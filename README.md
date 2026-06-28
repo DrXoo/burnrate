@@ -56,3 +56,5 @@ The Web UI should be the primary user experience.
 * [Architecture](./docs/technical/architecture.md)
 * [Domain Model](./docs/technical/domain.md)
 * [Technical Flows](./docs/technical/flows.md)
+* [Enable Banking Integration](./docs/technical/bank-integrations/enable-banking.md)
+* [Database Schema](./docs/technical/database/schema.md)
