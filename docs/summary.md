@@ -19,6 +19,7 @@ The documentation is split into product and technical sections so the project is
 * [Technical Flows](./technical/flows.md)
 * [Enable Banking Integration](./technical/bank-integrations/enable-banking.md)
 * [Database Schema](./technical/database/schema.md)
+* [Implementation Roadmap](./technical/roadmap.md)
 
 ## Suggested Reading Order
 
@@ -31,3 +32,4 @@ The documentation is split into product and technical sections so the project is
 7. Read [Technical Flows](./technical/flows.md) for concrete runtime and interaction diagrams.
 8. Read [Enable Banking Integration](./technical/bank-integrations/enable-banking.md) for the restricted production setup and account-linking workflow.
 9. Read [Database Schema](./technical/database/schema.md) for the first PostgreSQL table design.
+10. Read [Implementation Roadmap](./technical/roadmap.md) for the proposed delivery order and milestones.
