@@ -49,7 +49,6 @@ The Web UI should be the primary user experience.
 
 ## Documentation
 
-* [Docs Index](./docs/summary.md)
 * [Product Overview](./docs/product/overview.md)
 * [MVP Scope](./docs/product/mvp.md)
 * [Metric Definitions](./docs/product/metrics.md)
@@ -58,4 +57,5 @@ The Web UI should be the primary user experience.
 * [Technical Flows](./docs/technical/flows.md)
 * [Enable Banking Integration](./docs/technical/bank-integrations/enable-banking.md)
 * [Database Schema](./docs/technical/database/schema.md)
+* [Deployment Model](./docs/technical/deployment.md)
 * [Implementation Roadmap](./docs/technical/roadmap.md)

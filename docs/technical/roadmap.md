@@ -59,8 +59,11 @@ Create the minimal technical base required for the rest of the implementation.
 
 * Choose backend framework and project structure
 * Create PostgreSQL setup
+* Define Docker Compose-based local and self-hosted runtime model
 * Create migrations system
 * Implement environment and secret configuration
+* Add initial `.env.example`
+* Define initial runtime services: `backend`, `web`, `postgres`, and `sync-worker`
 * Create initial database schema
 * Define core modules for domain, application, and infrastructure
 
@@ -68,13 +71,14 @@ Create the minimal technical base required for the rest of the implementation.
 
 * Backend project boots successfully
 * PostgreSQL is reachable from the application
+* Docker Compose can start the core local stack
 * Initial migrations can be applied and rolled back
 * Core schema exists for accounts, transactions, categories, rules, budgets, connections, and sync sessions
 * Local development setup is documented
 
 ### Definition of Done
 
-* A developer can clone the repo, start the database, run migrations, and start the backend locally without manual database edits
+* A developer can clone the repo, configure environment variables, start the local stack with Docker Compose, run migrations, and start working without manual database edits
 
 ---
 
@@ -170,6 +174,7 @@ Move from manual sync behavior to reliable background refresh.
 * Sync results are logged in `sync_sessions`
 * Failures are visible and diagnosable
 * The system does not create duplicates during repeated refreshes
+* The `sync-worker` runs as an explicit runtime service in the deployment model
 
 ### Definition of Done
 
@@ -291,8 +296,9 @@ If implementation starts now, the next practical tasks should be:
 
 1. Finalize the schema and connection-related tables
 2. Choose the backend stack and migration tool
-3. Scaffold the backend project structure
-4. Implement the Enable Banking client and JWT signing
-5. Build the auth callback and first account import flow
+3. Scaffold the Docker Compose runtime with `postgres`, `backend`, `web`, and `sync-worker`
+4. Scaffold the backend project structure
+5. Implement the Enable Banking client and JWT signing
+6. Build the auth callback and first account import flow
 
 That sequence gives BurnRate the fastest path to a real working vertical slice.

@@ -9,7 +9,6 @@ BurnRate is a personal finance product focused on spending visibility, budgets, 
 Before implementing features, read:
 
 * `README.md`
-* `docs/summary.md`
 * `docs/technical/architecture.md`
 * `docs/technical/domain.md`
 * `docs/technical/database/schema.md`
