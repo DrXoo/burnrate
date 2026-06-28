@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "burnrate-backend"
+version = "0.1.0"
+description = "BurnRate backend foundations"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "alembic>=1.16.4,<2.0.0",
+  "fastapi>=0.116.1,<1.0.0",
+  "psycopg[binary]>=3.2.9,<4.0.0",
+  "pydantic-settings>=2.10.1,<3.0.0",
+  "sqlalchemy>=2.0.42,<3.0.0",
+  "uvicorn[standard]>=0.35.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.1,<1.0.0",
+  "pytest>=8.4.1,<9.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

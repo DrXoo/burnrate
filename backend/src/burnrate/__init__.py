@@ -1,0 +1,2 @@
+"""BurnRate backend package."""
+

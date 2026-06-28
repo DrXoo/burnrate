@@ -47,6 +47,18 @@ Initial interfaces:
 
 The Web UI should be the primary user experience.
 
+## Phase 1 Stack
+
+The initial implementation scaffold uses:
+
+* Backend: `FastAPI`
+* Database: `PostgreSQL`
+* Migrations: `Alembic`
+* Tests: `pytest`
+* Runtime: `Docker Compose`
+
+The `web` service is currently a lightweight placeholder so the deployment shape stays aligned with the architecture while the backend and integration work are built first.
+
 ## Documentation
 
 * [Product Overview](./docs/product/overview.md)
