@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
+import logging
 from typing import Any
+from uuid import UUID
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -23,6 +25,8 @@ from burnrate.db.models import (
 )
 from burnrate.integrations.enable_banking.client import EnableBankingClient
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ImportSummary:
@@ -35,6 +39,13 @@ class EnableBankingService:
         self.db = db
         self.settings = settings
         self.client = client
+
+    def list_connections(self) -> list[dict[str, Any]]:
+        connections = self.db.scalars(
+            select(EnableBankingConnection).order_by(EnableBankingConnection.created_at.desc())
+        ).all()
+
+        return [self._serialize_connection_summary(connection) for connection in connections]
 
     def list_aspsps(self, *, country: str) -> list[dict[str, Any]]:
         return self.client.list_aspsps(country=country)
@@ -121,6 +132,12 @@ class EnableBankingService:
         self.db.flush()
 
         try:
+            logger.info(
+                "Starting Enable Banking import for session %s (%s/%s)",
+                session_id,
+                auth_request.aspsp_name,
+                auth_request.aspsp_country,
+            )
             summary = self._import_session_accounts(
                 connection=connection,
                 session_payload=session_payload,
@@ -130,10 +147,17 @@ class EnableBankingService:
             sync_session.imported_transactions_count = summary.transactions_imported
             sync_session.finished_at = datetime.now(UTC)
             connection.last_synced_at = datetime.now(UTC)
+            logger.info(
+                "Completed Enable Banking import for session %s: accounts=%s transactions=%s",
+                session_id,
+                summary.accounts_imported,
+                summary.transactions_imported,
+            )
         except Exception as exc:
             sync_session.status = "failed"
             sync_session.error_summary = str(exc)
             sync_session.finished_at = datetime.now(UTC)
+            logger.exception("Enable Banking import failed for session %s", session_id)
             raise
 
         accounts_returned = len(session_payload.get("accounts", []))
@@ -155,6 +179,58 @@ class EnableBankingService:
             "message": message,
         }
 
+    def sync_connection(self, *, connection_id: str) -> dict[str, Any]:
+        connection = self.db.get(EnableBankingConnection, UUID(connection_id))
+        if connection is None:
+            raise ValueError(f"Enable Banking connection not found for id {connection_id}")
+        if not connection.active:
+            raise ValueError(f"Enable Banking connection {connection_id} is inactive")
+        if not connection.session_id:
+            raise ValueError(f"Enable Banking connection {connection_id} has no session_id")
+
+        session_data = self.client.get_session(session_id=connection.session_id)
+        connection.session_status = session_data.get("status", connection.session_status or "AUTHORIZED")
+
+        sync_session = SyncSession(
+            enable_banking_connection_id=connection.id,
+            started_at=datetime.now(UTC),
+            status="running",
+            imported_accounts_count=0,
+            imported_transactions_count=0,
+        )
+        self.db.add(sync_session)
+        self.db.flush()
+
+        try:
+            summary = self._resync_connection_accounts(connection=connection)
+            sync_session.status = "success"
+            sync_session.imported_accounts_count = summary.accounts_imported
+            sync_session.imported_transactions_count = summary.transactions_imported
+            sync_session.finished_at = datetime.now(UTC)
+            connection.last_synced_at = datetime.now(UTC)
+            logger.info(
+                "Completed manual Enable Banking sync for connection %s: accounts=%s transactions=%s",
+                connection_id,
+                summary.accounts_imported,
+                summary.transactions_imported,
+            )
+        except Exception as exc:
+            sync_session.status = "failed"
+            sync_session.error_summary = str(exc)
+            sync_session.finished_at = datetime.now(UTC)
+            logger.exception("Manual Enable Banking sync failed for connection %s", connection_id)
+            raise
+
+        return {
+            "connection_id": str(connection.id),
+            "sync_session_id": str(sync_session.id),
+            "session_id": connection.session_id,
+            "session_status": connection.session_status or "AUTHORIZED",
+            "accounts_synced": summary.accounts_imported,
+            "transactions_imported": summary.transactions_imported,
+            "message": None if summary.accounts_imported > 0 else "No linked accounts found for this connection.",
+        }
+
     def _import_session_accounts(
         self,
         *,
@@ -164,6 +240,7 @@ class EnableBankingService:
         summary = ImportSummary()
         for account_payload in session_payload.get("accounts", []):
             account_uid = account_payload["uid"]
+            logger.info("Importing Enable Banking account %s", account_uid)
             local_account = self._upsert_local_account(
                 connection=connection,
                 account_payload=account_payload,
@@ -174,12 +251,23 @@ class EnableBankingService:
             self._apply_latest_balance(local_account=local_account, balances_payload=balances_payload)
 
             continuation_key: str | None = None
+            page_number = 1
             while True:
                 transactions_payload = self.client.get_account_transactions(
                     account_id=account_uid,
                     continuation_key=continuation_key,
                 )
-                transactions = transactions_payload.get("transactions", [])
+                transactions = self._extract_transactions(transactions_payload)
+                payload_summary = self._summarize_transactions_payload(transactions_payload)
+                log_level = logging.INFO if transactions else logging.WARNING
+                logger.log(
+                    log_level,
+                    "Fetched Enable Banking transactions for account %s page=%s imported=%s summary=%s",
+                    account_uid,
+                    page_number,
+                    len(transactions),
+                    payload_summary,
+                )
                 for transaction_payload in transactions:
                     self._upsert_transaction(
                         local_account=local_account,
@@ -189,6 +277,68 @@ class EnableBankingService:
                 continuation_key = transactions_payload.get("continuation_key")
                 if not continuation_key:
                     break
+                page_number += 1
+
+        return summary
+
+    def _resync_connection_accounts(
+        self,
+        *,
+        connection: EnableBankingConnection,
+    ) -> ImportSummary:
+        mappings = self.db.scalars(
+            select(EnableBankingAccountMapping).where(
+                EnableBankingAccountMapping.enable_banking_connection_id == connection.id
+            )
+        ).all()
+
+        summary = ImportSummary()
+        for mapping in mappings:
+            local_account = self.db.get(Account, mapping.account_id)
+            if local_account is None:
+                logger.warning(
+                    "Skipping Enable Banking mapping %s because local account %s no longer exists",
+                    mapping.id,
+                    mapping.account_id,
+                )
+                continue
+
+            mapping.last_seen_at = datetime.now(UTC)
+            local_account.last_synced_at = datetime.now(UTC)
+            logger.info("Manual sync for Enable Banking account %s", mapping.external_account_id)
+            summary.accounts_imported += 1
+
+            balances_payload = self.client.get_account_balances(account_id=mapping.external_account_id)
+            self._apply_latest_balance(local_account=local_account, balances_payload=balances_payload)
+
+            continuation_key: str | None = None
+            page_number = 1
+            while True:
+                transactions_payload = self.client.get_account_transactions(
+                    account_id=mapping.external_account_id,
+                    continuation_key=continuation_key,
+                )
+                transactions = self._extract_transactions(transactions_payload)
+                payload_summary = self._summarize_transactions_payload(transactions_payload)
+                log_level = logging.INFO if transactions else logging.WARNING
+                logger.log(
+                    log_level,
+                    "Fetched Enable Banking transactions for account %s page=%s imported=%s summary=%s",
+                    mapping.external_account_id,
+                    page_number,
+                    len(transactions),
+                    payload_summary,
+                )
+                for transaction_payload in transactions:
+                    self._upsert_transaction(
+                        local_account=local_account,
+                        transaction_payload=transaction_payload,
+                    )
+                summary.transactions_imported += len(transactions)
+                continuation_key = transactions_payload.get("continuation_key")
+                if not continuation_key:
+                    break
+                page_number += 1
 
         return summary
 
@@ -238,6 +388,38 @@ class EnableBankingService:
         self.db.add(mapping)
         self.db.flush()
         return account
+
+    def _serialize_connection_summary(
+        self,
+        connection: EnableBankingConnection,
+    ) -> dict[str, Any]:
+        linked_account_count = self.db.query(EnableBankingAccountMapping).filter(
+            EnableBankingAccountMapping.enable_banking_connection_id == connection.id
+        ).count()
+        latest_sync = self.db.scalar(
+            select(SyncSession)
+            .where(SyncSession.enable_banking_connection_id == connection.id)
+            .order_by(SyncSession.started_at.desc())
+        )
+
+        return {
+            "connection_id": str(connection.id),
+            "aspsp_name": connection.aspsp_name,
+            "aspsp_country": connection.aspsp_country,
+            "psu_type": connection.psu_type,
+            "session_id": connection.session_id,
+            "session_status": connection.session_status,
+            "active": connection.active,
+            "authorized_at": connection.authorized_at.isoformat() if connection.authorized_at else None,
+            "last_synced_at": connection.last_synced_at.isoformat() if connection.last_synced_at else None,
+            "linked_account_count": linked_account_count,
+            "latest_sync_status": latest_sync.status if latest_sync else None,
+            "latest_sync_started_at": latest_sync.started_at.isoformat() if latest_sync else None,
+            "latest_sync_finished_at": latest_sync.finished_at.isoformat() if latest_sync and latest_sync.finished_at else None,
+            "latest_sync_accounts_count": latest_sync.imported_accounts_count if latest_sync else None,
+            "latest_sync_transactions_count": latest_sync.imported_transactions_count if latest_sync else None,
+            "latest_sync_error_summary": latest_sync.error_summary if latest_sync else None,
+        }
 
     def _apply_latest_balance(self, *, local_account: Account, balances_payload: dict[str, Any]) -> None:
         selected_balance = None
@@ -297,6 +479,41 @@ class EnableBankingService:
         transaction.direction = direction
         transaction.status = status
         transaction.raw_payload = transaction_payload
+
+    def _extract_transactions(self, transactions_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        transactions_node = transactions_payload.get("transactions")
+        if isinstance(transactions_node, list):
+            return transactions_node
+
+        if isinstance(transactions_node, dict):
+            booked = transactions_node.get("booked") or []
+            pending = transactions_node.get("pending") or []
+            return [*booked, *pending]
+
+        booked = transactions_payload.get("booked") or []
+        pending = transactions_payload.get("pending") or []
+        return [*booked, *pending]
+
+    def _summarize_transactions_payload(self, transactions_payload: dict[str, Any]) -> dict[str, Any]:
+        transactions_node = transactions_payload.get("transactions")
+        booked: list[dict[str, Any]] = []
+        pending: list[dict[str, Any]] = []
+
+        if isinstance(transactions_node, dict):
+            booked = transactions_node.get("booked") or []
+            pending = transactions_node.get("pending") or []
+        else:
+            booked = transactions_payload.get("booked") or []
+            pending = transactions_payload.get("pending") or []
+
+        return {
+            "keys": sorted(transactions_payload.keys()),
+            "transactions_type": type(transactions_node).__name__ if transactions_node is not None else None,
+            "transactions_count": len(transactions_node) if isinstance(transactions_node, list) else 0,
+            "booked_count": len(booked),
+            "pending_count": len(pending),
+            "continuation_key_present": bool(transactions_payload.get("continuation_key")),
+        }
 
     def _transaction_external_id(self, account_id: str, transaction_payload: dict[str, Any]) -> str:
         explicit_id = transaction_payload.get("transaction_id") or transaction_payload.get("entry_reference")

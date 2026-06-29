@@ -6,6 +6,8 @@ from burnrate.api.dependencies import get_enable_banking_service
 from burnrate.api.schemas.enable_banking import (
     AspspListResponse,
     AuthorizationCallbackResponse,
+    EnableBankingConnectionListResponse,
+    ManualSyncResponse,
     StartAuthorizationRequest,
     StartAuthorizationResponse,
 )
@@ -14,6 +16,13 @@ from burnrate.services.enable_banking_service import EnableBankingService
 
 router = APIRouter(prefix="/integrations/enable-banking", tags=["enable-banking"])
 public_router = APIRouter(tags=["enable-banking"])
+
+
+@router.get("/connections", response_model=EnableBankingConnectionListResponse)
+def list_connections(
+    service: EnableBankingService = Depends(get_enable_banking_service),
+) -> EnableBankingConnectionListResponse:
+    return EnableBankingConnectionListResponse(connections=service.list_connections())
 
 
 @router.get("/aspsps", response_model=AspspListResponse)
@@ -58,6 +67,23 @@ def enable_banking_callback(
             error_description=error_description,
         )
         return AuthorizationCallbackResponse.model_validate(payload)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+    except EnableBankingAPIError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/connections/{connection_id}/sync", response_model=ManualSyncResponse)
+def sync_connection(
+    connection_id: str,
+    service: EnableBankingService = Depends(get_enable_banking_service),
+) -> ManualSyncResponse:
+    try:
+        payload = service.sync_connection(connection_id=connection_id)
+        return ManualSyncResponse.model_validate(payload)
     except ValueError as exc:
         message = str(exc)
         if "not found" in message.lower():

@@ -30,6 +30,38 @@ class AuthorizationCallbackResponse(BaseModel):
     message: str | None = None
 
 
+class ManualSyncResponse(BaseModel):
+    connection_id: str
+    sync_session_id: str
+    session_id: str | None = None
+    session_status: str
+    accounts_synced: int
+    transactions_imported: int
+    message: str | None = None
+
+
 class AspspListResponse(BaseModel):
     aspsps: list[dict[str, Any]]
 
+
+class EnableBankingConnectionSummary(BaseModel):
+    connection_id: str
+    aspsp_name: str
+    aspsp_country: str
+    psu_type: str
+    session_id: str | None = None
+    session_status: str | None = None
+    active: bool
+    authorized_at: str | None = None
+    last_synced_at: str | None = None
+    linked_account_count: int
+    latest_sync_status: str | None = None
+    latest_sync_started_at: str | None = None
+    latest_sync_finished_at: str | None = None
+    latest_sync_accounts_count: int | None = None
+    latest_sync_transactions_count: int | None = None
+    latest_sync_error_summary: str | None = None
+
+
+class EnableBankingConnectionListResponse(BaseModel):
+    connections: list[EnableBankingConnectionSummary]

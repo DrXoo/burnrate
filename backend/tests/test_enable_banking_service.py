@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -24,6 +25,9 @@ from burnrate.services.enable_banking_service import EnableBankingService
 
 
 class FakeEnableBankingClient:
+    def __init__(self) -> None:
+        self.transaction_ids = ["tx-1"]
+
     def list_aspsps(self, *, country: str):
         return [{"name": "Nordea", "country": country}]
 
@@ -72,20 +76,31 @@ class FakeEnableBankingClient:
         assert account_id == "account-uid-1"
         assert continuation_key is None
         return {
-            "transactions": [
-                {
-                    "transaction_id": "tx-1",
-                    "transaction_amount": {"amount": "15.99", "currency": "EUR"},
-                    "credit_debit_indicator": "DBIT",
-                    "status": "BOOK",
-                    "booking_date": "2026-01-02",
-                    "value_date": "2026-01-02",
-                    "remittance_information": ["Coffee shop"],
-                    "creditor": {"name": "Cafe"},
-                    "debtor": {"name": "Owner"},
-                }
-            ]
+            "transactions": {
+                "booked": [
+                    {
+                        "transaction_id": transaction_id,
+                        "transaction_amount": {"amount": "15.99", "currency": "EUR"},
+                        "credit_debit_indicator": "DBIT",
+                        "status": "BOOK",
+                        "booking_date": "2026-01-02",
+                        "value_date": "2026-01-02",
+                        "remittance_information": ["Coffee shop"],
+                        "creditor": {"name": "Cafe"},
+                        "debtor": {"name": "Owner"},
+                    }
+                    for transaction_id in self.transaction_ids
+                ],
+                "pending": [],
+            }
         }
+
+
+class EmptyTransactionsClient(FakeEnableBankingClient):
+    def get_account_transactions(self, *, account_id: str, continuation_key: str | None = None):
+        assert account_id == "account-uid-1"
+        assert continuation_key is None
+        return {"transactions": [], "continuation_key": None}
 
 
 def make_settings() -> Settings:
@@ -169,3 +184,96 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     assert sync_session.imported_transactions_count == 1
     assert callback["accounts_imported"] == 1
     assert callback["transactions_imported"] == 1
+
+
+def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=EmptyTransactionsClient())
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+
+    with caplog.at_level(logging.WARNING):
+        callback = service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+    db.commit()
+
+    assert callback["transactions_imported"] == 0
+    assert "Fetched Enable Banking transactions for account account-uid-1 page=1 imported=0" in caplog.text
+    assert "'transactions_count': 0" in caplog.text
+
+
+def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None:
+    db = make_session()
+    client = FakeEnableBankingClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+
+    initial_callback = service.handle_callback(
+        code="auth-code",
+        state=start["state"],
+        error=None,
+        error_description=None,
+    )
+    db.commit()
+
+    client.transaction_ids = ["tx-1", "tx-2"]
+    sync_result = service.sync_connection(connection_id=initial_callback["connection_id"])
+    db.commit()
+
+    transactions = db.scalars(select(Transaction).order_by(Transaction.enable_banking_transaction_id)).all()
+    sync_sessions = db.scalars(select(SyncSession).order_by(SyncSession.started_at)).all()
+
+    assert sync_result["accounts_synced"] == 1
+    assert sync_result["transactions_imported"] == 2
+    assert len(transactions) == 2
+    assert transactions[0].enable_banking_transaction_id == "tx-1"
+    assert transactions[1].enable_banking_transaction_id == "tx-2"
+    assert len(sync_sessions) == 2
+    assert sync_sessions[-1].imported_transactions_count == 2
+
+
+def test_enable_banking_service_lists_connections_with_latest_sync_summary() -> None:
+    db = make_session()
+    client = FakeEnableBankingClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+
+    callback = service.handle_callback(
+        code="auth-code",
+        state=start["state"],
+        error=None,
+        error_description=None,
+    )
+    db.commit()
+
+    connections = service.list_connections()
+
+    assert len(connections) == 1
+    assert connections[0]["connection_id"] == callback["connection_id"]
+    assert connections[0]["aspsp_name"] == "Nordea"
+    assert connections[0]["linked_account_count"] == 1
+    assert connections[0]["latest_sync_status"] == "success"
+    assert connections[0]["latest_sync_accounts_count"] == 1
+    assert connections[0]["latest_sync_transactions_count"] == 1
