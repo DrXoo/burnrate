@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from uuid import UUID
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -61,7 +62,7 @@ class CategorizationRule(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     match_field: Mapped[str] = mapped_column(Text)
     match_operator: Mapped[str] = mapped_column(Text)
     match_value: Mapped[str] = mapped_column(Text)
-    category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"), index=True)
+    category_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("categories.id"), index=True)
     priority: Mapped[int] = mapped_column(Integer, index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_from_manual_classification: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -70,7 +71,7 @@ class CategorizationRule(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
 class Budget(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     __tablename__ = "budgets"
 
-    category_id: Mapped[str] = mapped_column(ForeignKey("categories.id"), index=True)
+    category_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("categories.id"), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     currency: Mapped[str] = mapped_column(Text)
     period_type: Mapped[str] = mapped_column(Text)
@@ -81,19 +82,20 @@ class Budget(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
 class EnableBankingAccountMapping(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     __tablename__ = "enable_banking_account_mappings"
 
-    enable_banking_connection_id: Mapped[str] = mapped_column(
-        ForeignKey("enable_banking_connections.id")
+    enable_banking_connection_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("enable_banking_connections.id"),
     )
     external_account_id: Mapped[str] = mapped_column(Text, unique=True)
     external_account_hash: Mapped[str | None] = mapped_column(Text)
-    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"))
+    account_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("accounts.id"))
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Transaction(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     __tablename__ = "transactions"
 
-    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
+    account_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("accounts.id"), index=True)
     enable_banking_transaction_id: Mapped[str | None] = mapped_column(Text, unique=True)
     booking_date: Mapped[date | None] = mapped_column(Date, index=True)
     value_date: Mapped[date | None] = mapped_column(Date)
@@ -104,9 +106,9 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     counterparty_name: Mapped[str | None] = mapped_column(Text)
     direction: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, index=True)
-    category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id"), index=True)
-    matched_rule_id: Mapped[str | None] = mapped_column(ForeignKey("categorization_rules.id"))
-    raw_payload: Mapped[dict | None] = mapped_column(JSONB)
+    category_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("categories.id"), index=True)
+    matched_rule_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("categorization_rules.id"))
+    raw_payload: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     account: Mapped[Account] = relationship(back_populates="transactions")
@@ -115,8 +117,9 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
 class SyncSession(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     __tablename__ = "sync_sessions"
 
-    enable_banking_connection_id: Mapped[str | None] = mapped_column(
-        ForeignKey("enable_banking_connections.id")
+    enable_banking_connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("enable_banking_connections.id"),
     )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -129,8 +132,9 @@ class SyncSession(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
 class EnableBankingAuthRequest(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     __tablename__ = "enable_banking_auth_requests"
 
-    enable_banking_connection_id: Mapped[str | None] = mapped_column(
-        ForeignKey("enable_banking_connections.id")
+    enable_banking_connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("enable_banking_connections.id"),
     )
     state: Mapped[str] = mapped_column(Text, unique=True)
     redirect_url: Mapped[str] = mapped_column(Text)
@@ -139,4 +143,3 @@ class EnableBankingAuthRequest(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     psu_type: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-

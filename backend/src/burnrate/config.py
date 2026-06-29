@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,11 +18,23 @@ class Settings(BaseSettings):
     )
     enable_banking_app_id: str = Field(default="replace-me", alias="ENABLE_BANKING_APP_ID")
     enable_banking_private_key: str = Field(default="replace-me", alias="ENABLE_BANKING_PRIVATE_KEY")
+    enable_banking_private_key_path: str | None = Field(
+        default=None,
+        alias="ENABLE_BANKING_PRIVATE_KEY_PATH",
+    )
     enable_banking_redirect_url: str = Field(
         default="http://localhost:8000/api/v1/integrations/enable-banking/callback",
         alias="ENABLE_BANKING_REDIRECT_URL",
     )
     enable_banking_environment: str = Field(default="production", alias="ENABLE_BANKING_ENVIRONMENT")
+    enable_banking_api_base_url: str = Field(
+        default="https://api.enablebanking.com",
+        alias="ENABLE_BANKING_API_BASE_URL",
+    )
+    enable_banking_timeout_seconds: float = Field(
+        default=30.0,
+        alias="ENABLE_BANKING_TIMEOUT_SECONDS",
+    )
     sync_cron: str = Field(default="*/30 * * * *", alias="SYNC_CRON")
 
     model_config = SettingsConfigDict(
@@ -35,8 +48,13 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.app_cors_origins.split(",") if origin.strip()]
 
+    @property
+    def enable_banking_private_key_value(self) -> str:
+        if self.enable_banking_private_key_path:
+            return Path(self.enable_banking_private_key_path).read_text(encoding="utf-8")
+        return self.enable_banking_private_key
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

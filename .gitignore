@@ -4,9 +4,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .mypy_cache/
+*.egg-info/
+secrets/*.pem
 backend/.venv/
 backend/.pytest_cache/
 backend/.mypy_cache/
 backend/.coverage
 postgres-data/
-
+private-key.pem

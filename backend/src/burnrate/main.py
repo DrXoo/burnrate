@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from burnrate.api.routes.enable_banking import public_router as enable_banking_public_router
+from burnrate.api.routes.enable_banking import router as enable_banking_router
 from burnrate.api.routes.health import router as health_router
 from burnrate.config import get_settings
 
@@ -24,8 +26,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(enable_banking_router, prefix="/api/v1")
+    app.include_router(enable_banking_public_router)
     return app
 
 
 app = create_app()
-
