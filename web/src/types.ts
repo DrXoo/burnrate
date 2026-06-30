@@ -24,6 +24,16 @@ export interface Connection {
   latest_sync_error_summary: string | null;
 }
 
+export interface ManualSyncResult {
+  connection_id: string;
+  sync_session_id: string;
+  session_id: string | null;
+  session_status: string;
+  accounts_synced: number;
+  transactions_imported: number;
+  message: string | null;
+}
+
 export interface Account {
   account_id: string;
   display_name: string;

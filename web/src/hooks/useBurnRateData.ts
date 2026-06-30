@@ -16,6 +16,7 @@ import {
   getTransactions,
   getUncategorizedCount,
   getUnknownQueue,
+  syncEnableBankingConnection,
   toggleRule,
   uncategorizeTransaction,
   updateAccountControls,
@@ -376,6 +377,23 @@ export function useBurnRateData() {
     await refreshLedgerViews();
   }
 
+  async function syncConnectionAction(connectionId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+
+    const result = await syncEnableBankingConnection(apiBase, connectionId);
+    const nextConnections = await getConnections(apiBase);
+    const nextAccounts = await getAccounts(apiBase);
+
+    startTransition(() => {
+      setConnections(nextConnections);
+      setAccounts(nextAccounts);
+    });
+    await refreshLedgerViews();
+    return result;
+  }
+
   async function categorizeTransactionAction(transactionId: string, categoryId: string) {
     if (!apiBase) {
       throw new Error("API base not loaded");
@@ -475,6 +493,7 @@ export function useBurnRateData() {
     refreshReferenceData,
     createCategory: createCategoryAction,
     updateAccount: updateAccountAction,
+    syncConnection: syncConnectionAction,
     categorizeTransaction: categorizeTransactionAction,
     uncategorizeTransaction: uncategorizeTransactionAction,
     createRule: createRuleAction,

@@ -1,48 +1,122 @@
-import type { Connection } from "../types";
+import { useEffect, useState } from "react";
+
 import { formatDateTime } from "../lib/format";
+import type { Connection, ManualSyncResult } from "../types";
 import { Card } from "./ui/Card";
 import { StatusTag } from "./ui/StatusTag";
 
 interface ConnectionsPanelProps {
   connections: Connection[];
+  onSyncConnection: (connectionId: string) => Promise<ManualSyncResult>;
 }
 
-export function ConnectionsPanel({ connections }: ConnectionsPanelProps) {
+interface ConnectionCardProps {
+  connection: Connection;
+  onSyncConnection: ConnectionsPanelProps["onSyncConnection"];
+}
+
+function syncTone(connection: Connection): "default" | "good" | "warn" | "danger" {
+  if (connection.latest_sync_status === "failed") {
+    return "danger";
+  }
+  if (connection.latest_sync_status === "success") {
+    return "good";
+  }
+  if (connection.session_status && connection.session_status !== "AUTHORIZED") {
+    return "warn";
+  }
+  return "default";
+}
+
+function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBusy(false);
+  }, [connection.latest_sync_finished_at, connection.latest_sync_status, connection.latest_sync_transactions_count]);
+
+  async function handleSync() {
+    try {
+      setBusy(true);
+      setError(null);
+      const result = await onSyncConnection(connection.connection_id);
+      setFeedback(
+        `${result.accounts_synced} account(s) synced, ${result.transactions_imported} transaction(s) imported${
+          result.message ? `, ${result.message}` : ""
+        }.`,
+      );
+      setBusy(false);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className="list-card">
+      <div className="row">
+        <strong>
+          {connection.aspsp_name} <span className="muted">({connection.aspsp_country})</span>
+        </strong>
+        <StatusTag tone={syncTone(connection)}>
+          {connection.latest_sync_status || connection.session_status || "unknown"}
+        </StatusTag>
+      </div>
+      <p className="meta-copy">
+        {connection.psu_type} user · {connection.linked_account_count} linked account(s)
+        <br />
+        Session: {connection.session_id || "not stored"} · Status: {connection.session_status || "unknown"}
+        <br />
+        Last sync finished: {formatDateTime(connection.latest_sync_finished_at || connection.last_synced_at)}
+      </p>
+
+      <div className="connection-metric-grid">
+        <article className="mini-metric">
+          <span className="stat-label">Accounts synced</span>
+          <strong>{connection.latest_sync_accounts_count ?? 0}</strong>
+        </article>
+        <article className="mini-metric">
+          <span className="stat-label">Transactions imported</span>
+          <strong>{connection.latest_sync_transactions_count ?? 0}</strong>
+        </article>
+      </div>
+
+      <div className="inline-actions">
+        <button type="button" className="button" disabled={busy || !connection.active} onClick={handleSync}>
+          {busy ? "Syncing..." : "Sync now"}
+        </button>
+        {connection.latest_sync_started_at ? (
+          <span className="glass-pill">Started {formatDateTime(connection.latest_sync_started_at)}</span>
+        ) : null}
+      </div>
+
+      {connection.latest_sync_error_summary ? (
+        <div className="error-banner">Latest sync error: {connection.latest_sync_error_summary}</div>
+      ) : null}
+      {feedback ? <div className="success-banner">{feedback}</div> : null}
+      {error ? <div className="error-banner">{error}</div> : null}
+    </article>
+  );
+}
+
+export function ConnectionsPanel({ connections, onSyncConnection }: ConnectionsPanelProps) {
   return (
     <Card
       title="Connections"
-      subtitle="Enable Banking sessions, sync health, and account linkage at a glance."
+      subtitle="Enable Banking sessions, sync health, and manual re-sync controls in one place."
     >
       <div className="stack">
         {connections.length === 0 ? (
           <div className="empty-state">No bank connections yet.</div>
         ) : (
           connections.map((connection) => (
-            <article key={connection.connection_id} className="list-card">
-              <div className="row">
-                <strong>
-                  {connection.aspsp_name} <span className="muted">({connection.aspsp_country})</span>
-                </strong>
-                <StatusTag
-                  tone={
-                    connection.latest_sync_status === "success"
-                      ? "good"
-                      : connection.latest_sync_status === "failed"
-                        ? "danger"
-                        : "default"
-                  }
-                >
-                  {connection.latest_sync_status || connection.session_status || "unknown"}
-                </StatusTag>
-              </div>
-              <p className="meta-copy">
-                {connection.psu_type} user · {connection.linked_account_count} linked account(s)
-                <br />
-                Session: {connection.session_id || "not stored"}
-                <br />
-                Last sync: {formatDateTime(connection.latest_sync_finished_at || connection.last_synced_at)}
-              </p>
-            </article>
+            <ConnectionCard
+              key={connection.connection_id}
+              connection={connection}
+              onSyncConnection={onSyncConnection}
+            />
           ))
         )}
       </div>

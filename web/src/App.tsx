@@ -110,7 +110,7 @@ export default function App() {
               apiBase={data.apiBase}
               activeMonth={data.filters.month}
             />
-            <ConnectionsPanel connections={data.connections} />
+            <ConnectionsPanel connections={data.connections} onSyncConnection={data.syncConnection} />
           </section>
 
           <section className="middle-grid">

@@ -7,6 +7,7 @@ import type {
   Category,
   Connection,
   FiltersState,
+  ManualSyncResult,
   PagingState,
   Rule,
   RuleDraft,
@@ -84,6 +85,12 @@ export async function detectApiBase(): Promise<string> {
 export async function getConnections(apiBase: string): Promise<Connection[]> {
   const payload = await fetchJson<{ connections: Connection[] }>(`${apiBase}/integrations/enable-banking/connections`);
   return payload.connections ?? [];
+}
+
+export async function syncEnableBankingConnection(apiBase: string, connectionId: string): Promise<ManualSyncResult> {
+  return fetchJson<ManualSyncResult>(`${apiBase}/integrations/enable-banking/connections/${connectionId}/sync`, {
+    method: "POST",
+  });
 }
 
 export async function getAccounts(apiBase: string): Promise<Account[]> {
