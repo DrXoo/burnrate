@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -69,9 +69,17 @@ class EnableBankingClient:
         self,
         *,
         account_id: str,
+        date_from: date | None = None,
+        date_to: date | None = None,
         continuation_key: str | None = None,
     ) -> dict[str, Any]:
-        params = {"continuation_key": continuation_key} if continuation_key else None
+        params: dict[str, Any] = {}
+        if date_from is not None:
+            params["date_from"] = date_from.isoformat()
+        if date_to is not None:
+            params["date_to"] = date_to.isoformat()
+        if continuation_key:
+            params["continuation_key"] = continuation_key
         return self._request("GET", f"/accounts/{account_id}/transactions", params=params)
 
     def _request(

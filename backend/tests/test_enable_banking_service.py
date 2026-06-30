@@ -27,6 +27,7 @@ from burnrate.services.enable_banking_service import EnableBankingService
 class FakeEnableBankingClient:
     def __init__(self) -> None:
         self.transaction_ids = ["tx-1"]
+        self.transaction_requests: list[dict[str, object]] = []
 
     def list_aspsps(self, *, country: str):
         return [{"name": "Nordea", "country": country}]
@@ -72,9 +73,24 @@ class FakeEnableBankingClient:
             ]
         }
 
-    def get_account_transactions(self, *, account_id: str, continuation_key: str | None = None):
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        continuation_key: str | None = None,
+    ):
         assert account_id == "account-uid-1"
         assert continuation_key is None
+        self.transaction_requests.append(
+            {
+                "account_id": account_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "continuation_key": continuation_key,
+            }
+        )
         return {
             "transactions": {
                 "booked": [
@@ -97,10 +113,62 @@ class FakeEnableBankingClient:
 
 
 class EmptyTransactionsClient(FakeEnableBankingClient):
-    def get_account_transactions(self, *, account_id: str, continuation_key: str | None = None):
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        continuation_key: str | None = None,
+    ):
         assert account_id == "account-uid-1"
         assert continuation_key is None
+        self.transaction_requests.append(
+            {
+                "account_id": account_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "continuation_key": continuation_key,
+            }
+        )
         return {"transactions": [], "continuation_key": None}
+
+
+class NullPartyTransactionsClient(FakeEnableBankingClient):
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        continuation_key: str | None = None,
+    ):
+        assert account_id == "account-uid-1"
+        assert continuation_key is None
+        self.transaction_requests.append(
+            {
+                "account_id": account_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "continuation_key": continuation_key,
+            }
+        )
+        return {
+            "transactions": [
+                {
+                    "transaction_id": "tx-null-party",
+                    "transaction_amount": {"amount": "42.00", "currency": "EUR"},
+                    "credit_debit_indicator": "DBIT",
+                    "status": "BOOK",
+                    "booking_date": "2026-01-03",
+                    "value_date": "2026-01-03",
+                    "remittance_information": ["Provider returned null parties"],
+                    "creditor": None,
+                    "debtor": None,
+                }
+            ],
+            "continuation_key": None,
+        }
 
 
 def make_settings() -> Settings:
@@ -154,7 +222,8 @@ def test_enable_banking_service_starts_authorization_and_persists_state() -> Non
 
 def test_enable_banking_service_handles_callback_and_imports_initial_data() -> None:
     db = make_session()
-    service = EnableBankingService(db=db, settings=make_settings(), client=FakeEnableBankingClient())
+    client = FakeEnableBankingClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
     start = service.start_authorization(
         StartAuthorizationRequest(
             aspsp_name="Nordea",
@@ -184,6 +253,10 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     assert sync_session.imported_transactions_count == 1
     assert callback["accounts_imported"] == 1
     assert callback["transactions_imported"] == 1
+    today = datetime.now(timezone.utc).date()
+    request = client.transaction_requests[0]
+    assert request["date_from"] == today.replace(day=1)
+    assert request["date_to"] == today
 
 
 def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:
@@ -204,7 +277,7 @@ def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:
     db.commit()
 
     assert callback["transactions_imported"] == 0
-    assert "Fetched Enable Banking transactions for account account-uid-1 page=1 imported=0" in caplog.text
+    assert "Fetched Enable Banking transactions for account account-uid-1 page=1 window=" in caplog.text
     assert "'transactions_count': 0" in caplog.text
 
 
@@ -244,6 +317,40 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     assert transactions[1].enable_banking_transaction_id == "tx-2"
     assert len(sync_sessions) == 2
     assert sync_sessions[-1].imported_transactions_count == 2
+    today = datetime.now(timezone.utc).date()
+    assert client.transaction_requests[-1]["date_from"] == today.replace(day=1)
+    assert client.transaction_requests[-1]["date_to"] == today
+
+
+def test_enable_banking_service_handles_null_creditor_and_debtor() -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=NullPartyTransactionsClient())
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+
+    callback = service.handle_callback(
+        code="auth-code",
+        state=start["state"],
+        error=None,
+        error_description=None,
+    )
+    db.commit()
+
+    transaction = db.scalar(
+        select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-null-party")
+    )
+
+    assert callback["transactions_imported"] == 1
+    assert transaction is not None
+    assert transaction.merchant_name is None
+    assert transaction.counterparty_name is None
 
 
 def test_enable_banking_service_lists_connections_with_latest_sync_summary() -> None:

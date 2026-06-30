@@ -7,103 +7,689 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #f4efe5;
-        --panel: #fffaf3;
-        --ink: #15231f;
-        --accent: #d15b2d;
-        --muted: #5d6b66;
-        --line: #dfd4c5;
+        --bg: #f3ecdf;
+        --bg-deep: #efe2cf;
+        --panel: rgba(255, 250, 243, 0.9);
+        --panel-strong: #fff9f1;
+        --ink: #12211d;
+        --muted: #5a6a64;
+        --line: #dccfbf;
+        --accent: #bf5a2b;
+        --accent-soft: rgba(191, 90, 43, 0.12);
+        --good: #2f6b48;
+        --warn: #996515;
+        --shadow: 0 18px 60px rgba(18, 33, 29, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
       }
 
       body {
         margin: 0;
         font-family: Georgia, "Times New Roman", serif;
-        background:
-          radial-gradient(circle at top left, #f7dbc0 0, transparent 30%),
-          linear-gradient(135deg, var(--bg), #efe6d7);
         color: var(--ink);
+        background:
+          radial-gradient(circle at top left, #f8ddbe 0, transparent 28%),
+          radial-gradient(circle at bottom right, #e6d4bf 0, transparent 24%),
+          linear-gradient(135deg, var(--bg), var(--bg-deep));
       }
 
       main {
-        max-width: 860px;
-        margin: 48px auto;
-        padding: 0 24px;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 18px;
+        margin-bottom: 24px;
+      }
+
+      .pill {
+        display: inline-flex;
+        width: fit-content;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.8rem, 7vw, 5rem);
+        line-height: 0.92;
+        max-width: 12ch;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 70ch;
+        color: var(--muted);
+        line-height: 1.6;
+        font-size: 1.05rem;
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .top-grid {
+        grid-template-columns: 1.15fr 0.85fr;
+        margin-bottom: 18px;
+      }
+
+      .bottom-grid {
+        grid-template-columns: 0.9fr 1.1fr;
       }
 
       .card {
         background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 20px;
-        padding: 32px;
-        box-shadow: 0 18px 60px rgba(21, 35, 31, 0.08);
+        border-radius: 24px;
+        padding: 22px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(8px);
       }
 
-      h1 {
-        font-size: clamp(2.5rem, 7vw, 4.5rem);
-        line-height: 0.95;
-        margin: 0 0 16px;
+      .card h2,
+      .card h3 {
+        margin: 0 0 14px;
+        font-size: 1.25rem;
       }
 
-      p {
-        font-size: 1.05rem;
-        line-height: 1.6;
-        margin: 0 0 16px;
+      .meta {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .stat {
+        padding: 14px;
+        border-radius: 18px;
+        background: var(--panel-strong);
+        border: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .stat-label {
+        display: block;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      .stat-value {
+        font-size: clamp(1.4rem, 3vw, 2rem);
+        line-height: 1;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .connection,
+      .account {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: var(--panel-strong);
+        border: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 16px;
+      }
+
+      .row strong {
+        font-size: 1.04rem;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(18, 33, 29, 0.06);
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      .tag.good {
+        background: rgba(47, 107, 72, 0.12);
+        color: var(--good);
+      }
+
+      .tag.warn {
+        background: rgba(153, 101, 21, 0.14);
+        color: var(--warn);
+      }
+
+      form.filters {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 0.92rem;
         color: var(--muted);
       }
 
-      .pill {
-        display: inline-block;
-        margin-bottom: 18px;
-        padding: 8px 14px;
-        border-radius: 999px;
-        background: rgba(209, 91, 45, 0.12);
+      input,
+      select,
+      button {
+        width: 100%;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: #fffdf9;
+        color: var(--ink);
+        padding: 12px 14px;
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff8f1;
+        border: none;
+        font-weight: 700;
+      }
+
+      .actions {
+        display: grid;
+        align-content: end;
+      }
+
+      .table-shell {
+        overflow: auto;
+        border-radius: 18px;
+        border: 1px solid rgba(220, 207, 191, 0.9);
+        background: var(--panel-strong);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 720px;
+      }
+
+      th,
+      td {
+        padding: 14px 16px;
+        text-align: left;
+        border-bottom: 1px solid rgba(220, 207, 191, 0.9);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--muted);
+        background: rgba(255, 249, 241, 0.85);
+      }
+
+      td.amount-negative {
         color: var(--accent);
         font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        font-size: 0.75rem;
       }
 
-      .list {
-        margin-top: 24px;
-        padding-left: 20px;
+      td.amount-positive {
+        color: var(--good);
+        font-weight: 700;
       }
 
-      .list li {
-        margin-bottom: 10px;
-        color: var(--ink);
+      .status {
+        display: inline-flex;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(18, 33, 29, 0.08);
+        color: var(--muted);
+        font-size: 0.78rem;
       }
 
-      code {
-        font-family: "Courier New", monospace;
-        background: rgba(21, 35, 31, 0.06);
-        padding: 2px 6px;
-        border-radius: 6px;
+      .empty,
+      .error {
+        padding: 16px;
+        border-radius: 16px;
+        line-height: 1.6;
+      }
+
+      .empty {
+        background: rgba(18, 33, 29, 0.04);
+        color: var(--muted);
+      }
+
+      .error {
+        background: rgba(191, 90, 43, 0.12);
+        color: #7f3315;
+      }
+
+      .footer-note {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      @media (max-width: 980px) {
+        .top-grid,
+        .bottom-grid,
+        form.filters,
+        .stats {
+          grid-template-columns: 1fr;
+        }
+
+        main {
+          padding-inline: 14px;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <section class="card">
-        <span class="pill">Phase 1 Scaffold</span>
-        <h1>BurnRate</h1>
+      <section class="hero">
+        <span class="pill">Phase 3.1</span>
+        <h1>Imported data becomes visible.</h1>
         <p>
-          The primary Web UI will be implemented in later phases. This placeholder keeps the
-          runtime shape honest while the backend, database, and Enable Banking integration are
-          built first.
+          This first web slice is intentionally simple. It shows bank connections, linked accounts,
+          current balances, uncategorized transaction count, and the imported transaction stream so
+          BurnRate can start behaving like a product instead of a database-backed integration demo.
         </p>
-        <p>
-          The backend health endpoint is expected at <code>/api/v1/health</code> on the backend
-          service.
-        </p>
-        <ul class="list">
-          <li>Backend: FastAPI</li>
-          <li>Database: PostgreSQL</li>
-          <li>Migrations: Alembic</li>
-          <li>Runtime: Docker Compose</li>
-        </ul>
+      </section>
+
+      <section class="grid top-grid">
+        <article class="card">
+          <h2>Ledger Overview</h2>
+          <p class="meta" id="overview-copy">
+            Reading from the backend API. If this panel stays empty, check the backend container and
+            CORS configuration.
+          </p>
+          <div class="stats">
+            <div class="stat">
+              <span class="stat-label">Connections</span>
+              <strong class="stat-value" id="connection-count">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Accounts</span>
+              <strong class="stat-value" id="account-count">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Unknown Queue</span>
+              <strong class="stat-value" id="uncategorized-count">0</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Connections</h2>
+          <div class="stack" id="connections-list">
+            <div class="empty">Loading connection state...</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid bottom-grid">
+        <article class="card">
+          <h2>Accounts</h2>
+          <div class="stack" id="accounts-list">
+            <div class="empty">Loading linked accounts...</div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="row" style="margin-bottom: 14px">
+            <h2>Transactions</h2>
+            <span class="tag" id="transaction-total">0 loaded</span>
+          </div>
+
+          <form class="filters" id="filters-form">
+            <label>
+              Month
+              <input id="filter-month" name="month" type="month" />
+            </label>
+            <label>
+              Account
+              <select id="filter-account" name="account_id">
+                <option value="">All accounts</option>
+              </select>
+            </label>
+            <label>
+              Status
+              <select id="filter-status" name="status">
+                <option value="">Any status</option>
+                <option value="booked">Booked</option>
+                <option value="pending">Pending</option>
+                <option value="ignored">Ignored</option>
+              </select>
+            </label>
+            <label>
+              Categorization
+              <select id="filter-categorized" name="categorized">
+                <option value="">All transactions</option>
+                <option value="false">Only unknown</option>
+                <option value="true">Only categorized</option>
+              </select>
+            </label>
+            <div class="actions">
+              <button type="submit">Apply Filters</button>
+            </div>
+          </form>
+
+          <div id="transactions-shell">
+            <div class="empty">Loading transactions...</div>
+          </div>
+          <p class="footer-note" id="api-note"></p>
+        </article>
       </section>
     </main>
+
+    <script>
+      const state = {
+        accounts: [],
+        connections: [],
+      };
+      document.getElementById("filters-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          await Promise.all([refreshTransactions(), refreshUncategorizedCount()]);
+        } catch (error) {
+          renderError("transactions-shell", error);
+        }
+      });
+
+      document.getElementById("filter-month").value = new Date().toISOString().slice(0, 7);
+      boot().catch((error) => {
+        renderError("transactions-shell", error);
+        document.getElementById("overview-copy").textContent = String(error.message || error);
+      });
+
+      async function boot() {
+        state.apiBase = await detectApiBase();
+        document.getElementById("api-note").textContent = `API base: ${state.apiBase}`;
+
+        const [connectionsPayload, accountsPayload] = await Promise.all([
+          fetchJson(`${state.apiBase}/integrations/enable-banking/connections`),
+          fetchJson(`${state.apiBase}/accounts`),
+        ]);
+
+        state.connections = connectionsPayload.connections || [];
+        state.accounts = accountsPayload.accounts || [];
+
+        document.getElementById("connection-count").textContent = String(state.connections.length);
+        document.getElementById("account-count").textContent = String(state.accounts.length);
+        document.getElementById("overview-copy").textContent =
+          state.connections.length > 0
+            ? "The backend is serving imported banking data. Filters below operate directly on persisted transactions."
+            : "No connections are imported yet. Complete the Enable Banking flow first, then return here.";
+
+        renderConnections(state.connections);
+        renderAccounts(state.accounts);
+        populateAccountFilter(state.accounts);
+
+        await Promise.all([refreshTransactions(), refreshUncategorizedCount()]);
+      }
+
+      async function refreshTransactions() {
+        const params = currentFilters();
+        const payload = await fetchJson(`${state.apiBase}/transactions${buildQuery(params)}`);
+        document.getElementById("transaction-total").textContent = `${payload.total_count} matching`;
+        renderTransactions(payload.transactions || []);
+      }
+
+      async function refreshUncategorizedCount() {
+        const params = currentFilters();
+        delete params.categorized;
+        const payload = await fetchJson(
+          `${state.apiBase}/transactions/uncategorized/count${buildQuery(params)}`
+        );
+        document.getElementById("uncategorized-count").textContent = String(payload.count ?? 0);
+      }
+
+      function currentFilters() {
+        const monthValue = document.getElementById("filter-month").value;
+        const accountValue = document.getElementById("filter-account").value;
+        const statusValue = document.getElementById("filter-status").value;
+        const categorizedValue = document.getElementById("filter-categorized").value;
+
+        return {
+          month: monthValue || undefined,
+          account_id: accountValue || undefined,
+          status: statusValue || undefined,
+          categorized:
+            categorizedValue === ""
+              ? undefined
+              : categorizedValue === "true"
+                ? "true"
+                : "false",
+          limit: 100,
+          offset: 0,
+        };
+      }
+
+      function renderConnections(connections) {
+        const root = document.getElementById("connections-list");
+        if (!connections.length) {
+          root.innerHTML = '<div class="empty">No bank connections yet.</div>';
+          return;
+        }
+
+        root.innerHTML = connections
+          .map(
+            (connection) => `
+              <article class="connection">
+                <div class="row">
+                  <strong>${escapeHtml(connection.aspsp_name)} <span class="meta">(${escapeHtml(connection.aspsp_country)})</span></strong>
+                  <span class="tag ${connection.latest_sync_status === "success" ? "good" : connection.latest_sync_status === "failed" ? "warn" : ""}">
+                    ${escapeHtml(connection.latest_sync_status || connection.session_status || "unknown")}
+                  </span>
+                </div>
+                <p class="meta">
+                  ${escapeHtml(connection.psu_type)} user · ${connection.linked_account_count} linked account(s)<br />
+                  Session: ${escapeHtml(connection.session_id || "not stored")}<br />
+                  Last sync: ${escapeHtml(formatDateTime(connection.latest_sync_finished_at || connection.last_synced_at))}
+                </p>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function renderAccounts(accounts) {
+        const root = document.getElementById("accounts-list");
+        if (!accounts.length) {
+          root.innerHTML = '<div class="empty">No imported accounts yet.</div>';
+          return;
+        }
+
+        root.innerHTML = accounts
+          .map(
+            (account) => `
+              <article class="account">
+                <div class="row">
+                  <strong>${escapeHtml(account.display_name)}</strong>
+                  <span class="tag">${escapeHtml(account.latest_balance_amount || "0.00")} ${escapeHtml(account.latest_balance_currency || account.currency)}</span>
+                </div>
+                <p class="meta">
+                  ${escapeHtml(account.source_aspsp_name || "Manual / unknown source")}<br />
+                  Calculations: ${account.included_in_calculations ? "included" : "excluded"} ·
+                  Runway: ${account.included_in_runway ? "included" : "excluded"}<br />
+                  Last synced: ${escapeHtml(formatDateTime(account.last_synced_at))}
+                </p>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function populateAccountFilter(accounts) {
+        const select = document.getElementById("filter-account");
+        const currentValue = select.value;
+        select.innerHTML =
+          '<option value="">All accounts</option>' +
+          accounts
+            .map(
+              (account) =>
+                `<option value="${escapeAttribute(account.account_id)}">${escapeHtml(account.display_name)}</option>`
+            )
+            .join("");
+        select.value = currentValue;
+      }
+
+      function renderTransactions(transactions) {
+        const root = document.getElementById("transactions-shell");
+        if (!transactions.length) {
+          root.innerHTML =
+            '<div class="empty">No transactions matched these filters. Try a different month or clear the category filter.</div>';
+          return;
+        }
+
+        root.innerHTML = `
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Description</th>
+                  <th>Account</th>
+                  <th>Status</th>
+                  <th>Category</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${transactions
+                  .map((transaction) => {
+                    const amountClass = transaction.direction === "credit" ? "amount-positive" : "amount-negative";
+                    const categoryLabel = transaction.category_id ? "Assigned" : "Unknown";
+                    return `
+                      <tr>
+                        <td>${escapeHtml(transaction.booking_date || "No booking date")}</td>
+                        <td>
+                          <strong>${escapeHtml(transaction.description || transaction.merchant_name || "No description")}</strong><br />
+                          <span class="meta">${escapeHtml(transaction.merchant_name || transaction.counterparty_name || "")}</span>
+                        </td>
+                        <td>${escapeHtml(transaction.account_display_name)}</td>
+                        <td><span class="status">${escapeHtml(transaction.status)}</span></td>
+                        <td>${escapeHtml(categoryLabel)}</td>
+                        <td class="${amountClass}">${escapeHtml(transaction.amount)} ${escapeHtml(transaction.currency)}</td>
+                      </tr>
+                    `;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      async function fetchJson(url) {
+        const response = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(`Request failed (${response.status}): ${body}`);
+        }
+        return response.json();
+      }
+
+      function buildQuery(params) {
+        const search = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined && value !== null && value !== "") {
+            search.set(key, value);
+          }
+        });
+        const encoded = search.toString();
+        return encoded ? `?${encoded}` : "";
+      }
+
+      async function detectApiBase() {
+        const candidates = [];
+        if (window.BURNRATE_API_BASE) {
+          candidates.push(window.BURNRATE_API_BASE);
+        }
+
+        const hostname = window.location.hostname;
+        const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+        if (localHosts.has(hostname)) {
+          candidates.push(`http://${hostname}:8000/api/v1`);
+          if (hostname === "localhost") {
+            candidates.push("http://127.0.0.1:8000/api/v1");
+          }
+        }
+
+        if (window.location.port === "3000") {
+          candidates.push(`${window.location.protocol}//${hostname}:8000/api/v1`);
+        }
+
+        candidates.push(`${window.location.origin}/api/v1`);
+
+        const errors = [];
+        for (const candidate of dedupe(candidates)) {
+          try {
+            await fetchJson(`${candidate}/health`);
+            return candidate;
+          } catch (error) {
+            errors.push(`${candidate} -> ${String(error.message || error)}`);
+          }
+        }
+
+        throw new Error(`Could not detect backend API base. Tried: ${errors.join(" | ")}`);
+      }
+
+      function dedupe(values) {
+        return [...new Set(values.filter(Boolean))];
+      }
+
+      function renderError(targetId, error) {
+        document.getElementById(targetId).innerHTML = `<div class="error">${escapeHtml(
+          String(error.message || error)
+        )}</div>`;
+      }
+
+      function formatDateTime(value) {
+        if (!value) {
+          return "Not available";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+        return date.toLocaleString();
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function escapeAttribute(value) {
+        return escapeHtml(value);
+      }
+    </script>
   </body>
 </html>
-

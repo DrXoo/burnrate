@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 
 import httpx
@@ -76,3 +76,27 @@ def test_enable_banking_client_posts_start_authorization_payload() -> None:
     assert payload["aspsp"]["name"] == "Nordea"
     assert payload["aspsp"]["country"] == "FI"
     assert payload["state"] == "state-123"
+
+
+def test_enable_banking_client_sends_transaction_date_window() -> None:
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"transactions": []})
+
+    client = EnableBankingClient(
+        settings=make_settings(),
+        transport=httpx.MockTransport(handler),
+    )
+
+    payload = client.get_account_transactions(
+        account_id="account-123",
+        date_from=date(2026, 6, 1),
+        date_to=date(2026, 6, 30),
+    )
+
+    assert payload == {"transactions": []}
+    assert captured["url"].endswith(
+        "/accounts/account-123/transactions?date_from=2026-06-01&date_to=2026-06-30"
+    )

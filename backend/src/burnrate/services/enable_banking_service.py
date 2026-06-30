@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
 import logging
@@ -250,11 +250,14 @@ class EnableBankingService:
             balances_payload = self.client.get_account_balances(account_id=account_uid)
             self._apply_latest_balance(local_account=local_account, balances_payload=balances_payload)
 
+            date_from, date_to = self._current_month_transaction_window()
             continuation_key: str | None = None
             page_number = 1
             while True:
                 transactions_payload = self.client.get_account_transactions(
                     account_id=account_uid,
+                    date_from=date_from,
+                    date_to=date_to,
                     continuation_key=continuation_key,
                 )
                 transactions = self._extract_transactions(transactions_payload)
@@ -262,9 +265,11 @@ class EnableBankingService:
                 log_level = logging.INFO if transactions else logging.WARNING
                 logger.log(
                     log_level,
-                    "Fetched Enable Banking transactions for account %s page=%s imported=%s summary=%s",
+                    "Fetched Enable Banking transactions for account %s page=%s window=%s..%s imported=%s summary=%s",
                     account_uid,
                     page_number,
+                    date_from.isoformat(),
+                    date_to.isoformat(),
                     len(transactions),
                     payload_summary,
                 )
@@ -311,11 +316,14 @@ class EnableBankingService:
             balances_payload = self.client.get_account_balances(account_id=mapping.external_account_id)
             self._apply_latest_balance(local_account=local_account, balances_payload=balances_payload)
 
+            date_from, date_to = self._current_month_transaction_window()
             continuation_key: str | None = None
             page_number = 1
             while True:
                 transactions_payload = self.client.get_account_transactions(
                     account_id=mapping.external_account_id,
+                    date_from=date_from,
+                    date_to=date_to,
                     continuation_key=continuation_key,
                 )
                 transactions = self._extract_transactions(transactions_payload)
@@ -323,9 +331,11 @@ class EnableBankingService:
                 log_level = logging.INFO if transactions else logging.WARNING
                 logger.log(
                     log_level,
-                    "Fetched Enable Banking transactions for account %s page=%s imported=%s summary=%s",
+                    "Fetched Enable Banking transactions for account %s page=%s window=%s..%s imported=%s summary=%s",
                     mapping.external_account_id,
                     page_number,
+                    date_from.isoformat(),
+                    date_to.isoformat(),
                     len(transactions),
                     payload_summary,
                 )
@@ -388,6 +398,10 @@ class EnableBankingService:
         self.db.add(mapping)
         self.db.flush()
         return account
+
+    def _current_month_transaction_window(self) -> tuple[date, date]:
+        today = datetime.now(UTC).date()
+        return date(today.year, today.month, 1), today
 
     def _serialize_connection_summary(
         self,
@@ -458,8 +472,10 @@ class EnableBankingService:
 
         status = self._normalize_transaction_status(transaction_payload.get("status"))
         description = self._build_transaction_description(transaction_payload)
-        merchant_name = transaction_payload.get("creditor", {}).get("name")
-        counterparty_name = transaction_payload.get("debtor", {}).get("name")
+        creditor = transaction_payload.get("creditor") or {}
+        debtor = transaction_payload.get("debtor") or {}
+        merchant_name = creditor.get("name")
+        counterparty_name = debtor.get("name")
 
         if transaction is None:
             transaction = Transaction(
