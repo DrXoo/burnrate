@@ -219,6 +219,11 @@ def test_summary_service_returns_phase_3_dashboard_metrics() -> None:
     assert summary["month"] == "2026-06"
     assert summary["current_balance_amount"] == "2000.00"
     assert summary["runway_balance_amount"] == "1500.00"
+    assert summary["runway_account_count"] == 1
+    assert summary["runway_accounts"][0]["display_name"] == "Savings"
+    assert summary["runway_drain_amount"] == "120.00"
+    assert summary["runway_drain_label"] == "Projected overspend"
+    assert summary["runway_message"] == "Runway is based on projected monthly overspend against the active category budgets."
     assert summary["monthly_spending_amount"] == "260.00"
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["budgeted_spending_amount"] == "260.00"
@@ -246,8 +251,29 @@ def test_summary_service_marks_runway_not_available_without_runway_accounts() ->
     summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
 
     assert summary["runway_balance_amount"] == "0.00"
+    assert summary["runway_account_count"] == 0
     assert summary["runway_months_left"] is None
     assert summary["runway_status"] == "not_available"
+    assert summary["runway_message"] == "Select one or more reserve accounts to activate runway tracking."
+
+
+def test_summary_service_uses_projected_monthly_spend_when_no_budgets_exist() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    db.query(Budget).delete()
+    db.commit()
+    service = SummaryService(db=db)
+
+    summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["runway_drain_label"] == "Projected monthly spend"
+    assert summary["runway_drain_amount"] == "520.00"
+    assert summary["runway_months_left"] == "2.88"
+    assert summary["runway_status"] == "critical"
+    assert (
+        summary["runway_message"]
+        == "No active budgets are configured, so runway uses projected monthly spending as the drain."
+    )
 
 
 def test_summary_service_rejects_invalid_month_format() -> None:

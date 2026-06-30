@@ -16,12 +16,25 @@ class BudgetUsageResponse(BaseModel):
     status: Literal["on_track", "watch", "over"]
 
 
+class RunwayAccountResponse(BaseModel):
+    account_id: str
+    display_name: str
+    balance_amount: str
+    balance_currency: str | None
+
+
 class SummaryResponse(BaseModel):
     month: str
     current_balance_amount: str
     current_balance_currency: str | None
     runway_balance_amount: str
     runway_balance_currency: str | None
+    runway_account_count: int
+    runway_accounts: list[RunwayAccountResponse]
+    runway_drain_amount: str
+    runway_drain_currency: str | None
+    runway_drain_label: str
+    runway_message: str
     monthly_spending_amount: str
     monthly_budget_amount: str
     budgeted_spending_amount: str

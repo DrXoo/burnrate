@@ -20,6 +20,14 @@ class ActiveBudgetWindow:
     currency: str
 
 
+@dataclass(frozen=True)
+class RunwayAccountBalance:
+    account_id: UUID
+    display_name: str
+    balance_amount: Decimal
+    balance_currency: str | None
+
+
 class SummaryService:
     def __init__(self, *, db: Session) -> None:
         self.db = db
@@ -40,7 +48,7 @@ class SummaryService:
         )
 
         calculation_balance, calculation_currency, _ = self._sum_account_balances(runway_only=False)
-        runway_balance, runway_currency, runway_accounts = self._sum_account_balances(runway_only=True)
+        runway_balance, runway_currency, runway_accounts = self._get_runway_accounts()
         uncategorized_count = self._count_uncategorized_transactions(
             month_start=month_start,
             month_end=month_end,
@@ -72,9 +80,14 @@ class SummaryService:
                 )
 
         projected_overspend = max(projected_month_end_spend - monthly_budget, Decimal("0.00"))
+        runway_drain_amount, runway_drain_label = self._runway_drain(
+            projected_month_end_spend=projected_month_end_spend,
+            projected_overspend=projected_overspend,
+            monthly_budget=monthly_budget,
+        )
         runway_months_left = None
-        if projected_overspend > 0 and runway_balance > 0:
-            runway_months_left = (runway_balance / projected_overspend).quantize(Decimal("0.01"))
+        if runway_drain_amount > 0 and runway_balance > 0:
+            runway_months_left = (runway_balance / runway_drain_amount).quantize(Decimal("0.01"))
 
         budget_usage = [
             self._serialize_budget_usage(
@@ -99,6 +112,24 @@ class SummaryService:
             "current_balance_currency": calculation_currency,
             "runway_balance_amount": self._format_decimal(runway_balance),
             "runway_balance_currency": runway_currency,
+            "runway_account_count": len(runway_accounts),
+            "runway_accounts": [
+                {
+                    "account_id": str(account.account_id),
+                    "display_name": account.display_name,
+                    "balance_amount": self._format_decimal(account.balance_amount),
+                    "balance_currency": account.balance_currency,
+                }
+                for account in runway_accounts
+            ],
+            "runway_drain_amount": self._format_decimal(runway_drain_amount),
+            "runway_drain_currency": runway_currency or calculation_currency,
+            "runway_drain_label": runway_drain_label,
+            "runway_message": self._runway_message(
+                runway_accounts=runway_accounts,
+                monthly_budget=monthly_budget,
+                runway_drain_amount=runway_drain_amount,
+            ),
             "monthly_spending_amount": self._format_decimal(monthly_spending),
             "monthly_budget_amount": self._format_decimal(monthly_budget),
             "budgeted_spending_amount": self._format_decimal(budgeted_spending),
@@ -111,9 +142,9 @@ class SummaryService:
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "runway_months_left": self._format_decimal(runway_months_left) if runway_months_left is not None else None,
             "runway_status": self._runway_status(
-                projected_overspend=projected_overspend,
+                runway_drain_amount=runway_drain_amount,
                 runway_months_left=runway_months_left,
-                runway_accounts=runway_accounts,
+                runway_account_count=len(runway_accounts),
             ),
             "budget_usage": budget_usage,
         }
@@ -167,6 +198,36 @@ class SummaryService:
         currencies = sorted({currency for _amount, currency in rows if currency})
         currency = currencies[0] if len(currencies) == 1 else None
         return total.quantize(Decimal("0.01")), currency, len(rows)
+
+    def _get_runway_accounts(self) -> tuple[Decimal, str | None, list[RunwayAccountBalance]]:
+        rows = self.db.execute(
+            select(
+                Account.id,
+                Account.display_name,
+                Account.latest_balance_amount,
+                Account.latest_balance_currency,
+            )
+            .where(
+                Account.included_in_runway.is_(True),
+                Account.latest_balance_amount.is_not(None),
+            )
+            .order_by(Account.display_name.asc(), Account.created_at.asc())
+        ).all()
+
+        accounts = [
+            RunwayAccountBalance(
+                account_id=account_id,
+                display_name=display_name,
+                balance_amount=balance_amount.quantize(Decimal("0.01")),
+                balance_currency=balance_currency,
+            )
+            for account_id, display_name, balance_amount, balance_currency in rows
+            if balance_amount is not None
+        ]
+        total = sum((account.balance_amount for account in accounts), start=Decimal("0.00"))
+        currencies = sorted({account.balance_currency for account in accounts if account.balance_currency})
+        currency = currencies[0] if len(currencies) == 1 else None
+        return total.quantize(Decimal("0.01")), currency, accounts
 
     def _count_uncategorized_transactions(self, *, month_start: date, month_end: date) -> int:
         count_query = (
@@ -287,16 +348,42 @@ class SummaryService:
             return "watch"
         return "on_track"
 
+    def _runway_drain(
+        self,
+        *,
+        projected_month_end_spend: Decimal,
+        projected_overspend: Decimal,
+        monthly_budget: Decimal,
+    ) -> tuple[Decimal, str]:
+        if monthly_budget > 0:
+            return projected_overspend, "Projected overspend"
+        return projected_month_end_spend, "Projected monthly spend"
+
+    def _runway_message(
+        self,
+        *,
+        runway_accounts: list[RunwayAccountBalance],
+        monthly_budget: Decimal,
+        runway_drain_amount: Decimal,
+    ) -> str:
+        if not runway_accounts:
+            return "Select one or more reserve accounts to activate runway tracking."
+        if runway_drain_amount <= 0:
+            return "Current spending is within the active monthly budget, so runway is not being consumed."
+        if monthly_budget <= 0:
+            return "No active budgets are configured, so runway uses projected monthly spending as the drain."
+        return "Runway is based on projected monthly overspend against the active category budgets."
+
     def _runway_status(
         self,
         *,
-        projected_overspend: Decimal,
+        runway_drain_amount: Decimal,
         runway_months_left: Decimal | None,
-        runway_accounts: int,
+        runway_account_count: int,
     ) -> str:
-        if runway_accounts == 0:
+        if runway_account_count == 0:
             return "not_available"
-        if projected_overspend <= 0:
+        if runway_drain_amount <= 0:
             return "stable"
         if runway_months_left is None or runway_months_left < Decimal("3.00"):
             return "critical"

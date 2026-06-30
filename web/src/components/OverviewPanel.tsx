@@ -117,7 +117,8 @@ export function OverviewPanel({
               <span className="stat-label">Runway</span>
               <strong className="stat-value">{formatRunwayMonths(summary.runway_months_left, summary.runway_status)}</strong>
               <p className="meta-copy">
-                {formatMoney(summary.runway_balance_amount, summary.runway_balance_currency)} reserved for runway.
+                {formatMoney(summary.runway_balance_amount, summary.runway_balance_currency)} reserved across{" "}
+                {summary.runway_account_count} runway account(s).
               </p>
             </article>
 
@@ -178,10 +179,19 @@ export function OverviewPanel({
 
             <section className="dashboard-block">
               <div className="row">
-                <strong>Context</strong>
+                <strong>Runway context</strong>
                 <StatusTag tone={runwayTone(summary.runway_status)}>{summary.runway_status.replace("_", " ")}</StatusTag>
               </div>
+              <p className="meta-copy">{summary.runway_message}</p>
               <div className="dashboard-context">
+                <article className="mini-metric">
+                  <span className="stat-label">{summary.runway_drain_label}</span>
+                  <strong>{formatMoney(summary.runway_drain_amount, summary.runway_drain_currency)}</strong>
+                </article>
+                <article className="mini-metric">
+                  <span className="stat-label">Runway reserve</span>
+                  <strong>{formatMoney(summary.runway_balance_amount, summary.runway_balance_currency)}</strong>
+                </article>
                 <article className="mini-metric">
                   <span className="stat-label">Connections</span>
                   <strong>{connections}</strong>
@@ -190,15 +200,21 @@ export function OverviewPanel({
                   <span className="stat-label">Accounts</span>
                   <strong>{accounts}</strong>
                 </article>
-                <article className="mini-metric">
-                  <span className="stat-label">Projected overspend</span>
-                  <strong>{formatMoney(summary.projected_overspend_amount, summary.current_balance_currency)}</strong>
-                </article>
-                <article className="mini-metric">
-                  <span className="stat-label">Month focus</span>
-                  <strong>{formatMonthLabel(activeMonth)}</strong>
-                </article>
               </div>
+              {summary.runway_accounts.length > 0 ? (
+                <div className="account-chip-list">
+                  {summary.runway_accounts.map((account) => (
+                    <article key={account.account_id} className="account-chip">
+                      <strong>{account.display_name}</strong>
+                      <span>{formatMoney(account.balance_amount, account.balance_currency)}</span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">
+                  No runway accounts selected yet. Use the Accounts section to add reserve accounts.
+                </div>
+              )}
             </section>
           </div>
         </div>

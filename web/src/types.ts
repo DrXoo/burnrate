@@ -104,12 +104,25 @@ export interface BudgetUsage {
   status: BudgetUsageStatus;
 }
 
+export interface RunwayAccount {
+  account_id: string;
+  display_name: string;
+  balance_amount: string;
+  balance_currency: string | null;
+}
+
 export interface SummaryDashboard {
   month: string;
   current_balance_amount: string;
   current_balance_currency: string | null;
   runway_balance_amount: string;
   runway_balance_currency: string | null;
+  runway_account_count: number;
+  runway_accounts: RunwayAccount[];
+  runway_drain_amount: string;
+  runway_drain_currency: string | null;
+  runway_drain_label: string;
+  runway_message: string;
   monthly_spending_amount: string;
   monthly_budget_amount: string;
   budgeted_spending_amount: string;

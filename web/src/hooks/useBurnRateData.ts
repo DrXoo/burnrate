@@ -336,9 +336,24 @@ export function useBurnRateData() {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await createCategory(apiBase, { name, type });
-    const nextCategories = await getCategories(apiBase);
-    setCategories(nextCategories);
+    const createdCategory = await createCategory(apiBase, { name, type });
+    startTransition(() => {
+      setCategories((current) => {
+        const nextCategories = [...current.filter((category) => category.category_id !== createdCategory.category_id), createdCategory];
+        nextCategories.sort((left, right) => {
+          const typeOrder = ["expense", "income", "transfer"];
+          const typeDelta = typeOrder.indexOf(left.type) - typeOrder.indexOf(right.type);
+          if (typeDelta !== 0) {
+            return typeDelta;
+          }
+          return left.name.localeCompare(right.name);
+        });
+        return nextCategories;
+      });
+    });
+
+    const canonicalCategories = await getCategories(apiBase);
+    setCategories(canonicalCategories);
   }
 
   async function updateAccountAction(
