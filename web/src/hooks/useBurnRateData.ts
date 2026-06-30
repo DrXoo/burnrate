@@ -12,6 +12,7 @@ import {
   getCategories,
   getConnections,
   getRules,
+  getSummary,
   getTransactions,
   getUncategorizedCount,
   getUnknownQueue,
@@ -33,6 +34,7 @@ import type {
   Rule,
   RuleDraft,
   RuleUpdateDraft,
+  SummaryDashboard,
   Transaction,
 } from "../types";
 
@@ -54,6 +56,9 @@ export function useBurnRateData() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
+  const [summary, setSummary] = useState<SummaryDashboard | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const [filters, setFilters] = useState<FiltersState>({
     month: currentMonthValue(),
@@ -144,17 +149,27 @@ export function useBurnRateData() {
     async function loadViews() {
       setTransactions((current) => ({ ...current, loading: true, error: null }));
       setUnknownQueue((current) => ({ ...current, loading: true, error: null }));
+      setSummaryLoading(true);
+      setSummaryError(null);
 
       try {
-        const [transactionsPayload, countPayload, unknownPayload] = await Promise.all([
+        const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
           getTransactions(base, filters, transactionsPaging),
           getUncategorizedCount(base, filters),
           getUnknownQueue(base, filters, unknownPaging),
+          getSummary(base, filters.month),
         ]);
 
         if (cancelled) {
           return;
         }
+
+        startTransition(() => {
+          setSummary(summaryPayload);
+          setSummaryLoading(false);
+          setSummaryError(null);
+          setUncategorizedCount(countPayload);
+        });
 
         let adjusted = false;
         if (transactionsPaging.offset > 0 && transactionsPaging.offset >= transactionsPayload.total_count) {
@@ -190,7 +205,6 @@ export function useBurnRateData() {
             error: null,
           });
           setUnknownPaging((current) => ({ ...current, total: unknownPayload.total_count }));
-          setUncategorizedCount(countPayload);
         });
       } catch (error) {
         if (cancelled) {
@@ -199,6 +213,8 @@ export function useBurnRateData() {
         const message = error instanceof Error ? error.message : String(error);
         setTransactions((current) => ({ ...current, loading: false, error: message }));
         setUnknownQueue((current) => ({ ...current, loading: false, error: message }));
+        setSummaryLoading(false);
+        setSummaryError(message);
       }
     }
 
@@ -242,11 +258,19 @@ export function useBurnRateData() {
     if (!apiBase) {
       return;
     }
-    const [transactionsPayload, countPayload, unknownPayload] = await Promise.all([
+    const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
       getTransactions(apiBase, filters, transactionsPaging),
       getUncategorizedCount(apiBase, filters),
       getUnknownQueue(apiBase, filters, unknownPaging),
+      getSummary(apiBase, filters.month),
     ]);
+
+    startTransition(() => {
+      setSummary(summaryPayload);
+      setSummaryLoading(false);
+      setSummaryError(null);
+      setUncategorizedCount(countPayload);
+    });
 
     let adjusted = false;
     if (transactionsPaging.offset > 0 && transactionsPaging.offset >= transactionsPayload.total_count) {
@@ -282,7 +306,6 @@ export function useBurnRateData() {
         error: null,
       });
       setUnknownPaging((current) => ({ ...current, total: unknownPayload.total_count }));
-      setUncategorizedCount(countPayload);
     });
   }
 
@@ -367,8 +390,9 @@ export function useBurnRateData() {
       throw new Error("API base not loaded");
     }
     await createBudgetForMonth(apiBase, draft, currentMonthStart());
-    const nextBudgets = await getBudgets(apiBase);
+    const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
     setBudgets(nextBudgets);
+    setSummary(nextSummary);
   }
 
   async function updateBudgetAction(budgetId: string, draft: BudgetUpdateDraft) {
@@ -376,8 +400,9 @@ export function useBurnRateData() {
       throw new Error("API base not loaded");
     }
     await updateBudget(apiBase, budgetId, draft);
-    const nextBudgets = await getBudgets(apiBase);
+    const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
     setBudgets(nextBudgets);
+    setSummary(nextSummary);
   }
 
   async function deactivateBudgetAction(budgetId: string) {
@@ -385,8 +410,9 @@ export function useBurnRateData() {
       throw new Error("API base not loaded");
     }
     await deactivateBudget(apiBase, budgetId);
-    const nextBudgets = await getBudgets(apiBase);
+    const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
     setBudgets(nextBudgets);
+    setSummary(nextSummary);
   }
 
   return {
@@ -398,6 +424,9 @@ export function useBurnRateData() {
     categories,
     rules,
     budgets,
+    summary,
+    summaryLoading,
+    summaryError,
     uncategorizedCount,
     filters,
     transactionsPaging,

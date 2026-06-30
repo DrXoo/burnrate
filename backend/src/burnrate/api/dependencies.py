@@ -11,6 +11,7 @@ from burnrate.services.categorization_service import CategorizationService
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.ledger_service import LedgerService
 from burnrate.services.rules_service import RulesService
+from burnrate.services.summary_service import SummaryService
 
 
 def get_enable_banking_client(
@@ -49,3 +50,9 @@ def get_budget_service(
     db: Session = Depends(get_db),
 ) -> BudgetService:
     return BudgetService(db=db)
+
+
+def get_summary_service(
+    db: Session = Depends(get_db),
+) -> SummaryService:
+    return SummaryService(db=db)

@@ -1,6 +1,7 @@
 import type {
   Account,
   Budget,
+  SummaryDashboard,
   BudgetDraft,
   BudgetUpdateDraft,
   Category,
@@ -148,6 +149,10 @@ export async function toggleRule(apiBase: string, ruleId: string, active: boolea
 export async function getBudgets(apiBase: string): Promise<Budget[]> {
   const payload = await fetchJson<{ budgets: Budget[] }>(`${apiBase}/budgets`);
   return payload.budgets ?? [];
+}
+
+export async function getSummary(apiBase: string, month: string): Promise<SummaryDashboard> {
+  return fetchJson<SummaryDashboard>(`${apiBase}/summary${buildQuery({ month })}`);
 }
 
 export async function createBudgetForMonth(

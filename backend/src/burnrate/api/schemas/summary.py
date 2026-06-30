@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel
+
+
+class BudgetUsageResponse(BaseModel):
+    category_id: str
+    category_name: str
+    budget_amount: str
+    spent_amount: str
+    remaining_amount: str
+    currency: str
+    utilization_percent: float
+    status: Literal["on_track", "watch", "over"]
+
+
+class SummaryResponse(BaseModel):
+    month: str
+    current_balance_amount: str
+    current_balance_currency: str | None
+    runway_balance_amount: str
+    runway_balance_currency: str | None
+    monthly_spending_amount: str
+    monthly_budget_amount: str
+    budgeted_spending_amount: str
+    money_left_amount: str
+    uncategorized_count: int
+    days_elapsed: int
+    days_in_month: int
+    average_daily_spend_amount: str
+    projected_month_end_spend_amount: str
+    projected_overspend_amount: str
+    runway_months_left: str | None
+    runway_status: Literal["stable", "watch", "critical", "not_available"]
+    budget_usage: list[BudgetUsageResponse]

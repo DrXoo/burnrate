@@ -174,6 +174,74 @@ input:disabled {
   gap: 18px;
 }
 
+.tab-shell,
+.tab-panel-stack {
+  margin-bottom: 18px;
+}
+
+.tab-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tab-button {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  text-align: left;
+  background: rgba(255, 250, 244, 0.72);
+  border: 1px solid rgba(197, 172, 144, 0.44);
+  box-shadow: var(--shadow-soft);
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.tab-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(200, 91, 47, 0.45);
+}
+
+.tab-button-active {
+  background:
+    linear-gradient(135deg, rgba(255, 246, 237, 0.96), rgba(255, 252, 248, 0.96)),
+    linear-gradient(135deg, rgba(200, 91, 47, 0.08), rgba(43, 84, 65, 0.05));
+  border-color: rgba(200, 91, 47, 0.48);
+}
+
+.tab-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tab-label {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.tab-caption {
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 0.88rem;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(16, 34, 29, 0.08);
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .card,
 .fatal-card {
   background: var(--panel);
@@ -252,7 +320,10 @@ input:disabled {
 .stack,
 .form-stack,
 .mini-form,
-.transaction-cell {
+.transaction-cell,
+.dashboard-stack,
+.budget-radar,
+.dashboard-context {
   display: grid;
   gap: 12px;
 }
@@ -268,8 +339,18 @@ input:disabled {
   border-radius: 22px;
 }
 
+.stat-card-highlight {
+  background:
+    linear-gradient(135deg, rgba(255, 245, 232, 0.95), rgba(255, 250, 244, 0.96)),
+    linear-gradient(135deg, rgba(200, 91, 47, 0.08), rgba(43, 84, 65, 0.05));
+}
+
 .stat-card-warn {
   background: linear-gradient(160deg, rgba(255, 247, 233, 0.96), rgba(253, 239, 217, 0.96));
+}
+
+.stat-card-danger {
+  background: linear-gradient(160deg, rgba(255, 238, 232, 0.96), rgba(255, 245, 240, 0.96));
 }
 
 .stat-label {
@@ -287,7 +368,8 @@ input:disabled {
 }
 
 .list-card,
-.queue-card {
+.queue-card,
+.dashboard-block {
   padding: 16px;
   background: var(--panel-solid);
   border: 1px solid rgba(197, 172, 144, 0.38);
@@ -303,6 +385,78 @@ input:disabled {
   justify-content: space-between;
   gap: 14px;
   align-items: baseline;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-detail-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 12px;
+}
+
+.dashboard-block {
+  gap: 14px;
+}
+
+.budget-radar-item {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(16, 34, 29, 0.03);
+  border: 1px solid rgba(197, 172, 144, 0.28);
+}
+
+.progress-track {
+  height: 10px;
+  overflow: hidden;
+  margin: 12px 0 8px;
+  border-radius: 999px;
+  background: rgba(16, 34, 29, 0.08);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--good), #4c936e);
+}
+
+.progress-watch {
+  background: linear-gradient(90deg, #d18a28, #f0b14f);
+}
+
+.progress-over {
+  background: linear-gradient(90deg, #b44628, #e47a57);
+}
+
+.progress-on_track {
+  background: linear-gradient(90deg, var(--good), #4c936e);
+}
+
+.dashboard-context {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mini-metric {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(16, 34, 29, 0.04);
+}
+
+.mini-metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 1.1rem;
 }
 
 .tag {
@@ -523,6 +677,10 @@ th {
   color: var(--good);
 }
 
+.summary-loading {
+  margin-top: 10px;
+}
+
 .loading-stage {
   display: grid;
   justify-items: center;
@@ -558,7 +716,14 @@ th {
 @media (max-width: 1120px) {
   .top-grid,
   .middle-grid,
-  .workspace-grid {
+  .workspace-grid,
+  .tab-row {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-grid,
+  .dashboard-detail-grid,
+  .dashboard-context {
     grid-template-columns: 1fr;
   }
 }

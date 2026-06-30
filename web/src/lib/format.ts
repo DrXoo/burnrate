@@ -1,4 +1,4 @@
-import type { MatchField, MatchOperator, Transaction } from "../types";
+import type { MatchField, MatchOperator, RunwayStatus, Transaction } from "../types";
 
 export function currentMonthValue(): string {
   return new Date().toISOString().slice(0, 7);
@@ -71,4 +71,58 @@ export function prettyMatchOperator(operator: MatchOperator): string {
 
 export function amountTone(amount: string, direction: string): "positive" | "negative" {
   return direction === "credit" || Number(amount) > 0 ? "positive" : "negative";
+}
+
+export function formatMoney(amount: string, currency: string | null | undefined): string {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) {
+    return currency ? `${amount} ${currency}` : amount;
+  }
+
+  if (currency) {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(numericAmount);
+    } catch (_error) {
+      return `${amount} ${currency}`;
+    }
+  }
+
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericAmount);
+}
+
+export function formatMonthLabel(value: string): string {
+  const date = new Date(`${value}-01T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+export function formatRunwayMonths(value: string | null, status: RunwayStatus): string {
+  if (status === "not_available") {
+    return "Not configured";
+  }
+  if (status === "stable" && !value) {
+    return "On track";
+  }
+  if (!value) {
+    return "At risk";
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return `${value} mo`;
+  }
+  return `${numericValue.toFixed(1)} mo`;
 }

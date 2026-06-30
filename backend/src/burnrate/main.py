@@ -10,6 +10,7 @@ from burnrate.api.routes.enable_banking import router as enable_banking_router
 from burnrate.api.routes.health import router as health_router
 from burnrate.api.routes.ledger import router as ledger_router
 from burnrate.api.routes.rules import router as rules_router
+from burnrate.api.routes.summary import router as summary_router
 from burnrate.config import get_settings
 
 
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(categorization_router, prefix="/api/v1")
     app.include_router(rules_router, prefix="/api/v1")
     app.include_router(budgets_router, prefix="/api/v1")
+    app.include_router(summary_router, prefix="/api/v1")
     app.include_router(enable_banking_public_router)
     return app
 

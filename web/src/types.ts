@@ -2,6 +2,8 @@ export type CategoryType = "expense" | "income" | "transfer";
 export type MatchField = "description" | "merchant_name" | "counterparty_name";
 export type MatchOperator = "contains" | "equals" | "starts_with" | "ends_with" | "regex";
 export type BudgetStatus = "active" | "scheduled" | "inactive";
+export type BudgetUsageStatus = "on_track" | "watch" | "over";
+export type RunwayStatus = "stable" | "watch" | "critical" | "not_available";
 
 export interface Connection {
   connection_id: string;
@@ -89,6 +91,38 @@ export interface Budget {
   active_to: string | null;
   active: boolean;
   status: BudgetStatus;
+}
+
+export interface BudgetUsage {
+  category_id: string;
+  category_name: string;
+  budget_amount: string;
+  spent_amount: string;
+  remaining_amount: string;
+  currency: string;
+  utilization_percent: number;
+  status: BudgetUsageStatus;
+}
+
+export interface SummaryDashboard {
+  month: string;
+  current_balance_amount: string;
+  current_balance_currency: string | null;
+  runway_balance_amount: string;
+  runway_balance_currency: string | null;
+  monthly_spending_amount: string;
+  monthly_budget_amount: string;
+  budgeted_spending_amount: string;
+  money_left_amount: string;
+  uncategorized_count: number;
+  days_elapsed: number;
+  days_in_month: number;
+  average_daily_spend_amount: string;
+  projected_month_end_spend_amount: string;
+  projected_overspend_amount: string;
+  runway_months_left: string | null;
+  runway_status: RunwayStatus;
+  budget_usage: BudgetUsage[];
 }
 
 export interface TransactionsResponse {
