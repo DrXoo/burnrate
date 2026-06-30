@@ -22,6 +22,11 @@ class AccountListResponse(BaseModel):
     accounts: list[AccountSummaryResponse]
 
 
+class UpdateAccountRequest(BaseModel):
+    included_in_calculations: bool
+    included_in_runway: bool
+
+
 class TransactionSummaryResponse(BaseModel):
     transaction_id: str
     account_id: str

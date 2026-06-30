@@ -47,22 +47,53 @@ class LedgerService:
         ).all()
 
         return [
-            {
-                "account_id": str(account.id),
-                "display_name": account.display_name,
-                "currency": account.currency,
-                "latest_balance_amount": self._serialize_decimal(account.latest_balance_amount),
-                "latest_balance_currency": account.latest_balance_currency,
-                "included_in_calculations": account.included_in_calculations,
-                "included_in_runway": account.included_in_runway,
-                "last_synced_at": account.last_synced_at.isoformat() if account.last_synced_at else None,
-                "source_connection_id": str(mapping.enable_banking_connection_id) if mapping else None,
-                "source_aspsp_name": connection.aspsp_name if connection else None,
-                "source_aspsp_country": connection.aspsp_country if connection else None,
-                "external_account_id": mapping.external_account_id if mapping else None,
-            }
+            self._serialize_account(
+                account=account,
+                mapping=mapping,
+                connection=connection,
+            )
             for account, mapping, connection in rows
         ]
+
+    def update_account(
+        self,
+        *,
+        account_id: str,
+        included_in_calculations: bool,
+        included_in_runway: bool,
+    ) -> dict[str, Any]:
+        account = self.db.get(Account, self._parse_uuid(account_id, "Account id"))
+        if account is None:
+            raise ValueError(f"Account not found for id {account_id}")
+
+        if not included_in_calculations:
+            included_in_runway = False
+        elif included_in_runway:
+            included_in_calculations = True
+
+        account.included_in_calculations = included_in_calculations
+        account.included_in_runway = included_in_runway
+        self.db.flush()
+
+        row = self.db.execute(
+            select(Account, EnableBankingAccountMapping, EnableBankingConnection)
+            .outerjoin(
+                EnableBankingAccountMapping,
+                EnableBankingAccountMapping.account_id == Account.id,
+            )
+            .outerjoin(
+                EnableBankingConnection,
+                EnableBankingConnection.id == EnableBankingAccountMapping.enable_banking_connection_id,
+            )
+            .where(Account.id == account.id)
+        ).one()
+
+        stored_account, mapping, connection = row
+        return self._serialize_account(
+            account=stored_account,
+            mapping=mapping,
+            connection=connection,
+        )
 
     def list_transactions(
         self,
@@ -191,6 +222,34 @@ class LedgerService:
         if month_start.month == 12:
             return month_start, date(month_start.year + 1, 1, 1)
         return month_start, date(month_start.year, month_start.month + 1, 1)
+
+    def _serialize_account(
+        self,
+        *,
+        account: Account,
+        mapping: EnableBankingAccountMapping | None,
+        connection: EnableBankingConnection | None,
+    ) -> dict[str, Any]:
+        return {
+            "account_id": str(account.id),
+            "display_name": account.display_name,
+            "currency": account.currency,
+            "latest_balance_amount": self._serialize_decimal(account.latest_balance_amount),
+            "latest_balance_currency": account.latest_balance_currency,
+            "included_in_calculations": account.included_in_calculations,
+            "included_in_runway": account.included_in_runway,
+            "last_synced_at": account.last_synced_at.isoformat() if account.last_synced_at else None,
+            "source_connection_id": str(mapping.enable_banking_connection_id) if mapping else None,
+            "source_aspsp_name": connection.aspsp_name if connection else None,
+            "source_aspsp_country": connection.aspsp_country if connection else None,
+            "external_account_id": mapping.external_account_id if mapping else None,
+        }
+
+    def _parse_uuid(self, value: str, label: str) -> UUID:
+        try:
+            return UUID(value)
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a valid UUID") from exc
 
     def _serialize_decimal(self, value: Decimal | None) -> str | None:
         if value is None:

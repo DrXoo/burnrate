@@ -18,6 +18,7 @@ import {
   getUnknownQueue,
   toggleRule,
   uncategorizeTransaction,
+  updateAccountControls,
   updateBudget,
   updateRule,
 } from "../lib/api";
@@ -340,6 +341,26 @@ export function useBurnRateData() {
     setCategories(nextCategories);
   }
 
+  async function updateAccountAction(
+    accountId: string,
+    draft: Pick<Account, "included_in_calculations" | "included_in_runway">,
+  ) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+
+    await updateAccountControls(apiBase, accountId, {
+      included_in_calculations: draft.included_in_calculations,
+      included_in_runway: draft.included_in_runway,
+    });
+
+    const nextAccounts = await getAccounts(apiBase);
+    startTransition(() => {
+      setAccounts(nextAccounts);
+    });
+    await refreshLedgerViews();
+  }
+
   async function categorizeTransactionAction(transactionId: string, categoryId: string) {
     if (!apiBase) {
       throw new Error("API base not loaded");
@@ -438,6 +459,7 @@ export function useBurnRateData() {
     moveUnknownPage,
     refreshReferenceData,
     createCategory: createCategoryAction,
+    updateAccount: updateAccountAction,
     categorizeTransaction: categorizeTransactionAction,
     uncategorizeTransaction: uncategorizeTransactionAction,
     createRule: createRuleAction,

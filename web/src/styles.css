@@ -447,6 +447,37 @@ input:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.account-control-grid {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.toggle-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(16, 34, 29, 0.04);
+  border: 1px solid rgba(197, 172, 144, 0.28);
+}
+
+.toggle-card input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.toggle-copy {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .mini-metric {
   padding: 14px;
   border-radius: 18px;

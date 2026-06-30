@@ -91,6 +91,21 @@ export async function getAccounts(apiBase: string): Promise<Account[]> {
   return payload.accounts ?? [];
 }
 
+export async function updateAccountControls(
+  apiBase: string,
+  accountId: string,
+  payload: {
+    included_in_calculations: boolean;
+    included_in_runway: boolean;
+  },
+): Promise<Account> {
+  return fetchJson<Account>(`${apiBase}/accounts/${accountId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getCategories(apiBase: string): Promise<Category[]> {
   const payload = await fetchJson<{ categories: Category[] }>(`${apiBase}/categories`);
   return payload.categories ?? [];

@@ -3,7 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from burnrate.api.dependencies import get_ledger_service
-from burnrate.api.schemas.ledger import AccountListResponse, TransactionListResponse, UncategorizedCountResponse
+from burnrate.api.schemas.ledger import (
+    AccountListResponse,
+    AccountSummaryResponse,
+    TransactionListResponse,
+    UncategorizedCountResponse,
+    UpdateAccountRequest,
+)
 from burnrate.services.ledger_service import LedgerService
 
 router = APIRouter(tags=["ledger"])
@@ -14,6 +20,24 @@ def list_accounts(
     service: LedgerService = Depends(get_ledger_service),
 ) -> AccountListResponse:
     return AccountListResponse(accounts=service.list_accounts())
+
+
+@router.patch("/accounts/{account_id}", response_model=AccountSummaryResponse)
+def update_account(
+    account_id: str,
+    request: UpdateAccountRequest,
+    service: LedgerService = Depends(get_ledger_service),
+) -> AccountSummaryResponse:
+    try:
+        payload = service.update_account(
+            account_id=account_id,
+            included_in_calculations=request.included_in_calculations,
+            included_in_runway=request.included_in_runway,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return AccountSummaryResponse.model_validate(payload)
 
 
 @router.get("/transactions", response_model=TransactionListResponse)

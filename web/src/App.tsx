@@ -114,7 +114,7 @@ export default function App() {
           </section>
 
           <section className="middle-grid">
-            <AccountsPanel accounts={data.accounts} />
+            <AccountsPanel accounts={data.accounts} onUpdateAccount={data.updateAccount} />
           </section>
         </section>
       ) : null}

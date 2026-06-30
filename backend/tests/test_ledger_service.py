@@ -146,6 +146,22 @@ def test_ledger_service_lists_accounts_with_connection_metadata() -> None:
     assert accounts[1]["source_aspsp_name"] is None
 
 
+def test_ledger_service_updates_account_flags_and_disables_runway_when_excluded() -> None:
+    db = make_session()
+    primary_account, _ = seed_ledger_data(db)
+    service = LedgerService(db=db)
+
+    updated = service.update_account(
+        account_id=str(primary_account.id),
+        included_in_calculations=False,
+        included_in_runway=True,
+    )
+    db.commit()
+
+    assert updated["included_in_calculations"] is False
+    assert updated["included_in_runway"] is False
+
+
 def test_ledger_service_lists_transactions_with_filters_and_pagination() -> None:
     db = make_session()
     primary_account, _ = seed_ledger_data(db)
