@@ -37,6 +37,8 @@ class TransactionSummaryResponse(BaseModel):
     status: str
     category_id: str | None = None
     category_name: str | None = None
+    matched_rule_id: str | None = None
+    matched_rule_name: str | None = None
     imported_at: str
 
 

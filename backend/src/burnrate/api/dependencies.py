@@ -9,6 +9,7 @@ from burnrate.integrations.enable_banking.client import EnableBankingClient
 from burnrate.services.categorization_service import CategorizationService
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.ledger_service import LedgerService
+from burnrate.services.rules_service import RulesService
 
 
 def get_enable_banking_client(
@@ -35,3 +36,9 @@ def get_categorization_service(
     db: Session = Depends(get_db),
 ) -> CategorizationService:
     return CategorizationService(db=db)
+
+
+def get_rules_service(
+    db: Session = Depends(get_db),
+) -> RulesService:
+    return RulesService(db=db)

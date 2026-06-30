@@ -9,7 +9,14 @@ from uuid import UUID
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from burnrate.db.models import Account, Category, EnableBankingAccountMapping, EnableBankingConnection, Transaction
+from burnrate.db.models import (
+    Account,
+    CategorizationRule,
+    Category,
+    EnableBankingAccountMapping,
+    EnableBankingConnection,
+    Transaction,
+)
 
 
 @dataclass
@@ -103,9 +110,11 @@ class LedgerService:
                     "status": transaction.status,
                     "category_id": str(transaction.category_id) if transaction.category_id else None,
                     "category_name": category_name,
+                    "matched_rule_id": str(transaction.matched_rule_id) if transaction.matched_rule_id else None,
+                    "matched_rule_name": matched_rule_name,
                     "imported_at": transaction.imported_at.isoformat(),
                 }
-                for transaction, account_display_name, category_name in rows
+                for transaction, account_display_name, category_name, matched_rule_name in rows
             ],
             "total_count": total_count,
             "limit": limit,
@@ -151,9 +160,10 @@ class LedgerService:
 
     def _transactions_query(self, *, filters: TransactionFilters) -> Select[Any]:
         query = (
-            select(Transaction, Account.display_name, Category.name)
+            select(Transaction, Account.display_name, Category.name, CategorizationRule.name)
             .join(Account, Account.id == Transaction.account_id)
             .outerjoin(Category, Category.id == Transaction.category_id)
+            .outerjoin(CategorizationRule, CategorizationRule.id == Transaction.matched_rule_id)
         )
 
         if filters.account_id is not None:

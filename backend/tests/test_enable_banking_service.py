@@ -15,6 +15,7 @@ from burnrate.config import Settings
 from burnrate.db.base import Base
 from burnrate.db.models import (
     Account,
+    Category,
     EnableBankingAccountMapping,
     EnableBankingAuthRequest,
     EnableBankingConnection,
@@ -22,6 +23,7 @@ from burnrate.db.models import (
     Transaction,
 )
 from burnrate.services.enable_banking_service import EnableBankingService
+from burnrate.services.rules_service import RulesService
 
 
 class FakeEnableBankingClient:
@@ -384,3 +386,48 @@ def test_enable_banking_service_lists_connections_with_latest_sync_summary() -> 
     assert connections[0]["latest_sync_status"] == "success"
     assert connections[0]["latest_sync_accounts_count"] == 1
     assert connections[0]["latest_sync_transactions_count"] == 1
+
+
+def test_enable_banking_service_applies_existing_rules_during_import() -> None:
+    db = make_session()
+    client = FakeEnableBankingClient()
+    category = Category(name="Coffee", type="expense", active=True)
+    db.add(category)
+    db.commit()
+
+    rules_service = RulesService(db=db)
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+
+    callback = service.handle_callback(
+        code="auth-code",
+        state=start["state"],
+        error=None,
+        error_description=None,
+    )
+    db.commit()
+    first_transaction = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-1"))
+    assert first_transaction is not None
+    first_transaction.category_id = category.id
+    db.commit()
+
+    rules_service.create_rule_from_transaction(transaction_id=str(first_transaction.id))
+    db.commit()
+
+    client.transaction_ids = ["tx-1", "tx-2"]
+    service.sync_connection(connection_id=callback["connection_id"])
+    db.commit()
+
+    second_transaction = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-2"))
+
+    assert second_transaction is not None
+    assert second_transaction.category_id == category.id
+    assert second_transaction.matched_rule_id is not None

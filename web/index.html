@@ -163,6 +163,67 @@
         border: 1px solid rgba(220, 207, 191, 0.9);
       }
 
+      .rule-item {
+        padding: 14px;
+        border-radius: 16px;
+        background: rgba(18, 33, 29, 0.03);
+        border: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .rule-item + .rule-item {
+        margin-top: 10px;
+      }
+
+      .rule-copy {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      .rule-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .rule-actions button {
+        width: auto;
+      }
+
+      .rule-editor {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .rule-editor-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .checkbox-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .checkbox-line input {
+        width: auto;
+      }
+
+      .subsection-title {
+        margin: 18px 0 10px;
+        font-size: 1rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
       .category-type {
         margin-top: 8px;
       }
@@ -238,6 +299,12 @@
         font-weight: 700;
       }
 
+      button:disabled,
+      select:disabled {
+        cursor: not-allowed;
+        opacity: 0.48;
+      }
+
       .actions {
         display: grid;
         align-content: end;
@@ -311,6 +378,12 @@
         min-width: 220px;
       }
 
+      .rule-note {
+        color: var(--muted);
+        font-size: 0.84rem;
+        line-height: 1.4;
+      }
+
       .inline-category .row {
         align-items: center;
       }
@@ -322,8 +395,28 @@
 
       .inline-category-actions {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto;
+        grid-template-columns: minmax(0, 1fr) auto auto auto;
         gap: 8px;
+      }
+
+      .transaction-rule-form {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+        padding: 12px;
+        border-radius: 14px;
+        background: rgba(18, 33, 29, 0.04);
+        border: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .transaction-rule-form[hidden] {
+        display: none;
+      }
+
+      .transaction-rule-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
       }
 
       .button-secondary {
@@ -435,6 +528,14 @@
         .review-grid,
         form.filters,
         .stats {
+          grid-template-columns: 1fr;
+        }
+
+        .rule-editor-fields {
+          grid-template-columns: 1fr;
+        }
+
+        .transaction-rule-grid {
           grid-template-columns: 1fr;
         }
 
@@ -566,6 +667,10 @@
             <button type="submit">Create Category</button>
           </form>
           <div id="category-feedback" style="margin-top: 12px"></div>
+          <h3 class="subsection-title">Saved rules</h3>
+          <div id="rules-list">
+            <div class="empty">Loading saved rules...</div>
+          </div>
         </article>
 
         <article class="card">
@@ -588,6 +693,7 @@
         accounts: [],
         connections: [],
         categories: [],
+        rules: [],
         paging: {
           transactions: { limit: 25, offset: 0, total: 0 },
           unknown: { limit: 12, offset: 0, total: 0 },
@@ -606,8 +712,11 @@
       document.getElementById("category-form").addEventListener("submit", handleCategoryCreate);
       document.getElementById("unknown-queue-shell").addEventListener("click", handleUnknownQueueClick);
       document.getElementById("transactions-shell").addEventListener("click", handleTransactionTableClick);
+      document.getElementById("transactions-shell").addEventListener("submit", handleTransactionRuleSubmit);
       document.getElementById("transactions-shell").addEventListener("click", handleTransactionPagerClick);
       document.getElementById("unknown-queue-shell").addEventListener("click", handleUnknownPagerClick);
+      document.getElementById("rules-list").addEventListener("click", handleRuleListClick);
+      document.getElementById("rules-list").addEventListener("submit", handleRuleEditSubmit);
 
       document.getElementById("filter-month").value = new Date().toISOString().slice(0, 7);
       boot().catch((error) => {
@@ -619,15 +728,17 @@
         state.apiBase = await detectApiBase();
         document.getElementById("api-note").textContent = `API base: ${state.apiBase}`;
 
-        const [connectionsPayload, accountsPayload, categoriesPayload] = await Promise.all([
+        const [connectionsPayload, accountsPayload, categoriesPayload, rulesPayload] = await Promise.all([
           fetchJson(`${state.apiBase}/integrations/enable-banking/connections`),
           fetchJson(`${state.apiBase}/accounts`),
           fetchJson(`${state.apiBase}/categories`),
+          fetchJson(`${state.apiBase}/rules`),
         ]);
 
         state.connections = connectionsPayload.connections || [];
         state.accounts = accountsPayload.accounts || [];
         state.categories = categoriesPayload.categories || [];
+        state.rules = rulesPayload.rules || [];
 
         document.getElementById("connection-count").textContent = String(state.connections.length);
         document.getElementById("account-count").textContent = String(state.accounts.length);
@@ -639,6 +750,7 @@
         renderConnections(state.connections);
         renderAccounts(state.accounts);
         renderCategories(state.categories);
+        renderRules(state.rules);
         populateAccountFilter(state.accounts);
 
         await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue()]);
@@ -674,6 +786,12 @@
         const payload = await fetchJson(`${state.apiBase}/categories`);
         state.categories = payload.categories || [];
         renderCategories(state.categories);
+      }
+
+      async function refreshRules() {
+        const payload = await fetchJson(`${state.apiBase}/rules`);
+        state.rules = payload.rules || [];
+        renderRules(state.rules);
       }
 
       async function refreshUnknownQueue() {
@@ -778,6 +896,93 @@
         select.value = currentValue;
       }
 
+      function renderCategoryOptions(selectedValue) {
+        return (
+          '<option value="">Choose a category</option>' +
+          state.categories
+            .map(
+              (category) =>
+                `<option value="${escapeAttribute(category.category_id)}" ${
+                  category.category_id === selectedValue ? "selected" : ""
+                }>${escapeHtml(category.name)} (${escapeHtml(category.type)})</option>`
+            )
+            .join("")
+        );
+      }
+
+      function suggestRuleField(transaction) {
+        if (transaction.merchant_name) {
+          return "merchant_name";
+        }
+        if (transaction.description) {
+          return "description";
+        }
+        if (transaction.counterparty_name) {
+          return "counterparty_name";
+        }
+        return "description";
+      }
+
+      function suggestRuleValue(transaction, fieldName) {
+        const rawValue = transaction[fieldName];
+        return typeof rawValue === "string" ? rawValue.trim() : "";
+      }
+
+      function renderTransactionRuleForm(transaction, selectedCategoryId) {
+        const matchField = suggestRuleField(transaction);
+        const matchValue = suggestRuleValue(transaction, matchField);
+        return `
+          <form class="transaction-rule-form" hidden>
+            <label>
+              Rule name
+              <input
+                type="text"
+                name="name"
+                placeholder="Optional custom name"
+              />
+            </label>
+            <div class="transaction-rule-grid">
+              <label>
+                Category
+                <select name="category_id">
+                  ${renderCategoryOptions(selectedCategoryId)}
+                </select>
+              </label>
+              <label>
+                Match field
+                <select name="match_field">
+                  ${renderRuleFieldOptions(matchField)}
+                </select>
+              </label>
+              <label>
+                Match type
+                <select name="match_operator">
+                  ${renderRuleOperatorOptions("contains")}
+                </select>
+              </label>
+              <label>
+                Match value
+                <input
+                  type="text"
+                  name="match_value"
+                  value="${escapeAttribute(matchValue)}"
+                  placeholder="Text or regex pattern"
+                  required
+                />
+              </label>
+            </div>
+            <label class="checkbox-line">
+              <input type="checkbox" name="apply_to_existing_uncategorized" checked />
+              Apply to current unknown queue
+            </label>
+            <div class="rule-actions">
+              <button class="transaction-rule-save-button">Create rule</button>
+              <button type="button" class="button-secondary transaction-rule-cancel-button">Cancel</button>
+            </div>
+          </form>
+        `;
+      }
+
       function renderTransactions(transactions, totalCount) {
         const root = document.getElementById("transactions-shell");
         if (!transactions.length) {
@@ -804,17 +1009,10 @@
                   .map((transaction) => {
                     const amountClass = transaction.direction === "credit" ? "amount-positive" : "amount-negative";
                     const categoryLabel = transaction.category_name || (transaction.category_id ? "Assigned" : "Unknown");
+                    const ruleLabel = transaction.matched_rule_name || (transaction.matched_rule_id ? "Rule attached" : "");
+                    const categoryActionLabel = transaction.category_id ? "Update" : "Assign";
                     const selectedValue = transaction.category_id || "";
-                    const categoryOptions =
-                      '<option value="">Choose a category</option>' +
-                      state.categories
-                        .map(
-                          (category) =>
-                            `<option value="${escapeAttribute(category.category_id)}" ${
-                              category.category_id === selectedValue ? "selected" : ""
-                            }>${escapeHtml(category.name)} (${escapeHtml(category.type)})</option>`
-                        )
-                        .join("");
+                    const categoryOptions = renderCategoryOptions(selectedValue);
                     return `
                       <tr data-transaction-id="${escapeAttribute(transaction.transaction_id)}">
                         <td>${escapeHtml(transaction.booking_date || "No booking date")}</td>
@@ -827,15 +1025,24 @@
                         <td>
                           <div class="inline-category">
                             <span class="tag ${transaction.category_id ? "good" : "warn"}">${escapeHtml(categoryLabel)}</span>
+                            ${ruleLabel ? `<span class="rule-note">Rule: ${escapeHtml(ruleLabel)}</span>` : ""}
                             <div class="inline-category-actions">
                               <select class="transaction-category-select" ${state.categories.length ? "" : "disabled"}>
                                 ${categoryOptions}
                               </select>
-                              <button class="transaction-assign-button" ${state.categories.length ? "" : "disabled"}>Save</button>
+                              <button class="transaction-assign-button" ${state.categories.length ? "" : "disabled"}>${categoryActionLabel}</button>
+                              <button class="button-secondary transaction-rule-button" ${
+                                transaction.category_id ? "" : "disabled"
+                              } title="${
+                                transaction.category_id
+                                  ? "Create a reusable rule from this categorized transaction"
+                                  : "Assign a category before creating a rule"
+                              }">Save rule</button>
                               <button class="button-secondary transaction-clear-button" ${
                                 transaction.category_id ? "" : "disabled"
                               }>Clear</button>
                             </div>
+                            ${renderTransactionRuleForm(transaction, selectedValue)}
                           </div>
                         </td>
                         <td class="${amountClass}">${escapeHtml(transaction.amount)} ${escapeHtml(transaction.currency)}</td>
@@ -874,6 +1081,108 @@
                 <div class="category-type meta">${category.active ? "Active" : "Inactive"}</div>
               </article>
             `
+          )
+          .join("");
+      }
+
+      function renderRules(rules) {
+        const root = document.getElementById("rules-list");
+        if (!rules.length) {
+          root.innerHTML = '<div class="empty">No saved rules yet. Categorize a transaction and save one from the transaction table.</div>';
+          return;
+        }
+
+        root.innerHTML = rules
+          .map(
+            (rule) => `
+              <article class="rule-item" data-rule-id="${escapeAttribute(rule.rule_id)}">
+                <div class="row">
+                  <strong>${escapeHtml(rule.name || `${rule.category_name} rule`)}</strong>
+                  <span class="tag ${rule.active ? "good" : ""}">${rule.active ? "Active" : "Inactive"}</span>
+                </div>
+                <div class="rule-copy">
+                  ${escapeHtml(rule.match_field)} ${escapeHtml(rule.match_operator)} "${escapeHtml(rule.match_value)}"<br />
+                  Category: ${escapeHtml(rule.category_name)} · Priority: ${escapeHtml(String(rule.priority))}
+                </div>
+                <div class="rule-actions">
+                  <button class="button-secondary rule-edit-button">Edit rule</button>
+                  <button class="button-secondary rule-toggle-button" data-next-active="${rule.active ? "false" : "true"}">
+                    ${rule.active ? "Disable rule" : "Enable rule"}
+                  </button>
+                </div>
+                <form class="rule-editor" hidden>
+                  <label>
+                    Rule name
+                    <input
+                      type="text"
+                      name="name"
+                      value="${escapeAttribute(rule.name || "")}"
+                      placeholder="Optional custom name"
+                    />
+                  </label>
+                  <div class="rule-editor-fields">
+                    <label>
+                      Match field
+                      <select name="match_field">
+                        ${renderRuleFieldOptions(rule.match_field)}
+                      </select>
+                    </label>
+                    <label>
+                      Match type
+                      <select name="match_operator">
+                        ${renderRuleOperatorOptions(rule.match_operator)}
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    Match value
+                    <input
+                      type="text"
+                      name="match_value"
+                      value="${escapeAttribute(rule.match_value)}"
+                      placeholder="Text or regex pattern"
+                      required
+                    />
+                  </label>
+                  <label class="checkbox-line">
+                    <input type="checkbox" name="apply_to_existing_uncategorized" checked />
+                    Reapply to current unknown queue
+                  </label>
+                  <div class="rule-actions">
+                    <button class="rule-save-button">Save changes</button>
+                    <button type="button" class="button-secondary rule-cancel-button">Cancel</button>
+                  </div>
+                </form>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function renderRuleFieldOptions(selectedValue) {
+        return [
+          ["description", "Description"],
+          ["merchant_name", "Merchant name"],
+          ["counterparty_name", "Counterparty name"],
+        ]
+          .map(
+            ([value, label]) =>
+              `<option value="${escapeAttribute(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(label)}</option>`
+          )
+          .join("");
+      }
+
+      function renderRuleOperatorOptions(selectedValue) {
+        return [
+          ["contains", "Contains"],
+          ["equals", "Equals"],
+          ["starts_with", "Starts with"],
+          ["ends_with", "Ends with"],
+          ["regex", "Regex"],
+        ]
+          .map(
+            ([value, label]) =>
+              `<option value="${escapeAttribute(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(label)}</option>`
           )
           .join("");
       }
@@ -1018,8 +1327,10 @@
 
       async function handleTransactionTableClick(event) {
         const assignButton = event.target.closest(".transaction-assign-button");
+        const ruleButton = event.target.closest(".transaction-rule-button");
+        const cancelRuleButton = event.target.closest(".transaction-rule-cancel-button");
         const clearButton = event.target.closest(".transaction-clear-button");
-        if (!assignButton && !clearButton) {
+        if (!assignButton && !ruleButton && !cancelRuleButton && !clearButton) {
           return;
         }
 
@@ -1035,6 +1346,14 @@
 
         const categorySelect = row.querySelector(".transaction-category-select");
         const categoryId = categorySelect?.value;
+        const ruleForm = row.querySelector(".transaction-rule-form");
+
+        if (cancelRuleButton) {
+          if (ruleForm) {
+            ruleForm.hidden = true;
+          }
+          return;
+        }
 
         try {
           if (assignButton) {
@@ -1045,8 +1364,18 @@
             await fetchJson(`${state.apiBase}/transactions/${transactionId}/categorize`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ category_id: categoryId }),
-            });
+                body: JSON.stringify({ category_id: categoryId }),
+              });
+          } else if (ruleButton) {
+            if (!ruleForm) {
+              return;
+            }
+            const formCategorySelect = ruleForm.querySelector('select[name="category_id"]');
+            if (formCategorySelect) {
+              formCategorySelect.value = categoryId || "";
+            }
+            ruleForm.hidden = false;
+            return;
           } else if (clearButton) {
             clearButton.disabled = true;
             await fetchJson(`${state.apiBase}/transactions/${transactionId}/uncategorize`, {
@@ -1054,9 +1383,177 @@
             });
           }
 
-          await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue()]);
+          await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue(), refreshRules()]);
         } catch (error) {
           row.insertAdjacentHTML(
+            "beforeend",
+            `<div class="error" style="margin-top: 12px">${escapeHtml(String(error.message || error))}</div>`
+          );
+        }
+      }
+
+      async function handleTransactionRuleSubmit(event) {
+        const form = event.target.closest(".transaction-rule-form");
+        if (!form) {
+          return;
+        }
+
+        event.preventDefault();
+        const row = form.closest("[data-transaction-id]");
+        const transactionId = row?.dataset.transactionId;
+        if (!transactionId) {
+          return;
+        }
+
+        const formData = new FormData(form);
+        const categoryId = String(formData.get("category_id") || "");
+        const matchValue = String(formData.get("match_value") || "").trim();
+        if (!categoryId) {
+          row.insertAdjacentHTML(
+            "beforeend",
+            '<div class="error" style="margin-top: 12px">Choose a category for the rule.</div>'
+          );
+          return;
+        }
+        if (!matchValue) {
+          row.insertAdjacentHTML(
+            "beforeend",
+            '<div class="error" style="margin-top: 12px">Match value is required.</div>'
+          );
+          return;
+        }
+
+        const saveButton = form.querySelector(".transaction-rule-save-button");
+        if (saveButton) {
+          saveButton.disabled = true;
+        }
+
+        try {
+          await fetchJson(`${state.apiBase}/transactions/${transactionId}/rules`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: String(formData.get("name") || "").trim() || null,
+              category_id: categoryId,
+              match_field: String(formData.get("match_field") || ""),
+              match_operator: String(formData.get("match_operator") || ""),
+              match_value: matchValue,
+              apply_to_existing_uncategorized:
+                formData.get("apply_to_existing_uncategorized") === "on",
+            }),
+          });
+          await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue(), refreshRules()]);
+        } catch (error) {
+          if (saveButton) {
+            saveButton.disabled = false;
+          }
+          row.insertAdjacentHTML(
+            "beforeend",
+            `<div class="error" style="margin-top: 12px">${escapeHtml(String(error.message || error))}</div>`
+          );
+        }
+      }
+
+      async function handleRuleListClick(event) {
+        const button = event.target.closest(".rule-toggle-button");
+        const editButton = event.target.closest(".rule-edit-button");
+        const cancelButton = event.target.closest(".rule-cancel-button");
+        if (!button && !editButton && !cancelButton) {
+          return;
+        }
+
+        const editItem = editButton?.closest("[data-rule-id]");
+        if (editButton && editItem) {
+          const form = editItem.querySelector(".rule-editor");
+          if (form) {
+            form.hidden = false;
+          }
+          return;
+        }
+
+        const cancelItem = cancelButton?.closest("[data-rule-id]");
+        if (cancelButton && cancelItem) {
+          const form = cancelItem.querySelector(".rule-editor");
+          if (form) {
+            form.hidden = true;
+          }
+          return;
+        }
+
+        const item = button.closest("[data-rule-id]");
+        const ruleId = item?.dataset.ruleId;
+        if (!ruleId) {
+          return;
+        }
+
+        button.disabled = true;
+        try {
+          await fetchJson(`${state.apiBase}/rules/${ruleId}/status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ active: button.dataset.nextActive === "true" }),
+          });
+          await refreshRules();
+        } catch (error) {
+          button.disabled = false;
+          item.insertAdjacentHTML(
+            "beforeend",
+            `<div class="error" style="margin-top: 12px">${escapeHtml(String(error.message || error))}</div>`
+          );
+        }
+      }
+
+      async function handleRuleEditSubmit(event) {
+        const form = event.target.closest(".rule-editor");
+        if (!form) {
+          return;
+        }
+
+        event.preventDefault();
+        const item = form.closest("[data-rule-id]");
+        const ruleId = item?.dataset.ruleId;
+        if (!ruleId) {
+          return;
+        }
+
+        const formData = new FormData(form);
+        const nameValue = String(formData.get("name") || "").trim();
+        const matchField = String(formData.get("match_field") || "");
+        const matchOperator = String(formData.get("match_operator") || "");
+        const matchValue = String(formData.get("match_value") || "").trim();
+        const applyToExisting = formData.get("apply_to_existing_uncategorized") === "on";
+
+        if (!matchValue) {
+          item.insertAdjacentHTML(
+            "beforeend",
+            '<div class="error" style="margin-top: 12px">Match value is required.</div>'
+          );
+          return;
+        }
+
+        const saveButton = form.querySelector(".rule-save-button");
+        if (saveButton) {
+          saveButton.disabled = true;
+        }
+
+        try {
+          await fetchJson(`${state.apiBase}/rules/${ruleId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: nameValue || null,
+              match_field: matchField,
+              match_operator: matchOperator,
+              match_value: matchValue,
+              apply_to_existing_uncategorized: applyToExisting,
+            }),
+          });
+          await Promise.all([refreshRules(), refreshTransactions(), refreshUnknownQueue(), refreshUncategorizedCount()]);
+        } catch (error) {
+          if (saveButton) {
+            saveButton.disabled = false;
+          }
+          item.insertAdjacentHTML(
             "beforeend",
             `<div class="error" style="margin-top: 12px">${escapeHtml(String(error.message || error))}</div>`
           );

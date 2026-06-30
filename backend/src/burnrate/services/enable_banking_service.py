@@ -24,6 +24,7 @@ from burnrate.db.models import (
     Transaction,
 )
 from burnrate.integrations.enable_banking.client import EnableBankingClient
+from burnrate.services.rules_service import RulesService
 
 logger = logging.getLogger(__name__)
 
@@ -495,6 +496,8 @@ class EnableBankingService:
         transaction.direction = direction
         transaction.status = status
         transaction.raw_payload = transaction_payload
+
+        RulesService(db=self.db).apply_rule_to_transaction(transaction=transaction)
 
     def _extract_transactions(self, transactions_payload: dict[str, Any]) -> list[dict[str, Any]]:
         transactions_node = transactions_payload.get("transactions")

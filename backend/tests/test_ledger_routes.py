@@ -41,6 +41,8 @@ class FakeLedgerService:
                     "status": "booked",
                     "category_id": None,
                     "category_name": None,
+                    "matched_rule_id": None,
+                    "matched_rule_name": None,
                     "imported_at": "2026-06-15T09:00:00+00:00",
                 }
             ],

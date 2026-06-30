@@ -73,6 +73,7 @@ class CategorizationService:
             raise ValueError(f"Category '{category.name}' is inactive")
 
         transaction.category_id = category.id
+        transaction.matched_rule_id = None
 
         return {
             "transaction_id": str(transaction.id),
@@ -87,6 +88,7 @@ class CategorizationService:
             raise ValueError(f"Transaction not found for id {transaction_id}")
 
         transaction.category_id = None
+        transaction.matched_rule_id = None
 
         return {
             "transaction_id": str(transaction.id),
