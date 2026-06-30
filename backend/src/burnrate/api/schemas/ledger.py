@@ -36,6 +36,7 @@ class TransactionSummaryResponse(BaseModel):
     direction: str
     status: str
     category_id: str | None = None
+    category_name: str | None = None
     imported_at: str
 
 

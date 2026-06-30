@@ -164,6 +164,7 @@ def test_ledger_service_lists_transactions_with_filters_and_pagination() -> None
     assert len(response["transactions"]) == 1
     assert response["transactions"][0]["description"] == "Coffee shop"
     assert response["transactions"][0]["amount"] == "-12.50"
+    assert response["transactions"][0]["category_name"] is None
 
 
 def test_ledger_service_counts_uncategorized_transactions_for_filters() -> None:

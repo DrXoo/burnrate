@@ -40,6 +40,7 @@ class FakeLedgerService:
                     "direction": "debit",
                     "status": "booked",
                     "category_id": None,
+                    "category_name": None,
                     "imported_at": "2026-06-15T09:00:00+00:00",
                 }
             ],

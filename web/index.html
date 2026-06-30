@@ -89,6 +89,11 @@
         grid-template-columns: 0.9fr 1.1fr;
       }
 
+      .review-grid {
+        grid-template-columns: 0.88fr 1.12fr;
+        margin-top: 18px;
+      }
+
       .card {
         background: var(--panel);
         border: 1px solid var(--line);
@@ -151,6 +156,17 @@
         border: 1px solid rgba(220, 207, 191, 0.9);
       }
 
+      .category-item {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: var(--panel-strong);
+        border: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .category-type {
+        margin-top: 8px;
+      }
+
       .row {
         display: flex;
         justify-content: space-between;
@@ -187,6 +203,12 @@
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 12px;
         margin-bottom: 18px;
+      }
+
+      form.category-form {
+        display: grid;
+        gap: 12px;
+        margin-top: 16px;
       }
 
       label {
@@ -226,6 +248,121 @@
         border-radius: 18px;
         border: 1px solid rgba(220, 207, 191, 0.9);
         background: var(--panel-strong);
+      }
+
+      .queue-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .queue-item {
+        padding: 16px;
+        border-radius: 18px;
+        background: var(--panel-strong);
+        border: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .queue-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-start;
+        margin-bottom: 10px;
+      }
+
+      .queue-title {
+        margin: 0;
+        font-size: 1.04rem;
+      }
+
+      .queue-meta {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+
+      .queue-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .queue-actions button {
+        padding-inline: 18px;
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+
+      .section-head h2 {
+        margin-bottom: 0;
+      }
+
+      .inline-category {
+        display: grid;
+        gap: 8px;
+        min-width: 220px;
+      }
+
+      .inline-category .row {
+        align-items: center;
+      }
+
+      .inline-category select,
+      .inline-category button {
+        padding: 10px 12px;
+      }
+
+      .inline-category-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 8px;
+      }
+
+      .button-secondary {
+        background: rgba(18, 33, 29, 0.08);
+        color: var(--ink);
+      }
+
+      .success {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(47, 107, 72, 0.12);
+        color: var(--good);
+        line-height: 1.5;
+      }
+
+      .pager {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(220, 207, 191, 0.9);
+      }
+
+      .pager-copy {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .pager-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .pager-actions button {
+        width: auto;
+        min-width: 96px;
+        padding: 10px 14px;
       }
 
       table {
@@ -295,6 +432,7 @@
       @media (max-width: 980px) {
         .top-grid,
         .bottom-grid,
+        .review-grid,
         form.filters,
         .stats {
           grid-template-columns: 1fr;
@@ -358,7 +496,7 @@
         </article>
 
         <article class="card">
-          <div class="row" style="margin-bottom: 14px">
+          <div class="section-head">
             <h2>Transactions</h2>
             <span class="tag" id="transaction-total">0 loaded</span>
           </div>
@@ -402,21 +540,74 @@
           <p class="footer-note" id="api-note"></p>
         </article>
       </section>
+
+      <section class="grid review-grid">
+        <article class="card">
+          <div class="section-head">
+            <h2>Categories</h2>
+            <span class="tag" id="category-count">0 defined</span>
+          </div>
+          <div class="stack" id="categories-list">
+            <div class="empty">Loading categories...</div>
+          </div>
+          <form class="category-form" id="category-form">
+            <label>
+              Category name
+              <input id="category-name" name="name" type="text" placeholder="Food, Rent, Transport..." />
+            </label>
+            <label>
+              Type
+              <select id="category-type" name="type">
+                <option value="expense">Expense</option>
+                <option value="income">Income</option>
+                <option value="transfer">Transfer</option>
+              </select>
+            </label>
+            <button type="submit">Create Category</button>
+          </form>
+          <div id="category-feedback" style="margin-top: 12px"></div>
+        </article>
+
+        <article class="card">
+          <div class="section-head">
+            <h2>Unknown Queue</h2>
+            <span class="tag warn" id="unknown-total">0 waiting</span>
+          </div>
+          <p class="meta">
+            Uncategorized transactions land here. Assign a category and they disappear from the queue immediately.
+          </p>
+          <div id="unknown-queue-shell" style="margin-top: 16px">
+            <div class="empty">Loading uncategorized transactions...</div>
+          </div>
+        </article>
+      </section>
     </main>
 
     <script>
       const state = {
         accounts: [],
         connections: [],
+        categories: [],
+        paging: {
+          transactions: { limit: 25, offset: 0, total: 0 },
+          unknown: { limit: 12, offset: 0, total: 0 },
+        },
       };
       document.getElementById("filters-form").addEventListener("submit", async (event) => {
         event.preventDefault();
+        state.paging.transactions.offset = 0;
+        state.paging.unknown.offset = 0;
         try {
-          await Promise.all([refreshTransactions(), refreshUncategorizedCount()]);
+          await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue()]);
         } catch (error) {
           renderError("transactions-shell", error);
         }
       });
+      document.getElementById("category-form").addEventListener("submit", handleCategoryCreate);
+      document.getElementById("unknown-queue-shell").addEventListener("click", handleUnknownQueueClick);
+      document.getElementById("transactions-shell").addEventListener("click", handleTransactionTableClick);
+      document.getElementById("transactions-shell").addEventListener("click", handleTransactionPagerClick);
+      document.getElementById("unknown-queue-shell").addEventListener("click", handleUnknownPagerClick);
 
       document.getElementById("filter-month").value = new Date().toISOString().slice(0, 7);
       boot().catch((error) => {
@@ -428,13 +619,15 @@
         state.apiBase = await detectApiBase();
         document.getElementById("api-note").textContent = `API base: ${state.apiBase}`;
 
-        const [connectionsPayload, accountsPayload] = await Promise.all([
+        const [connectionsPayload, accountsPayload, categoriesPayload] = await Promise.all([
           fetchJson(`${state.apiBase}/integrations/enable-banking/connections`),
           fetchJson(`${state.apiBase}/accounts`),
+          fetchJson(`${state.apiBase}/categories`),
         ]);
 
         state.connections = connectionsPayload.connections || [];
         state.accounts = accountsPayload.accounts || [];
+        state.categories = categoriesPayload.categories || [];
 
         document.getElementById("connection-count").textContent = String(state.connections.length);
         document.getElementById("account-count").textContent = String(state.accounts.length);
@@ -445,16 +638,27 @@
 
         renderConnections(state.connections);
         renderAccounts(state.accounts);
+        renderCategories(state.categories);
         populateAccountFilter(state.accounts);
 
-        await Promise.all([refreshTransactions(), refreshUncategorizedCount()]);
+        await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue()]);
       }
 
       async function refreshTransactions() {
         const params = currentFilters();
+        params.limit = state.paging.transactions.limit;
+        params.offset = state.paging.transactions.offset;
         const payload = await fetchJson(`${state.apiBase}/transactions${buildQuery(params)}`);
+        if (payload.total_count > 0 && state.paging.transactions.offset >= payload.total_count) {
+          state.paging.transactions.offset = Math.max(
+            0,
+            state.paging.transactions.offset - state.paging.transactions.limit
+          );
+          return refreshTransactions();
+        }
+        state.paging.transactions.total = payload.total_count || 0;
         document.getElementById("transaction-total").textContent = `${payload.total_count} matching`;
-        renderTransactions(payload.transactions || []);
+        renderTransactions(payload.transactions || [], payload.total_count || 0);
       }
 
       async function refreshUncategorizedCount() {
@@ -464,6 +668,26 @@
           `${state.apiBase}/transactions/uncategorized/count${buildQuery(params)}`
         );
         document.getElementById("uncategorized-count").textContent = String(payload.count ?? 0);
+      }
+
+      async function refreshCategories() {
+        const payload = await fetchJson(`${state.apiBase}/categories`);
+        state.categories = payload.categories || [];
+        renderCategories(state.categories);
+      }
+
+      async function refreshUnknownQueue() {
+        const params = currentFilters();
+        delete params.categorized;
+        params.limit = state.paging.unknown.limit;
+        params.offset = state.paging.unknown.offset;
+        const payload = await fetchJson(`${state.apiBase}/transactions/uncategorized${buildQuery(params)}`);
+        if (payload.total_count > 0 && state.paging.unknown.offset >= payload.total_count) {
+          state.paging.unknown.offset = Math.max(0, state.paging.unknown.offset - state.paging.unknown.limit);
+          return refreshUnknownQueue();
+        }
+        state.paging.unknown.total = payload.total_count || 0;
+        renderUnknownQueue(payload.transactions || [], payload.total_count || 0);
       }
 
       function currentFilters() {
@@ -482,8 +706,6 @@
               : categorizedValue === "true"
                 ? "true"
                 : "false",
-          limit: 100,
-          offset: 0,
         };
       }
 
@@ -556,7 +778,7 @@
         select.value = currentValue;
       }
 
-      function renderTransactions(transactions) {
+      function renderTransactions(transactions, totalCount) {
         const root = document.getElementById("transactions-shell");
         if (!transactions.length) {
           root.innerHTML =
@@ -581,9 +803,20 @@
                 ${transactions
                   .map((transaction) => {
                     const amountClass = transaction.direction === "credit" ? "amount-positive" : "amount-negative";
-                    const categoryLabel = transaction.category_id ? "Assigned" : "Unknown";
+                    const categoryLabel = transaction.category_name || (transaction.category_id ? "Assigned" : "Unknown");
+                    const selectedValue = transaction.category_id || "";
+                    const categoryOptions =
+                      '<option value="">Choose a category</option>' +
+                      state.categories
+                        .map(
+                          (category) =>
+                            `<option value="${escapeAttribute(category.category_id)}" ${
+                              category.category_id === selectedValue ? "selected" : ""
+                            }>${escapeHtml(category.name)} (${escapeHtml(category.type)})</option>`
+                        )
+                        .join("");
                     return `
-                      <tr>
+                      <tr data-transaction-id="${escapeAttribute(transaction.transaction_id)}">
                         <td>${escapeHtml(transaction.booking_date || "No booking date")}</td>
                         <td>
                           <strong>${escapeHtml(transaction.description || transaction.merchant_name || "No description")}</strong><br />
@@ -591,7 +824,20 @@
                         </td>
                         <td>${escapeHtml(transaction.account_display_name)}</td>
                         <td><span class="status">${escapeHtml(transaction.status)}</span></td>
-                        <td>${escapeHtml(categoryLabel)}</td>
+                        <td>
+                          <div class="inline-category">
+                            <span class="tag ${transaction.category_id ? "good" : "warn"}">${escapeHtml(categoryLabel)}</span>
+                            <div class="inline-category-actions">
+                              <select class="transaction-category-select" ${state.categories.length ? "" : "disabled"}>
+                                ${categoryOptions}
+                              </select>
+                              <button class="transaction-assign-button" ${state.categories.length ? "" : "disabled"}>Save</button>
+                              <button class="button-secondary transaction-clear-button" ${
+                                transaction.category_id ? "" : "disabled"
+                              }>Clear</button>
+                            </div>
+                          </div>
+                        </td>
                         <td class="${amountClass}">${escapeHtml(transaction.amount)} ${escapeHtml(transaction.currency)}</td>
                       </tr>
                     `;
@@ -600,11 +846,259 @@
               </tbody>
             </table>
           </div>
+          ${renderPager({
+            totalCount,
+            offset: state.paging.transactions.offset,
+            limit: state.paging.transactions.limit,
+            scope: "transactions",
+          })}
         `;
       }
 
-      async function fetchJson(url) {
-        const response = await fetch(url, { headers: { Accept: "application/json" } });
+      function renderCategories(categories) {
+        document.getElementById("category-count").textContent = `${categories.length} defined`;
+        const root = document.getElementById("categories-list");
+        if (!categories.length) {
+          root.innerHTML = '<div class="empty">No categories yet. Create your first one below to start classifying the unknown queue.</div>';
+          return;
+        }
+
+        root.innerHTML = categories
+          .map(
+            (category) => `
+              <article class="category-item">
+                <div class="row">
+                  <strong>${escapeHtml(category.name)}</strong>
+                  <span class="tag">${escapeHtml(category.type)}</span>
+                </div>
+                <div class="category-type meta">${category.active ? "Active" : "Inactive"}</div>
+              </article>
+            `
+          )
+          .join("");
+      }
+
+      function renderUnknownQueue(transactions, totalCount) {
+        document.getElementById("unknown-total").textContent = `${totalCount} waiting`;
+        const root = document.getElementById("unknown-queue-shell");
+        if (!transactions.length) {
+          root.innerHTML = '<div class="success">The unknown queue is empty for the current filters.</div>';
+          return;
+        }
+
+        const categoryOptions = state.categories.length
+          ? state.categories
+              .map(
+                (category) =>
+                  `<option value="${escapeAttribute(category.category_id)}">${escapeHtml(category.name)} (${escapeHtml(category.type)})</option>`
+              )
+              .join("")
+          : '<option value="">Create a category first</option>';
+
+        root.innerHTML = `
+          <div class="queue-list">
+            ${transactions
+              .map(
+                (transaction) => `
+                  <article class="queue-item" data-transaction-id="${escapeAttribute(transaction.transaction_id)}">
+                    <div class="queue-header">
+                      <div>
+                        <h3 class="queue-title">${escapeHtml(transaction.description || transaction.merchant_name || "No description")}</h3>
+                        <p class="queue-meta">
+                          ${escapeHtml(transaction.account_display_name)} · ${escapeHtml(transaction.booking_date || "No booking date")}<br />
+                          ${escapeHtml(transaction.merchant_name || transaction.counterparty_name || "No merchant/counterparty")} ·
+                          <span class="${transaction.direction === "credit" ? "amount-positive" : "amount-negative"}">${escapeHtml(transaction.amount)} ${escapeHtml(transaction.currency)}</span>
+                        </p>
+                      </div>
+                      <span class="tag warn">Unknown</span>
+                    </div>
+                    <div class="queue-actions">
+                      <select class="queue-category-select" ${state.categories.length ? "" : "disabled"}>
+                        <option value="">Choose a category</option>
+                        ${categoryOptions}
+                      </select>
+                      <button class="queue-assign-button" ${state.categories.length ? "" : "disabled"}>Assign</button>
+                    </div>
+                  </article>
+                `
+              )
+              .join("")}
+          </div>
+          ${renderPager({
+            totalCount,
+            offset: state.paging.unknown.offset,
+            limit: state.paging.unknown.limit,
+            scope: "unknown",
+          })}
+        `;
+      }
+
+      function renderPager({ totalCount, offset, limit, scope }) {
+        if (totalCount <= limit) {
+          return `<div class="pager"><span class="pager-copy">Showing ${totalCount} item(s).</span></div>`;
+        }
+
+        const start = offset + 1;
+        const end = Math.min(offset + limit, totalCount);
+        const prevDisabled = offset <= 0 ? "disabled" : "";
+        const nextDisabled = offset + limit >= totalCount ? "disabled" : "";
+
+        return `
+          <div class="pager">
+            <span class="pager-copy">Showing ${start}-${end} of ${totalCount}</span>
+            <div class="pager-actions">
+              <button class="button-secondary pager-button" data-scope="${scope}" data-direction="prev" ${prevDisabled}>Previous</button>
+              <button class="pager-button" data-scope="${scope}" data-direction="next" ${nextDisabled}>Next</button>
+            </div>
+          </div>
+        `;
+      }
+
+      async function handleCategoryCreate(event) {
+        event.preventDefault();
+        const feedback = document.getElementById("category-feedback");
+        feedback.innerHTML = "";
+
+        const name = document.getElementById("category-name").value.trim();
+        const type = document.getElementById("category-type").value;
+        if (!name) {
+          feedback.innerHTML = '<div class="error">Category name is required.</div>';
+          return;
+        }
+
+        try {
+          await fetchJson(`${state.apiBase}/categories`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, type }),
+          });
+          document.getElementById("category-form").reset();
+          document.getElementById("category-type").value = "expense";
+          feedback.innerHTML = '<div class="success">Category created.</div>';
+          await Promise.all([refreshCategories(), refreshUnknownQueue(), refreshTransactions()]);
+        } catch (error) {
+          feedback.innerHTML = `<div class="error">${escapeHtml(String(error.message || error))}</div>`;
+        }
+      }
+
+      async function handleUnknownQueueClick(event) {
+        const button = event.target.closest(".queue-assign-button");
+        if (!button) {
+          return;
+        }
+
+        const item = button.closest("[data-transaction-id]");
+        if (!item) {
+          return;
+        }
+
+        const select = item.querySelector(".queue-category-select");
+        const categoryId = select?.value;
+        const transactionId = item.dataset.transactionId;
+        if (!transactionId || !categoryId) {
+          return;
+        }
+
+        button.disabled = true;
+        try {
+          await fetchJson(`${state.apiBase}/transactions/${transactionId}/categorize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category_id: categoryId }),
+          });
+          await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue()]);
+        } catch (error) {
+          button.disabled = false;
+          item.insertAdjacentHTML(
+            "beforeend",
+            `<div class="error" style="margin-top: 12px">${escapeHtml(String(error.message || error))}</div>`
+          );
+        }
+      }
+
+      async function handleTransactionTableClick(event) {
+        const assignButton = event.target.closest(".transaction-assign-button");
+        const clearButton = event.target.closest(".transaction-clear-button");
+        if (!assignButton && !clearButton) {
+          return;
+        }
+
+        const row = event.target.closest("[data-transaction-id]");
+        if (!row) {
+          return;
+        }
+
+        const transactionId = row.dataset.transactionId;
+        if (!transactionId) {
+          return;
+        }
+
+        const categorySelect = row.querySelector(".transaction-category-select");
+        const categoryId = categorySelect?.value;
+
+        try {
+          if (assignButton) {
+            if (!categoryId) {
+              return;
+            }
+            assignButton.disabled = true;
+            await fetchJson(`${state.apiBase}/transactions/${transactionId}/categorize`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ category_id: categoryId }),
+            });
+          } else if (clearButton) {
+            clearButton.disabled = true;
+            await fetchJson(`${state.apiBase}/transactions/${transactionId}/uncategorize`, {
+              method: "POST",
+            });
+          }
+
+          await Promise.all([refreshTransactions(), refreshUncategorizedCount(), refreshUnknownQueue()]);
+        } catch (error) {
+          row.insertAdjacentHTML(
+            "beforeend",
+            `<div class="error" style="margin-top: 12px">${escapeHtml(String(error.message || error))}</div>`
+          );
+        }
+      }
+
+      async function handleTransactionPagerClick(event) {
+        const button = event.target.closest('.pager-button[data-scope="transactions"]');
+        if (!button || button.disabled) {
+          return;
+        }
+
+        movePage(state.paging.transactions, button.dataset.direction);
+        await refreshTransactions();
+      }
+
+      async function handleUnknownPagerClick(event) {
+        const button = event.target.closest('.pager-button[data-scope="unknown"]');
+        if (!button || button.disabled) {
+          return;
+        }
+
+        movePage(state.paging.unknown, button.dataset.direction);
+        await refreshUnknownQueue();
+      }
+
+      function movePage(paging, direction) {
+        if (direction === "prev") {
+          paging.offset = Math.max(0, paging.offset - paging.limit);
+          return;
+        }
+        paging.offset = paging.offset + paging.limit;
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: {
+            Accept: "application/json",
+            ...(options.headers || {}),
+          },
+          ...options,
+        });
         if (!response.ok) {
           const body = await response.text();
           throw new Error(`Request failed (${response.status}): ${body}`);
