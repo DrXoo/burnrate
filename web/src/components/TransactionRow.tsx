@@ -1,4 +1,4 @@
-import { amountTone, transactionMeta, transactionTitle } from "../lib/format";
+import { amountTone, prettyLabel, transactionMeta, transactionTitle } from "../lib/format";
 import type { Transaction } from "../types";
 import { StatusTag } from "./ui/StatusTag";
 
@@ -28,7 +28,7 @@ export function TransactionRow({ transaction, onSelect }: TransactionRowProps) {
       </td>
       <td data-label="Account">{transaction.account_display_name}</td>
       <td data-label="Status">
-        <StatusTag>{transaction.status}</StatusTag>
+        <StatusTag>{prettyLabel(transaction.status)}</StatusTag>
       </td>
       <td data-label="Category">
         <div className="transaction-cell">

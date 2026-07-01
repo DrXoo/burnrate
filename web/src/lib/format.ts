@@ -59,6 +59,17 @@ export function prettyMatchField(field: MatchField): string {
   return "Description";
 }
 
+/** Title-cases a raw enum value ("not_available" -> "Not Available", "booked" -> "Booked"). */
+export function prettyLabel(value: string): string {
+  return value
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+export const CURRENCY_OPTIONS = ["EUR", "USD", "GBP", "CHF", "SEK", "NOK", "DKK", "PLN"];
+
 export function prettyMatchOperator(operator: MatchOperator): string {
   if (operator === "starts_with") {
     return "Starts with";

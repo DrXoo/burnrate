@@ -1,4 +1,4 @@
-import { formatMoney, formatMonthLabel, formatRunwayMonths } from "../lib/format";
+import { formatMoney, formatMonthLabel, formatRunwayMonths, prettyLabel } from "../lib/format";
 import type { BudgetUsage, SummaryDashboard } from "../types";
 import { Card } from "./ui/Card";
 import { StatusTag } from "./ui/StatusTag";
@@ -182,7 +182,7 @@ export function OverviewPanel({
             <section className="dashboard-block">
               <div className="row">
                 <strong>Runway context</strong>
-                <StatusTag tone={runwayTone(summary.runway_status)}>{summary.runway_status.replace("_", " ")}</StatusTag>
+                <StatusTag tone={runwayTone(summary.runway_status)}>{prettyLabel(summary.runway_status)}</StatusTag>
               </div>
               <p className="meta-copy">{summary.runway_message}</p>
               <div className="dashboard-context">

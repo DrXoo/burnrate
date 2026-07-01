@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 
+import { CURRENCY_OPTIONS, prettyLabel } from "../lib/format";
 import type { Budget, BudgetUpdateDraft } from "../types";
 import { StatusTag } from "./ui/StatusTag";
 
@@ -43,6 +44,9 @@ export function BudgetCard({ budget, onUpdateBudget, onDeactivateBudget }: Budge
   }
 
   async function handleDeactivate() {
+    if (!window.confirm(`Deactivate the ${budget.category_name} budget? It will stop counting toward your dashboard metrics.`)) {
+      return;
+    }
     try {
       setBusy("deactivate");
       setError(null);
@@ -58,7 +62,7 @@ export function BudgetCard({ budget, onUpdateBudget, onDeactivateBudget }: Budge
       <div className="row">
         <strong>{budget.category_name}</strong>
         <StatusTag tone={budget.status === "active" ? "good" : budget.status === "scheduled" ? "warn" : "default"}>
-          {budget.status}
+          {prettyLabel(budget.status)}
         </StatusTag>
       </div>
 
@@ -95,11 +99,19 @@ export function BudgetCard({ budget, onUpdateBudget, onDeactivateBudget }: Budge
             </label>
             <label>
               Currency
-              <input
-                maxLength={3}
+              <select
                 value={draft.currency}
                 onChange={(event) => setDraft((current) => ({ ...current, currency: event.target.value }))}
-              />
+              >
+                {(CURRENCY_OPTIONS.includes(draft.currency)
+                  ? CURRENCY_OPTIONS
+                  : [draft.currency, ...CURRENCY_OPTIONS]
+                ).map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="inline-actions">

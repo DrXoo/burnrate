@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 
 import {
   amountTone,
+  prettyLabel,
   suggestRuleField,
   suggestRuleValue,
   transactionMeta,
@@ -59,6 +60,9 @@ export function TransactionDetailModal({
   }
 
   async function handleClear() {
+    if (!window.confirm("Remove this transaction's category? It will return to the unknown queue.")) {
+      return;
+    }
     try {
       setBusy("clear");
       setError(null);
@@ -106,7 +110,7 @@ export function TransactionDetailModal({
 
         <p className="meta-copy">
           {transaction.booking_date || "No booking date"} · {transaction.account_display_name} ·{" "}
-          <StatusTag>{transaction.status}</StatusTag>
+          <StatusTag>{prettyLabel(transaction.status)}</StatusTag>
         </p>
 
         <div className="transaction-cell">

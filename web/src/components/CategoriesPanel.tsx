@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 
+import { prettyLabel } from "../lib/format";
 import type { Category } from "../types";
 import { Card } from "./ui/Card";
 import { StatusTag } from "./ui/StatusTag";
@@ -49,7 +50,7 @@ export function CategoriesPanel({ categories, onCreateCategory }: CategoriesPane
             <article key={category.category_id} className="list-card">
               <div className="row">
                 <strong>{category.name}</strong>
-                <StatusTag>{category.type}</StatusTag>
+                <StatusTag>{prettyLabel(category.type)}</StatusTag>
               </div>
               <p className="meta-copy">{category.active ? "Active" : "Inactive"}</p>
             </article>

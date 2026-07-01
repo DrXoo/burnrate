@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 
+import { CURRENCY_OPTIONS } from "../lib/format";
 import type { Budget, BudgetDraft, BudgetUpdateDraft, Category } from "../types";
 import { Card } from "./ui/Card";
 import { BudgetCard } from "./BudgetCard";
@@ -97,11 +98,16 @@ export function BudgetsPanel({
           </label>
           <label>
             Currency
-            <input
-              maxLength={3}
+            <select
               value={draft.currency}
               onChange={(event) => setDraft((current) => ({ ...current, currency: event.target.value }))}
-            />
+            >
+              {CURRENCY_OPTIONS.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
         <button type="submit" className="button" disabled={busy}>
