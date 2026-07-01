@@ -749,9 +749,42 @@ th {
   align-items: flex-start;
 }
 
+.queue-head-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.queue-select {
+  margin-top: 4px;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
 .queue-head h3 {
   margin: 0;
   font-size: 1.02rem;
+}
+
+.queue-toolbar {
+  margin-bottom: 10px;
+}
+
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(200, 91, 47, 0.08);
+  border: 1px solid rgba(200, 91, 47, 0.28);
+}
+
+.bulk-bar select {
+  min-width: 200px;
+  flex: 1 1 200px;
 }
 
 .queue-badge {
