@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
     app_cors_origins: str = Field(default="http://localhost:3000", alias="APP_CORS_ORIGINS")
+    app_web_base_url: str = Field(default="http://localhost:3000", alias="WEB_BASE_URL")
     database_url: str = Field(
         default="postgresql+psycopg://burnrate:burnrate@postgres:5432/burnrate",
         alias="DATABASE_URL",

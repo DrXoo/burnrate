@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { Account, Category, FiltersState, PagingState, RuleDraft, Transaction } from "../types";
 import { Card } from "./ui/Card";
 import { Pager } from "./ui/Pager";
+import { TransactionDetailModal } from "./TransactionDetailModal";
 import { TransactionRow } from "./TransactionRow";
 
 interface TransactionsPanelProps {
@@ -37,10 +38,13 @@ export function TransactionsPanel({
   onCreateRule,
 }: TransactionsPanelProps) {
   const [draft, setDraft] = useState(filters);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(filters);
   }, [filters]);
+
+  const selectedTransaction = transactions.find((item) => item.transaction_id === selectedId) ?? null;
 
   return (
     <Card
@@ -119,7 +123,7 @@ export function TransactionsPanel({
       ) : (
         <>
           <div className="table-shell">
-            <table>
+            <table className="ledger-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -135,10 +139,7 @@ export function TransactionsPanel({
                   <TransactionRow
                     key={transaction.transaction_id}
                     transaction={transaction}
-                    categories={categories}
-                    onAssignCategory={onAssignCategory}
-                    onClearCategory={onClearCategory}
-                    onCreateRule={onCreateRule}
+                    onSelect={(item) => setSelectedId(item.transaction_id)}
                   />
                 ))}
               </tbody>
@@ -147,6 +148,18 @@ export function TransactionsPanel({
           <Pager total={total} offset={paging.offset} limit={paging.limit} onMove={onMovePage} />
         </>
       )}
+
+      {selectedTransaction ? (
+        <TransactionDetailModal
+          key={selectedTransaction.transaction_id}
+          transaction={selectedTransaction}
+          categories={categories}
+          onAssignCategory={onAssignCategory}
+          onClearCategory={onClearCategory}
+          onCreateRule={onCreateRule}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
     </Card>
   );
 }

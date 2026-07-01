@@ -54,7 +54,7 @@ export function OverviewPanel({
   return (
     <Card
       title="BurnRate dashboard"
-      subtitle="The main product loop now has a real summary layer: live balances, month spending, budget pressure, and runway in one place."
+      subtitle="Live balances, monthly spending, budget pressure, and runway in one place."
       actions={
         <div className="dashboard-actions">
           <span className="glass-pill">{formatMonthLabel(activeMonth)}</span>

@@ -1,18 +1,27 @@
 from __future__ import annotations
 
+from urllib.parse import urlencode
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 
 from burnrate.api.dependencies import get_enable_banking_service
 from burnrate.api.schemas.enable_banking import (
     AspspListResponse,
-    AuthorizationCallbackResponse,
     EnableBankingConnectionListResponse,
     ManualSyncResponse,
     StartAuthorizationRequest,
     StartAuthorizationResponse,
 )
+from burnrate.config import Settings, get_settings
 from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.services.enable_banking_service import EnableBankingService
+
+
+def _connect_redirect(*, web_base_url: str, params: dict[str, object]) -> RedirectResponse:
+    """Redirect the user's browser back to the Web UI with a connection result."""
+    target = f"{web_base_url.rstrip('/')}/?{urlencode(params)}"
+    return RedirectResponse(url=target, status_code=status.HTTP_303_SEE_OTHER)
 
 router = APIRouter(prefix="/integrations/enable-banking", tags=["enable-banking"])
 public_router = APIRouter(tags=["enable-banking"])
@@ -47,17 +56,28 @@ def start_authorization(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.get("/callback", response_model=AuthorizationCallbackResponse)
-@public_router.get("/enable_banking_items/callback", response_model=AuthorizationCallbackResponse)
+@router.get("/callback")
+@public_router.get("/enable_banking_items/callback")
 def enable_banking_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
     error_description: str | None = Query(default=None),
     service: EnableBankingService = Depends(get_enable_banking_service),
-) -> AuthorizationCallbackResponse:
+    settings: Settings = Depends(get_settings),
+) -> RedirectResponse:
+    """Handle the bank redirect and send the browser back to the Web UI with a result.
+
+    The bank sends the user's browser here after consent, so this endpoint always
+    responds with a redirect to the Web UI rather than JSON.
+    """
+    web_base_url = settings.app_web_base_url
+
     if not state:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing callback state")
+        return _connect_redirect(
+            web_base_url=web_base_url,
+            params={"connect": "error", "message": "Missing callback state"},
+        )
 
     try:
         payload = service.handle_callback(
@@ -66,14 +86,26 @@ def enable_banking_callback(
             error=error,
             error_description=error_description,
         )
-        return AuthorizationCallbackResponse.model_validate(payload)
     except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+        return _connect_redirect(
+            web_base_url=web_base_url,
+            params={"connect": "error", "message": str(exc)},
+        )
     except EnableBankingAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return _connect_redirect(
+            web_base_url=web_base_url,
+            params={"connect": "error", "message": f"Enable Banking error ({exc.status_code})"},
+        )
+
+    accounts_imported = int(payload.get("accounts_imported", 0) or 0)
+    return _connect_redirect(
+        web_base_url=web_base_url,
+        params={
+            "connect": "success" if accounts_imported > 0 else "empty",
+            "accounts": accounts_imported,
+            "imported": int(payload.get("transactions_imported", 0) or 0),
+        },
+    )
 
 
 @router.post("/connections/{connection_id}/sync", response_model=ManualSyncResponse)

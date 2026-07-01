@@ -8,6 +8,7 @@ import { StatusTag } from "./ui/StatusTag";
 interface ConnectionsPanelProps {
   connections: Connection[];
   onSyncConnection: (connectionId: string) => Promise<ManualSyncResult>;
+  onConnect: () => void;
 }
 
 interface ConnectionCardProps {
@@ -130,17 +131,22 @@ function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
   );
 }
 
-export function ConnectionsPanel({ connections, onSyncConnection }: ConnectionsPanelProps) {
+export function ConnectionsPanel({ connections, onSyncConnection, onConnect }: ConnectionsPanelProps) {
   return (
     <Card
       title="Connections"
       subtitle="Enable Banking sessions, sync health, and manual re-sync controls in one place."
+      actions={
+        <button type="button" className="button" onClick={onConnect}>
+          Connect a bank
+        </button>
+      }
     >
       <div className="stack">
         {connections.length === 0 ? (
           <div className="empty-state">
-            No bank connections yet. Connect a bank account to start importing balances and transactions. In-app
-            linking is coming soon.
+            No bank connections yet. Use “Connect a bank” to link an account and start importing balances and
+            transactions.
           </div>
         ) : (
           connections.map((connection) => (

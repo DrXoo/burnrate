@@ -1,16 +1,25 @@
 import { Card } from "./ui/Card";
 
-export function GettingStarted() {
+interface GettingStartedProps {
+  onConnect: () => void;
+}
+
+export function GettingStarted({ onConnect }: GettingStartedProps) {
   return (
     <Card
       eyebrow="First run"
       title="Get started with BurnRate"
       subtitle="Connect a bank account to start seeing balances, spending, budgets, and runway. Here is the loop:"
+      actions={
+        <button type="button" className="button" onClick={onConnect}>
+          Connect a bank
+        </button>
+      }
     >
       <div className="stack">
         <ol className="getting-started-steps">
           <li>
-            <strong>Connect a bank account</strong> through Enable Banking. In-app linking is coming soon.
+            <strong>Connect a bank account</strong> through Enable Banking using the button above.
           </li>
           <li>
             <strong>BurnRate imports</strong> your balances and transactions automatically and keeps them fresh.

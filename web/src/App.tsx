@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AccountsPanel } from "./components/AccountsPanel";
 import { BudgetsPanel } from "./components/BudgetsPanel";
 import { CategoriesPanel } from "./components/CategoriesPanel";
+import { ConnectBankModal } from "./components/ConnectBankModal";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { GettingStarted } from "./components/GettingStarted";
 import { Hero } from "./components/Hero";
@@ -14,9 +15,45 @@ import { useBurnRateData } from "./hooks/useBurnRateData";
 
 type WorkspaceTab = "dashboard" | "ledger" | "review" | "automation";
 
+interface ConnectResult {
+  banner: "success-banner" | "warn-banner" | "error-banner";
+  message: string;
+}
+
 export default function App() {
   const data = useBurnRateData();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectResult, setConnectResult] = useState<ConnectResult | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connect = params.get("connect");
+    if (!connect) {
+      return;
+    }
+    if (connect === "success") {
+      const accounts = params.get("accounts") ?? "0";
+      const imported = params.get("imported") ?? "0";
+      setConnectResult({
+        banner: "success-banner",
+        message: `Bank connected. Imported ${imported} transaction(s) across ${accounts} account(s).`,
+      });
+    } else if (connect === "empty") {
+      setConnectResult({
+        banner: "warn-banner",
+        message:
+          "Authorized, but no accounts were linked to this application (Enable Banking restricted production mode).",
+      });
+    } else if (connect === "error") {
+      setConnectResult({
+        banner: "error-banner",
+        message: params.get("message") || "Bank connection failed.",
+      });
+    }
+    // Strip the connect params so a refresh does not re-show the banner.
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   const tabs: Array<{
     id: WorkspaceTab;
@@ -77,6 +114,22 @@ export default function App() {
     <main className="app-shell">
       <Hero />
 
+      {connectResult ? (
+        <div className={connectResult.banner}>
+          <div className="row">
+            <span>{connectResult.message}</span>
+            <button
+              type="button"
+              className="modal-close"
+              aria-label="Dismiss"
+              onClick={() => setConnectResult(null)}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <section className="tab-shell">
         <div className="tab-row" role="tablist" aria-label="BurnRate workspace sections">
           {tabs.map((tab) => (
@@ -100,7 +153,9 @@ export default function App() {
 
       {activeTab === "dashboard" ? (
         <section className="tab-panel-stack">
-          {data.connections.length === 0 && data.accounts.length === 0 ? <GettingStarted /> : null}
+          {data.connections.length === 0 && data.accounts.length === 0 ? (
+            <GettingStarted onConnect={() => setConnectOpen(true)} />
+          ) : null}
           <section className="top-grid">
             <OverviewPanel
               summary={data.summary}
@@ -112,7 +167,11 @@ export default function App() {
               apiBase={data.apiBase}
               activeMonth={data.filters.month}
             />
-            <ConnectionsPanel connections={data.connections} onSyncConnection={data.syncConnection} />
+            <ConnectionsPanel
+              connections={data.connections}
+              onSyncConnection={data.syncConnection}
+              onConnect={() => setConnectOpen(true)}
+            />
           </section>
 
           <section className="middle-grid">
@@ -172,6 +231,10 @@ export default function App() {
             onDeactivateBudget={data.deactivateBudget}
           />
         </section>
+      ) : null}
+
+      {connectOpen && data.apiBase ? (
+        <ConnectBankModal apiBase={data.apiBase} onClose={() => setConnectOpen(false)} />
       ) : null}
     </main>
   );

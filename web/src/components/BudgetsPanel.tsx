@@ -52,7 +52,7 @@ export function BudgetsPanel({
   }
 
   return (
-    <Card title="Budgets" subtitle="Monthly targets per expense category, kept intentionally lean for the first version.">
+    <Card title="Budgets" subtitle="Monthly spending targets per expense category.">
       <div className="stack">
         {budgets.length === 0 ? (
           <div className="empty-state">No budgets yet. Create a monthly target for an expense category.</div>

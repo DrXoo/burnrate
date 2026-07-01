@@ -8,7 +8,12 @@ from burnrate.api.routes.enable_banking import (
     start_authorization,
 )
 from burnrate.api.schemas.enable_banking import StartAuthorizationRequest
+from burnrate.config import Settings
 from burnrate.main import create_app
+
+
+def make_web_settings() -> Settings:
+    return Settings(WEB_BASE_URL="http://web.test")
 
 
 class FakeRouteService:
@@ -92,14 +97,57 @@ def test_enable_banking_routes_use_service_dependency() -> None:
         error=None,
         error_description=None,
         service=service,
+        settings=make_web_settings(),
     )
     sync_response = sync_connection(connection_id="conn-1", service=service)
 
     assert connections_response.connections[0].connection_id == "conn-1"
     assert aspsps_response.aspsps[0]["name"] == "Nordea"
     assert start_response.state == "state-123"
-    assert callback_response.transactions_imported == 2
+    assert callback_response.status_code == 303
+    callback_location = callback_response.headers["location"]
+    assert callback_location.startswith("http://web.test/?")
+    assert "connect=success" in callback_location
+    assert "imported=2" in callback_location
     assert sync_response.sync_session_id == "sync-1"
+
+
+def test_enable_banking_callback_redirects_error_to_web_ui() -> None:
+    class FailingService:
+        def handle_callback(self, *, code, state, error, error_description):
+            raise ValueError("Authorization request not found for state bad-state")
+
+    response = enable_banking_callback(
+        code=None,
+        state="bad-state",
+        error=None,
+        error_description=None,
+        service=FailingService(),
+        settings=make_web_settings(),
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("http://web.test/?")
+    assert "connect=error" in location
+
+
+def test_enable_banking_callback_redirects_when_state_missing() -> None:
+    class UnusedService:
+        def handle_callback(self, *, code, state, error, error_description):
+            raise AssertionError("handle_callback should not be called without state")
+
+    response = enable_banking_callback(
+        code=None,
+        state=None,
+        error=None,
+        error_description=None,
+        service=UnusedService(),
+        settings=make_web_settings(),
+    )
+
+    assert response.status_code == 303
+    assert "connect=error" in response.headers["location"]
 
 
 def test_app_exposes_both_enable_banking_callback_paths() -> None:

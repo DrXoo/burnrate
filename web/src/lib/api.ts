@@ -1,5 +1,6 @@
 import type {
   Account,
+  Aspsp,
   Budget,
   SummaryDashboard,
   BudgetDraft,
@@ -12,6 +13,7 @@ import type {
   Rule,
   RuleDraft,
   RuleUpdateDraft,
+  StartAuthorizationResult,
   Transaction,
 } from "../types";
 
@@ -80,6 +82,24 @@ export async function detectApiBase(): Promise<string> {
   }
 
   throw new Error(`Could not detect backend API base. Tried: ${errors.join(" | ")}`);
+}
+
+export async function getAspsps(apiBase: string, country: string): Promise<Aspsp[]> {
+  const payload = await fetchJson<{ aspsps: Aspsp[] }>(
+    `${apiBase}/integrations/enable-banking/aspsps${buildQuery({ country })}`,
+  );
+  return payload.aspsps ?? [];
+}
+
+export async function startBankAuthorization(
+  apiBase: string,
+  payload: { aspsp_name: string; aspsp_country: string; psu_type: "personal" | "business" },
+): Promise<StartAuthorizationResult> {
+  return fetchJson<StartAuthorizationResult>(`${apiBase}/integrations/enable-banking/auth/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function getConnections(apiBase: string): Promise<Connection[]> {

@@ -102,6 +102,17 @@ The normal BurnRate connection flow should be:
 
 After the session is created, BurnRate can fetch balances and transactions for those accounts.
 
+The connection flow is started from the Web UI ("Connect a bank"), which calls the authorization
+start endpoint and sends the browser to the returned bank URL. Because the bank redirects the user's
+browser to the callback, the callback endpoint responds with a **redirect back to the Web UI**
+(`WEB_BASE_URL`) carrying a result, rather than returning JSON:
+
+* `?connect=success&accounts=N&imported=M` when accounts were imported
+* `?connect=empty` when authorization succeeded but no linked accounts were returned (restricted production)
+* `?connect=error&message=...` when the callback could not be completed
+
+The Web UI reads these parameters, shows a result banner, and refreshes connections and accounts.
+
 ---
 
 ## API Calls BurnRate Should Use

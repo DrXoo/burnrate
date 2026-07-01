@@ -24,6 +24,20 @@ export interface Connection {
   latest_sync_error_summary: string | null;
 }
 
+export interface Aspsp {
+  name: string;
+  country: string;
+  [key: string]: unknown;
+}
+
+export interface StartAuthorizationResult {
+  authorization_id: string | null;
+  psu_id_hash: string | null;
+  state: string;
+  url: string;
+  valid_until: string;
+}
+
 export interface ManualSyncResult {
   connection_id: string;
   sync_session_id: string;

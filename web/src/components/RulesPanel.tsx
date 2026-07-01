@@ -10,7 +10,7 @@ interface RulesPanelProps {
 
 export function RulesPanel({ rules, onToggleRule, onUpdateRule }: RulesPanelProps) {
   return (
-    <Card title="Saved rules" subtitle="Text-based automation so manual classification keeps paying off later.">
+    <Card title="Saved rules" subtitle="Text-based rules that auto-categorize matching transactions.">
       <div className="stack">
         {rules.length === 0 ? (
           <div className="empty-state">
