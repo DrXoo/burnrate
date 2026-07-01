@@ -139,7 +139,7 @@ export function TransactionDetailModal({
             <button
               type="button"
               className="button button-secondary"
-              disabled={!transaction.category_id || busy !== null}
+              disabled={(!categoryId && !transaction.category_id) || busy !== null}
               onClick={() => {
                 setShowRuleForm((current) => !current);
                 setRuleDraft((current) => ({ ...current, category_id: categoryId || transaction.category_id || "" }));

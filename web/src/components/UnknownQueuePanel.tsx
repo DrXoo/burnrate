@@ -1,6 +1,9 @@
-import type { Category, PagingState, Transaction } from "../types";
+import { useState } from "react";
+
+import type { Category, PagingState, RuleDraft, Transaction } from "../types";
 import { Card } from "./ui/Card";
 import { Pager } from "./ui/Pager";
+import { TransactionDetailModal } from "./TransactionDetailModal";
 import { UnknownQueueItem } from "./UnknownQueueItem";
 
 interface UnknownQueuePanelProps {
@@ -11,7 +14,9 @@ interface UnknownQueuePanelProps {
   paging: PagingState;
   categories: Category[];
   onMovePage: (direction: "prev" | "next") => void;
-  onAssign: (transactionId: string, categoryId: string) => Promise<void>;
+  onAssignCategory: (transactionId: string, categoryId: string) => Promise<void>;
+  onClearCategory: (transactionId: string) => Promise<void>;
+  onCreateRule: (transactionId: string, draft: RuleDraft) => Promise<void>;
 }
 
 export function UnknownQueuePanel({
@@ -22,8 +27,13 @@ export function UnknownQueuePanel({
   paging,
   categories,
   onMovePage,
-  onAssign,
+  onAssignCategory,
+  onClearCategory,
+  onCreateRule,
 }: UnknownQueuePanelProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedTransaction = transactions.find((item) => item.transaction_id === selectedId) ?? null;
+
   return (
     <Card
       title="Unknown queue"
@@ -43,14 +53,25 @@ export function UnknownQueuePanel({
               <UnknownQueueItem
                 key={transaction.transaction_id}
                 transaction={transaction}
-                categories={categories}
-                onAssign={onAssign}
+                onSelect={(item) => setSelectedId(item.transaction_id)}
               />
             ))}
           </div>
           <Pager total={total} offset={paging.offset} limit={paging.limit} onMove={onMovePage} />
         </>
       )}
+
+      {selectedTransaction ? (
+        <TransactionDetailModal
+          key={selectedTransaction.transaction_id}
+          transaction={selectedTransaction}
+          categories={categories}
+          onAssignCategory={onAssignCategory}
+          onClearCategory={onClearCategory}
+          onCreateRule={onCreateRule}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
     </Card>
   );
 }

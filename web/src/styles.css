@@ -386,6 +386,18 @@ input:disabled {
   border-radius: 20px;
 }
 
+.queue-card-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.queue-card-clickable:hover,
+.queue-card-clickable:focus-visible {
+  border-color: rgba(200, 91, 47, 0.5);
+  background: rgba(200, 91, 47, 0.05);
+  outline: none;
+}
+
 .list-card-muted {
   background: var(--panel-muted);
 }

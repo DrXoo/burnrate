@@ -7,8 +7,6 @@ interface OverviewPanelProps {
   summary: SummaryDashboard | null;
   summaryLoading: boolean;
   summaryError: string | null;
-  connections: number;
-  accounts: number;
   uncategorizedCount: number;
   apiBase: string | null;
   activeMonth: string;
@@ -45,8 +43,6 @@ export function OverviewPanel({
   summary,
   summaryLoading,
   summaryError,
-  connections,
-  accounts,
   uncategorizedCount,
   apiBase,
   activeMonth,
@@ -103,7 +99,9 @@ export function OverviewPanel({
               </p>
             </article>
 
-            <article className="stat-card">
+            <article
+              className={`stat-card ${summary.projected_overspend_amount !== "0.00" ? "stat-card-danger" : ""}`.trim()}
+            >
               <span className="stat-label">Projected month end</span>
               <strong className="stat-value">
                 {formatMoney(summary.projected_month_end_spend_amount, summary.current_balance_currency)}
@@ -122,10 +120,14 @@ export function OverviewPanel({
               </p>
             </article>
 
-            <article className="stat-card stat-card-warn">
+            <article className={`stat-card ${uncategorizedCount > 0 ? "stat-card-warn" : ""}`.trim()}>
               <span className="stat-label">Unknown queue</span>
               <strong className="stat-value">{uncategorizedCount}</strong>
-              <p className="meta-copy">Transactions still waiting for category cleanup this month.</p>
+              <p className="meta-copy">
+                {uncategorizedCount > 0
+                  ? "Transactions still waiting for category cleanup this month."
+                  : "All transactions categorized this month."}
+              </p>
             </article>
           </div>
 
@@ -191,14 +193,6 @@ export function OverviewPanel({
                 <article className="mini-metric">
                   <span className="stat-label">Runway reserve</span>
                   <strong>{formatMoney(summary.runway_balance_amount, summary.runway_balance_currency)}</strong>
-                </article>
-                <article className="mini-metric">
-                  <span className="stat-label">Connections</span>
-                  <strong>{connections}</strong>
-                </article>
-                <article className="mini-metric">
-                  <span className="stat-label">Accounts</span>
-                  <strong>{accounts}</strong>
                 </article>
               </div>
               {summary.runway_accounts.length > 0 ? (

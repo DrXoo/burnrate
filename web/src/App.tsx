@@ -55,6 +55,9 @@ export default function App() {
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
 
+  const overspentBudgetCount =
+    data.summary?.budget_usage.filter((budget) => budget.status === "over").length ?? 0;
+
   const tabs: Array<{
     id: WorkspaceTab;
     label: string;
@@ -68,8 +71,8 @@ export default function App() {
     },
     {
       id: "ledger",
-      label: "Ledger",
-      caption: "Transactions and filters for the working month.",
+      label: "Transactions",
+      caption: "Imported transactions and filters for the working month.",
       badge: String(data.transactions.total),
     },
     {
@@ -80,9 +83,9 @@ export default function App() {
     },
     {
       id: "automation",
-      label: "Automation",
-      caption: "Rules and monthly budgets.",
-      badge: String(data.rules.length + data.budgets.length),
+      label: "Rules & Budgets",
+      caption: "Categorization rules and monthly budgets.",
+      badge: overspentBudgetCount > 0 ? String(overspentBudgetCount) : undefined,
     },
   ];
 
@@ -161,8 +164,6 @@ export default function App() {
               summary={data.summary}
               summaryLoading={data.summaryLoading}
               summaryError={data.summaryError}
-              connections={data.connections.length}
-              accounts={data.accounts.length}
               uncategorizedCount={data.uncategorizedCount}
               apiBase={data.apiBase}
               activeMonth={data.filters.month}
@@ -211,7 +212,9 @@ export default function App() {
               paging={data.unknownPaging}
               categories={data.categories}
               onMovePage={data.moveUnknownPage}
-              onAssign={data.categorizeTransaction}
+              onAssignCategory={data.categorizeTransaction}
+              onClearCategory={data.uncategorizeTransaction}
+              onCreateRule={data.createRule}
             />
           </div>
           <CategoriesPanel categories={data.categories} onCreateCategory={data.createCategory} />
