@@ -4,6 +4,7 @@ import { AccountsPanel } from "./components/AccountsPanel";
 import { BudgetsPanel } from "./components/BudgetsPanel";
 import { CategoriesPanel } from "./components/CategoriesPanel";
 import { ConnectBankModal } from "./components/ConnectBankModal";
+import { ConnectionHealthStrip } from "./components/ConnectionHealthStrip";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { GettingStarted } from "./components/GettingStarted";
 import { Hero } from "./components/Hero";
@@ -13,7 +14,7 @@ import { TransactionsPanel } from "./components/TransactionsPanel";
 import { UnknownQueuePanel } from "./components/UnknownQueuePanel";
 import { useBurnRateData } from "./hooks/useBurnRateData";
 
-type WorkspaceTab = "dashboard" | "ledger" | "review" | "automation";
+type WorkspaceTab = "dashboard" | "ledger" | "review" | "automation" | "settings";
 
 interface ConnectResult {
   banner: "success-banner" | "warn-banner" | "error-banner";
@@ -87,6 +88,11 @@ export default function App() {
       caption: "Categorization rules and monthly budgets.",
       badge: overspentBudgetCount > 0 ? String(overspentBudgetCount) : undefined,
     },
+    {
+      id: "settings",
+      label: "Settings",
+      caption: "Bank connections, accounts, and categories.",
+    },
   ];
 
   if (data.bootLoading) {
@@ -159,25 +165,15 @@ export default function App() {
           {data.connections.length === 0 && data.accounts.length === 0 ? (
             <GettingStarted onConnect={() => setConnectOpen(true)} />
           ) : null}
-          <section className="top-grid">
-            <OverviewPanel
-              summary={data.summary}
-              summaryLoading={data.summaryLoading}
-              summaryError={data.summaryError}
-              uncategorizedCount={data.uncategorizedCount}
-              apiBase={data.apiBase}
-              activeMonth={data.filters.month}
-            />
-            <ConnectionsPanel
-              connections={data.connections}
-              onSyncConnection={data.syncConnection}
-              onConnect={() => setConnectOpen(true)}
-            />
-          </section>
-
-          <section className="middle-grid">
-            <AccountsPanel accounts={data.accounts} onUpdateAccount={data.updateAccount} />
-          </section>
+          <ConnectionHealthStrip connections={data.connections} onManage={() => setActiveTab("settings")} />
+          <OverviewPanel
+            summary={data.summary}
+            summaryLoading={data.summaryLoading}
+            summaryError={data.summaryError}
+            uncategorizedCount={data.uncategorizedCount}
+            apiBase={data.apiBase}
+            activeMonth={data.filters.month}
+          />
         </section>
       ) : null}
 
@@ -202,22 +198,19 @@ export default function App() {
       ) : null}
 
       {activeTab === "review" ? (
-        <section className="workspace-grid">
-          <div className="workspace-stack">
-            <UnknownQueuePanel
-              transactions={data.unknownQueue.items}
-              total={data.unknownQueue.total}
-              loading={data.unknownQueue.loading}
-              error={data.unknownQueue.error}
-              paging={data.unknownPaging}
-              categories={data.categories}
-              onMovePage={data.moveUnknownPage}
-              onAssignCategory={data.categorizeTransaction}
-              onClearCategory={data.uncategorizeTransaction}
-              onCreateRule={data.createRule}
-            />
-          </div>
-          <CategoriesPanel categories={data.categories} onCreateCategory={data.createCategory} />
+        <section className="tab-panel-stack">
+          <UnknownQueuePanel
+            transactions={data.unknownQueue.items}
+            total={data.unknownQueue.total}
+            loading={data.unknownQueue.loading}
+            error={data.unknownQueue.error}
+            paging={data.unknownPaging}
+            categories={data.categories}
+            onMovePage={data.moveUnknownPage}
+            onAssignCategory={data.categorizeTransaction}
+            onClearCategory={data.uncategorizeTransaction}
+            onCreateRule={data.createRule}
+          />
         </section>
       ) : null}
 
@@ -233,6 +226,20 @@ export default function App() {
             onUpdateBudget={data.updateBudget}
             onDeactivateBudget={data.deactivateBudget}
           />
+        </section>
+      ) : null}
+
+      {activeTab === "settings" ? (
+        <section className="tab-panel-stack">
+          <ConnectionsPanel
+            connections={data.connections}
+            onSyncConnection={data.syncConnection}
+            onConnect={() => setConnectOpen(true)}
+          />
+          <section className="workspace-grid">
+            <AccountsPanel accounts={data.accounts} onUpdateAccount={data.updateAccount} />
+            <CategoriesPanel categories={data.categories} onCreateCategory={data.createCategory} />
+          </section>
         </section>
       ) : null}
 

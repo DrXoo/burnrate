@@ -7,7 +7,8 @@ import {
   transactionMeta,
   transactionTitle,
 } from "../lib/format";
-import type { Category, MatchField, MatchOperator, RuleDraft, Transaction } from "../types";
+import type { Category, RuleDraft, Transaction } from "../types";
+import { RuleFields } from "./RuleFields";
 import { Modal } from "./ui/Modal";
 import { StatusTag } from "./ui/StatusTag";
 
@@ -160,7 +161,7 @@ export function TransactionDetailModal({
 
         {showRuleForm ? (
           <form className="transaction-rule-box" onSubmit={handleCreateRule}>
-            <div className="dual-grid dual-grid-wide">
+            <div className="dual-grid">
               <label>
                 Rule name
                 <input
@@ -183,43 +184,14 @@ export function TransactionDetailModal({
                   ))}
                 </select>
               </label>
-              <label>
-                Match field
-                <select
-                  value={ruleDraft.match_field}
-                  onChange={(event) =>
-                    setRuleDraft((current) => ({ ...current, match_field: event.target.value as MatchField }))
-                  }
-                >
-                  <option value="description">Description</option>
-                  <option value="merchant_name">Merchant name</option>
-                  <option value="counterparty_name">Counterparty name</option>
-                </select>
-              </label>
-              <label>
-                Match type
-                <select
-                  value={ruleDraft.match_operator}
-                  onChange={(event) =>
-                    setRuleDraft((current) => ({ ...current, match_operator: event.target.value as MatchOperator }))
-                  }
-                >
-                  <option value="contains">Contains</option>
-                  <option value="equals">Equals</option>
-                  <option value="starts_with">Starts with</option>
-                  <option value="ends_with">Ends with</option>
-                  <option value="regex">Regex</option>
-                </select>
-              </label>
-              <label className="span-two">
-                Match value
-                <input
-                  value={ruleDraft.match_value}
-                  onChange={(event) => setRuleDraft((current) => ({ ...current, match_value: event.target.value }))}
-                  placeholder="Text or regex pattern"
-                />
-              </label>
             </div>
+            <RuleFields
+              matchField={ruleDraft.match_field}
+              matchOperator={ruleDraft.match_operator}
+              matchValue={ruleDraft.match_value}
+              disabled={busy === "rule"}
+              onChange={(patch) => setRuleDraft((current) => ({ ...current, ...patch }))}
+            />
             <label className="check-row">
               <input
                 type="checkbox"

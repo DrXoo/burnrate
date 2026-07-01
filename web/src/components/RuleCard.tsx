@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { prettyMatchField, prettyMatchOperator } from "../lib/format";
-import type { MatchField, MatchOperator, Rule, RuleUpdateDraft } from "../types";
+import type { Rule, RuleUpdateDraft } from "../types";
+import { RuleFields } from "./RuleFields";
 import { StatusTag } from "./ui/StatusTag";
 
 interface RuleCardProps {
@@ -99,44 +100,13 @@ export function RuleCard({ rule, onToggleRule, onUpdateRule }: RuleCardProps) {
               placeholder="Optional custom name"
             />
           </label>
-          <div className="dual-grid">
-            <label>
-              Match field
-              <select
-                value={draft.match_field}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, match_field: event.target.value as MatchField }))
-                }
-              >
-                <option value="description">Description</option>
-                <option value="merchant_name">Merchant name</option>
-                <option value="counterparty_name">Counterparty name</option>
-              </select>
-            </label>
-            <label>
-              Match type
-              <select
-                value={draft.match_operator}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, match_operator: event.target.value as MatchOperator }))
-                }
-              >
-                <option value="contains">Contains</option>
-                <option value="equals">Equals</option>
-                <option value="starts_with">Starts with</option>
-                <option value="ends_with">Ends with</option>
-                <option value="regex">Regex</option>
-              </select>
-            </label>
-          </div>
-          <label>
-            Match value
-            <input
-              value={draft.match_value}
-              onChange={(event) => setDraft((current) => ({ ...current, match_value: event.target.value }))}
-              placeholder="Text or regex pattern"
-            />
-          </label>
+          <RuleFields
+            matchField={draft.match_field}
+            matchOperator={draft.match_operator}
+            matchValue={draft.match_value}
+            disabled={busy === "save"}
+            onChange={(patch) => setDraft((current) => ({ ...current, ...patch }))}
+          />
           <label className="check-row">
             <input
               type="checkbox"
