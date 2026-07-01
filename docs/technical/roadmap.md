@@ -195,7 +195,8 @@ Make the MVP reliable, understandable, and pleasant enough for regular personal 
 * Restricted-production UX for no-linked-account cases
 * Basic observability and logs
 * Integration and end-to-end tests for core flows
-* Backup and restore considerations
+
+Backup and restore was originally scoped here but has been deferred to a later phase (see Phase 7).
 
 ### Deliverables
 
@@ -231,6 +232,31 @@ Expose stable backend capabilities through Telegram after the main Web UI produc
 ### Definition of Done
 
 * The owner can check BurnRate summaries from Telegram without needing Telegram-specific business logic
+
+---
+
+## Phase 7: Operational Resilience
+
+### Objective
+
+Protect the owner's data once BurnRate is a dependable day-to-day tool.
+
+This phase is intentionally deferred: it only becomes worthwhile after real, ongoing data lives in the system.
+
+### Scope
+
+* Backup and restore considerations
+* PostgreSQL `pg_dump`-based backup and restore scripts wired for Docker Compose
+* Documentation for running and testing a restore
+
+### Deliverables
+
+* The owner can take a backup of the PostgreSQL data and restore it on a fresh deployment
+* Backup and restore steps are documented
+
+### Definition of Done
+
+* A restore has been exercised at least once and reproduces the owner's data on a clean stack
 
 ---
 
