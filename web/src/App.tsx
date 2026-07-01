@@ -4,6 +4,7 @@ import { AccountsPanel } from "./components/AccountsPanel";
 import { BudgetsPanel } from "./components/BudgetsPanel";
 import { CategoriesPanel } from "./components/CategoriesPanel";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
+import { GettingStarted } from "./components/GettingStarted";
 import { Hero } from "./components/Hero";
 import { OverviewPanel } from "./components/OverviewPanel";
 import { RulesPanel } from "./components/RulesPanel";
@@ -99,6 +100,7 @@ export default function App() {
 
       {activeTab === "dashboard" ? (
         <section className="tab-panel-stack">
+          {data.connections.length === 0 && data.accounts.length === 0 ? <GettingStarted /> : null}
           <section className="top-grid">
             <OverviewPanel
               summary={data.summary}

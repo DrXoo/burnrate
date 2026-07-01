@@ -60,6 +60,11 @@ function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
     }
   }
 
+  const showRestrictedEmpty =
+    connection.active &&
+    (connection.session_status ?? "").toUpperCase() === "AUTHORIZED" &&
+    connection.linked_account_count === 0;
+
   return (
     <article className="list-card">
       <div className="row">
@@ -112,6 +117,13 @@ function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
           <div className="error-banner">Latest sync error: {connection.latest_sync_error_summary}</div>
         )
       ) : null}
+      {showRestrictedEmpty ? (
+        <div className="warn-banner">
+          Authorized, but no accounts are linked to this BurnRate application. In restricted production mode
+          Enable Banking only returns accounts that were pre-linked — the account you authorized may not be one
+          of them.
+        </div>
+      ) : null}
       {feedback ? <div className="success-banner">{feedback}</div> : null}
       {error ? <div className="error-banner">{error}</div> : null}
     </article>
@@ -126,7 +138,10 @@ export function ConnectionsPanel({ connections, onSyncConnection }: ConnectionsP
     >
       <div className="stack">
         {connections.length === 0 ? (
-          <div className="empty-state">No bank connections yet.</div>
+          <div className="empty-state">
+            No bank connections yet. Connect a bank account to start importing balances and transactions. In-app
+            linking is coming soon.
+          </div>
         ) : (
           connections.map((connection) => (
             <ConnectionCard

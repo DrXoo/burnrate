@@ -101,7 +101,10 @@ export function AccountsPanel({ accounts, onUpdateAccount }: AccountsPanelProps)
     <Card title="Accounts" subtitle="Balances, inclusion flags, and source metadata for imported ledgers.">
       <div className="stack">
         {accounts.length === 0 ? (
-          <div className="empty-state">No imported accounts yet.</div>
+          <div className="empty-state">
+            No imported accounts yet. Once a bank connection is linked and synced, your accounts and balances
+            appear here.
+          </div>
         ) : (
           accounts.map((account) => (
             <AccountControlCard
