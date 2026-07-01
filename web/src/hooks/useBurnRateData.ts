@@ -23,7 +23,7 @@ import {
   updateBudget,
   updateRule,
 } from "../lib/api";
-import { currentMonthStart, currentMonthValue } from "../lib/format";
+import { currentMonthValue } from "../lib/format";
 import type {
   Account,
   Budget,
@@ -443,7 +443,9 @@ export function useBurnRateData() {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await createBudgetForMonth(apiBase, draft, currentMonthStart());
+    // Create the budget for the month the user is currently viewing, not always
+    // the real current month, so a new budget shows up in the summary they see.
+    await createBudgetForMonth(apiBase, draft, `${filters.month}-01`);
     const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
     setBudgets(nextBudgets);
     setSummary(nextSummary);

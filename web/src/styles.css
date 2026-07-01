@@ -882,11 +882,24 @@ th {
 }
 
 @media (max-width: 860px) {
-  .filter-grid,
   .dual-grid,
   .stats-grid,
   .queue-actions {
     grid-template-columns: 1fr;
+  }
+
+  /* Keep the filter bar compact: two columns instead of five stacked controls. */
+  .filter-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Tabs become a compact 2-column set with captions hidden. */
+  .tab-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .tab-caption {
+    display: none;
   }
 
   /* Ledger table collapses into a stacked card list on small screens. */
@@ -968,5 +981,12 @@ th {
 
   .app-shell {
     padding-inline: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .filter-grid,
+  .tab-row {
+    grid-template-columns: 1fr;
   }
 }

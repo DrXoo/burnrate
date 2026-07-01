@@ -222,6 +222,7 @@ export default function App() {
           <BudgetsPanel
             budgets={data.budgets}
             categories={data.categories}
+            activeMonth={data.filters.month}
             onCreateBudget={data.createBudget}
             onUpdateBudget={data.updateBudget}
             onDeactivateBudget={data.deactivateBudget}

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { CURRENCY_OPTIONS } from "../lib/format";
+import { CURRENCY_OPTIONS, formatMonthLabel } from "../lib/format";
 import type { Budget, BudgetDraft, BudgetUpdateDraft, Category } from "../types";
 import { Card } from "./ui/Card";
 import { BudgetCard } from "./BudgetCard";
@@ -8,6 +8,7 @@ import { BudgetCard } from "./BudgetCard";
 interface BudgetsPanelProps {
   budgets: Budget[];
   categories: Category[];
+  activeMonth: string;
   onCreateBudget: (draft: BudgetDraft) => Promise<void>;
   onUpdateBudget: (budgetId: string, draft: BudgetUpdateDraft) => Promise<void>;
   onDeactivateBudget: (budgetId: string) => Promise<void>;
@@ -16,6 +17,7 @@ interface BudgetsPanelProps {
 export function BudgetsPanel({
   budgets,
   categories,
+  activeMonth,
   onCreateBudget,
   onUpdateBudget,
   onDeactivateBudget,
@@ -110,6 +112,7 @@ export function BudgetsPanel({
             </select>
           </label>
         </div>
+        <p className="hint-copy">New budget starts in {formatMonthLabel(activeMonth)} (the month you are viewing).</p>
         <button type="submit" className="button" disabled={busy}>
           {busy ? "Creating..." : "Create budget"}
         </button>

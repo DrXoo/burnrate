@@ -1,3 +1,4 @@
+import { formatDateTime } from "../lib/format";
 import type { Connection } from "../types";
 
 interface ConnectionHealthStripProps {
@@ -23,14 +24,22 @@ export function ConnectionHealthStrip({ connections, onManage }: ConnectionHealt
 
   const attention = connections.filter(needsAttention);
   const healthy = attention.length === 0;
+  const lastSynced = connections
+    .map((connection) => connection.last_synced_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1);
+
+  const summary = healthy
+    ? `${connections.length} bank connection(s) healthy.`
+    : `${attention.length} of ${connections.length} bank connection(s) need attention.`;
 
   return (
     <div className={healthy ? "success-banner" : "warn-banner"}>
       <div className="row">
         <span>
-          {healthy
-            ? `${connections.length} bank connection(s) healthy.`
-            : `${attention.length} of ${connections.length} bank connection(s) need attention.`}
+          {summary}
+          {lastSynced ? ` · Last synced ${formatDateTime(lastSynced)}` : ""}
         </span>
         <button type="button" className="button button-secondary" onClick={onManage}>
           Manage connections

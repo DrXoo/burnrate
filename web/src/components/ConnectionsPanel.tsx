@@ -132,14 +132,44 @@ function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
 }
 
 export function ConnectionsPanel({ connections, onSyncConnection, onConnect }: ConnectionsPanelProps) {
+  const [syncingAll, setSyncingAll] = useState(false);
+  const activeConnections = connections.filter((connection) => connection.active);
+
+  async function handleSyncAll() {
+    setSyncingAll(true);
+    try {
+      for (const connection of activeConnections) {
+        try {
+          await onSyncConnection(connection.connection_id);
+        } catch {
+          // Best-effort: a failing connection is reflected on its own card; keep going.
+        }
+      }
+    } finally {
+      setSyncingAll(false);
+    }
+  }
+
   return (
     <Card
       title="Connections"
       subtitle="Enable Banking sessions, sync health, and manual re-sync controls in one place."
       actions={
-        <button type="button" className="button" onClick={onConnect}>
-          Connect a bank
-        </button>
+        <div className="inline-actions">
+          {activeConnections.length > 0 ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={handleSyncAll}
+              disabled={syncingAll}
+            >
+              {syncingAll ? "Syncing all..." : "Sync all"}
+            </button>
+          ) : null}
+          <button type="button" className="button" onClick={onConnect}>
+            Connect a bank
+          </button>
+        </div>
       }
     >
       <div className="stack">
