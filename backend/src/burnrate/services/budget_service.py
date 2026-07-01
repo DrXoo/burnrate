@@ -101,7 +101,9 @@ class BudgetService:
         assert category is not None
 
         today = datetime.now(UTC).date()
-        if budget.active_from > today:
+        if budget.active_from >= today:
+            # A budget that has not actually started yet (starts today or later)
+            # becomes inactive immediately rather than staying active for today.
             budget.active_to = budget.active_from - timedelta(days=1)
         else:
             budget.active_to = today

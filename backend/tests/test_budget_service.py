@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import create_engine, select
@@ -21,6 +21,14 @@ def make_session() -> Session:
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
+
+def next_month_start() -> date:
+    """A first-of-month that is always in the future, independent of the run date."""
+    today = datetime.now(UTC).date()
+    if today.month == 12:
+        return date(today.year + 1, 1, 1)
+    return date(today.year, today.month + 1, 1)
 
 
 def seed_budget_categories(db: Session) -> tuple[Category, Category]:
@@ -104,7 +112,7 @@ def test_budget_service_deactivates_budget() -> None:
         category_id=str(expense.id),
         amount=Decimal("300.00"),
         currency="EUR",
-        active_from=date(2026, 7, 1),
+        active_from=next_month_start(),
     )
 
     response = service.deactivate_budget(budget_id=created["budget_id"])

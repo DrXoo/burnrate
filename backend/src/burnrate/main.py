@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from burnrate.api.observability import register_observability
+from burnrate.logging_config import configure_logging
 from burnrate.api.routes.budgets import router as budgets_router
 from burnrate.api.routes.categorization import router as categorization_router
 from burnrate.api.routes.enable_banking import public_router as enable_banking_public_router
@@ -14,6 +19,14 @@ from burnrate.api.routes.summary import router as summary_router
 from burnrate.config import get_settings
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    logging.getLogger("burnrate.api").info("BurnRate API starting (env=%s)", settings.app_env)
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
 
@@ -22,7 +35,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
+    register_observability(app)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

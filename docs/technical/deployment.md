@@ -281,6 +281,17 @@ This is one of the strongest practical reasons to prefer Docker Compose for Burn
 
 ---
 
+## Observability
+
+BurnRate uses simple, structured stdout logging so `docker compose logs` is the primary diagnostic tool.
+
+* The `backend` and `sync-worker` configure logging on startup at the level set by `LOG_LEVEL` (default `INFO`), using a shared format.
+* Each HTTP request is logged with method, path, status code, and duration.
+* Unexpected server errors are logged with a full traceback and returned to clients as a consistent `{"detail": "Internal server error"}` 500 response — stack traces are never exposed to the client.
+* Deliberate `HTTPException` responses keep their own status and detail and are not converted into 500s.
+
+For deeper diagnosis, log level can be raised to `DEBUG` through `LOG_LEVEL` without code changes.
+
 ## What Not To Optimize For Yet
 
 The first version should not optimize for:

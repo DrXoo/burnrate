@@ -8,6 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from burnrate.config import Settings, get_settings
 from burnrate.db.session import SessionLocal
 from burnrate.integrations.enable_banking.client import EnableBankingClient
+from burnrate.logging_config import configure_logging
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.sync_service import SyncService
 
@@ -62,8 +63,8 @@ def build_scheduler(settings: Settings) -> BlockingScheduler:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
     settings = get_settings()
+    configure_logging(settings.log_level)
     logger.info("Starting sync worker with schedule %s", settings.sync_cron)
     scheduler = build_scheduler(settings)
     try:
