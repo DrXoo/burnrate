@@ -754,8 +754,11 @@ th {
 }
 
 .queue-select {
+  width: 18px;
+  height: 18px;
   margin-top: 5px;
-  flex: 0 0 auto;
+  padding: 0;
+  flex: 0 0 18px;
   cursor: pointer;
 }
 
@@ -996,7 +999,6 @@ th {
   .ledger-table td.transaction-primary-cell::before {
     display: none;
   }
-}
 
   .card-head,
   .row,
