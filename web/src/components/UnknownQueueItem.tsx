@@ -26,26 +26,24 @@ export function UnknownQueueItem({ transaction, selected, onToggleSelect, onSele
       }}
     >
       <div className="queue-head">
-        <div className="queue-head-main">
-          <input
-            type="checkbox"
-            className="queue-select"
-            checked={selected}
-            aria-label={`Select ${transactionTitle(transaction)}`}
-            onClick={(event) => event.stopPropagation()}
-            onChange={() => onToggleSelect(transaction.transaction_id)}
-          />
-          <div>
-            <h3>{transactionTitle(transaction)}</h3>
-            <p className="meta-copy">
-              {transaction.account_display_name} · {transaction.booking_date || "No booking date"}
-              <br />
-              {transactionMeta(transaction)} ·{" "}
-              <span className={`amount amount-${amountTone(transaction.amount, transaction.direction)}`}>
-                {transaction.amount} {transaction.currency}
-              </span>
-            </p>
-          </div>
+        <input
+          type="checkbox"
+          className="queue-select"
+          checked={selected}
+          aria-label={`Select ${transactionTitle(transaction)}`}
+          onClick={(event) => event.stopPropagation()}
+          onChange={() => onToggleSelect(transaction.transaction_id)}
+        />
+        <div className="queue-item-body">
+          <h3>{transactionTitle(transaction)}</h3>
+          <p className="meta-copy">
+            {transaction.account_display_name} · {transaction.booking_date || "No booking date"}
+            <br />
+            {transactionMeta(transaction)} ·{" "}
+            <span className={`amount amount-${amountTone(transaction.amount, transaction.direction)}`}>
+              {transaction.amount} {transaction.currency}
+            </span>
+          </p>
         </div>
         <span className="queue-badge">Unknown</span>
       </div>

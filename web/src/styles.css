@@ -744,21 +744,23 @@ th {
 
 .queue-head {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.queue-head-main {
-  display: flex;
   gap: 12px;
   align-items: flex-start;
 }
 
+.queue-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
 .queue-select {
-  margin-top: 4px;
+  margin-top: 5px;
   flex: 0 0 auto;
   cursor: pointer;
+}
+
+.queue-badge {
+  flex: 0 0 auto;
 }
 
 .queue-head h3 {
@@ -998,7 +1000,6 @@ th {
 
   .card-head,
   .row,
-  .queue-head,
   .pager {
     flex-direction: column;
     align-items: flex-start;
