@@ -127,10 +127,6 @@ If the integration, callback handling, restricted account linking, or transactio
 
 Turn imported bank data into the first usable version of the product.
 
-Detailed execution plan:
-
-* See [Phase 3 Plan](./phase-3-plan.md)
-
 ### Scope
 
 * Transaction list view

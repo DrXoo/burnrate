@@ -190,7 +190,11 @@ class EnableBankingService:
             raise ValueError(f"Enable Banking connection {connection_id} has no session_id")
 
         session_data = self.client.get_session(session_id=connection.session_id)
-        connection.session_status = session_data.get("status", connection.session_status or "AUTHORIZED")
+        session_status = session_data.get("status", connection.session_status or "AUTHORIZED")
+        connection.session_status = session_status
+
+        if not self._is_session_authorized(session_status):
+            return self._handle_expired_session(connection=connection, session_status=session_status)
 
         sync_session = SyncSession(
             enable_banking_connection_id=connection.id,
@@ -229,7 +233,56 @@ class EnableBankingService:
             "session_status": connection.session_status or "AUTHORIZED",
             "accounts_synced": summary.accounts_imported,
             "transactions_imported": summary.transactions_imported,
+            "status": "success",
             "message": None if summary.accounts_imported > 0 else "No linked accounts found for this connection.",
+        }
+
+    def _is_session_authorized(self, session_status: str | None) -> bool:
+        return (session_status or "").upper() == "AUTHORIZED"
+
+    def _handle_expired_session(
+        self,
+        *,
+        connection: EnableBankingConnection,
+        session_status: str,
+    ) -> dict[str, Any]:
+        """Record an expired/revoked session and deactivate the connection.
+
+        A session that is no longer authorized cannot be refreshed automatically;
+        the owner must re-authorize the bank. Deactivating the connection stops the
+        background worker from retrying a doomed sync on every scheduled tick.
+        """
+        connection.active = False
+        error_summary = (
+            f"Enable Banking session is no longer authorized (status={session_status}). "
+            "The connection was deactivated and must be re-authorized."
+        )
+        sync_session = SyncSession(
+            enable_banking_connection_id=connection.id,
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+            status="skipped",
+            imported_accounts_count=0,
+            imported_transactions_count=0,
+            error_summary=error_summary,
+        )
+        self.db.add(sync_session)
+        self.db.flush()
+        logger.warning(
+            "Skipping Enable Banking sync for connection %s: session status=%s",
+            connection.id,
+            session_status,
+        )
+
+        return {
+            "connection_id": str(connection.id),
+            "sync_session_id": str(sync_session.id),
+            "session_id": connection.session_id,
+            "session_status": session_status,
+            "accounts_synced": 0,
+            "transactions_imported": 0,
+            "status": "skipped",
+            "message": "Bank session expired. Please reconnect this account to resume syncing.",
         }
 
     def _import_session_accounts(

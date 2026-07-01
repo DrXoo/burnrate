@@ -198,6 +198,27 @@ For the first version, BurnRate should use a simple sync strategy:
 
 BurnRate should assume that transaction imports may be paginated or refreshed incrementally over time, and it should preserve external identifiers needed for safe re-sync behavior.
 
+### Transient Error Retries
+
+Enable Banking API calls are retried automatically on transient failures inside the infrastructure client (`EnableBankingClient`):
+
+* Network/transport errors and timeouts are retried.
+* HTTP `429`, `500`, `502`, `503`, and `504` responses are retried.
+* Other `4xx` responses (auth, permission, not-found) are not retried, since a retry cannot fix them.
+
+Retries use exponential backoff configured by `ENABLE_BANKING_MAX_RETRIES` and `ENABLE_BANKING_RETRY_BACKOFF_SECONDS`.
+
+### Expired Or Inactive Sessions
+
+Before a scheduled or manual re-sync, BurnRate fetches the Enable Banking session and checks its status.
+
+If the session is no longer `AUTHORIZED` (for example `EXPIRED`, `REVOKED`, or `CANCELLED`):
+
+* BurnRate does not attempt to fetch balances or transactions.
+* The connection is marked inactive so the background worker stops retrying a doomed sync every cycle.
+* A `sync_session` row is recorded with status `skipped` and an explanatory `error_summary`.
+* The connection must be re-authorized through the Web UI to resume syncing.
+
 ---
 
 ## Responsibilities by Layer
@@ -257,7 +278,6 @@ This keeps the first version aligned with the actual product goal instead of dri
 
 These are still worth deciding at implementation time:
 
-* How should BurnRate refresh expired or inactive sessions?
 * Should BurnRate support multiple bank connections from day one, or only one connection first?
 * Which callback state data should be persisted to protect against replay or mismatched redirects?
 * How should the UI distinguish `authorization succeeded but no linked accounts were returned` from `authorization failed`?

@@ -16,8 +16,14 @@ interface ConnectionCardProps {
 }
 
 function syncTone(connection: Connection): "default" | "good" | "warn" | "danger" {
+  if (!connection.active) {
+    return "danger";
+  }
   if (connection.latest_sync_status === "failed") {
     return "danger";
+  }
+  if (connection.latest_sync_status === "skipped") {
+    return "warn";
   }
   if (connection.latest_sync_status === "success") {
     return "good";
@@ -61,7 +67,9 @@ function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
           {connection.aspsp_name} <span className="muted">({connection.aspsp_country})</span>
         </strong>
         <StatusTag tone={syncTone(connection)}>
-          {connection.latest_sync_status || connection.session_status || "unknown"}
+          {!connection.active
+            ? "needs reconnection"
+            : connection.latest_sync_status || connection.session_status || "unknown"}
         </StatusTag>
       </div>
       <p className="meta-copy">
@@ -92,8 +100,17 @@ function ConnectionCard({ connection, onSyncConnection }: ConnectionCardProps) {
         ) : null}
       </div>
 
-      {connection.latest_sync_error_summary ? (
-        <div className="error-banner">Latest sync error: {connection.latest_sync_error_summary}</div>
+      {!connection.active ? (
+        <div className="warn-banner">
+          {connection.latest_sync_error_summary ||
+            "This connection is inactive and must be re-authorized before syncing can resume."}
+        </div>
+      ) : connection.latest_sync_error_summary ? (
+        connection.latest_sync_status === "skipped" ? (
+          <div className="warn-banner">{connection.latest_sync_error_summary}</div>
+        ) : (
+          <div className="error-banner">Latest sync error: {connection.latest_sync_error_summary}</div>
+        )
       ) : null}
       {feedback ? <div className="success-banner">{feedback}</div> : null}
       {error ? <div className="error-banner">{error}</div> : null}

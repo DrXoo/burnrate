@@ -71,4 +71,3 @@ The `web` service is currently a lightweight placeholder so the deployment shape
 * [Database Schema](./docs/technical/database/schema.md)
 * [Deployment Model](./docs/technical/deployment.md)
 * [Implementation Roadmap](./docs/technical/roadmap.md)
-* [Phase 3 Plan](./docs/technical/phase-3-plan.md)

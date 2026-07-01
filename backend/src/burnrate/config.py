@@ -35,6 +35,16 @@ class Settings(BaseSettings):
         default=30.0,
         alias="ENABLE_BANKING_TIMEOUT_SECONDS",
     )
+    enable_banking_max_retries: int = Field(
+        default=3,
+        ge=0,
+        alias="ENABLE_BANKING_MAX_RETRIES",
+    )
+    enable_banking_retry_backoff_seconds: float = Field(
+        default=0.5,
+        ge=0.0,
+        alias="ENABLE_BANKING_RETRY_BACKOFF_SECONDS",
+    )
     sync_cron: str = Field(default="*/30 * * * *", alias="SYNC_CRON")
 
     model_config = SettingsConfigDict(

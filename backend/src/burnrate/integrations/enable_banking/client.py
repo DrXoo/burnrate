@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import time
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
@@ -7,6 +10,10 @@ import httpx
 
 from burnrate.config import Settings
 from burnrate.integrations.enable_banking.jwt_signer import EnableBankingJWTSigner
+
+logger = logging.getLogger(__name__)
+
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 class EnableBankingAPIError(Exception):
@@ -22,9 +29,11 @@ class EnableBankingClient:
         *,
         settings: Settings,
         transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.settings = settings
         self.transport = transport
+        self.sleep = sleep
         self.signer = EnableBankingJWTSigner(
             app_id=settings.enable_banking_app_id,
             private_key=settings.enable_banking_private_key_value,
@@ -83,6 +92,42 @@ class EnableBankingClient:
         return self._request("GET", f"/accounts/{account_id}/transactions", params=params)
 
     def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        attempt = 0
+        while True:
+            try:
+                return self._perform_request(method, path, params=params, json=json)
+            except (httpx.TransportError, EnableBankingAPIError) as exc:
+                if attempt >= self.settings.enable_banking_max_retries or not self._is_retryable(exc):
+                    raise
+                delay = self.settings.enable_banking_retry_backoff_seconds * (2**attempt)
+                logger.warning(
+                    "Enable Banking request %s %s failed (%s), retrying in %.2fs (attempt %s/%s)",
+                    method,
+                    path,
+                    exc,
+                    delay,
+                    attempt + 1,
+                    self.settings.enable_banking_max_retries,
+                )
+                self.sleep(delay)
+                attempt += 1
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, httpx.TransportError):
+            return True
+        if isinstance(exc, EnableBankingAPIError):
+            return exc.status_code in RETRYABLE_STATUS_CODES
+        return False
+
+    def _perform_request(
         self,
         method: str,
         path: str,

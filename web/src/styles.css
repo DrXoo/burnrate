@@ -711,6 +711,7 @@ th {
 
 .empty-state,
 .error-banner,
+.warn-banner,
 .success-banner,
 .loading-stage {
   border-radius: 20px;
@@ -728,6 +729,13 @@ th {
   padding: 14px;
   background: rgba(140, 54, 33, 0.12);
   color: var(--danger);
+}
+
+.warn-banner {
+  margin-top: 12px;
+  padding: 14px;
+  background: rgba(154, 104, 33, 0.12);
+  color: var(--warn);
 }
 
 .success-banner {

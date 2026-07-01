@@ -173,6 +173,23 @@ class NullPartyTransactionsClient(FakeEnableBankingClient):
         }
 
 
+class ExpiringSessionClient(FakeEnableBankingClient):
+    """Session is AUTHORIZED during the initial callback, then EXPIRED on resync."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.session_status = "AUTHORIZED"
+
+    def get_session(self, *, session_id: str):
+        assert session_id == "session-123"
+        return {
+            "status": self.session_status,
+            "authorized": "2026-01-01T12:00:00+00:00",
+            "accounts": ["account-uid-1"],
+            "accounts_data": [{"uid": "account-uid-1", "identification_hash": "hash-1"}],
+        }
+
+
 def make_settings() -> Settings:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_key_pem = private_key.private_bytes(
@@ -386,6 +403,48 @@ def test_enable_banking_service_lists_connections_with_latest_sync_summary() -> 
     assert connections[0]["latest_sync_status"] == "success"
     assert connections[0]["latest_sync_accounts_count"] == 1
     assert connections[0]["latest_sync_transactions_count"] == 1
+
+
+def test_enable_banking_service_skips_and_deactivates_expired_session() -> None:
+    db = make_session()
+    client = ExpiringSessionClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+
+    callback = service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+    db.commit()
+    requests_after_initial_import = len(client.transaction_requests)
+
+    # The bank session has since expired.
+    client.session_status = "EXPIRED"
+    result = service.sync_connection(connection_id=callback["connection_id"])
+    db.commit()
+
+    assert result["status"] == "skipped"
+    assert result["session_status"] == "EXPIRED"
+    assert result["transactions_imported"] == 0
+    assert "expired" in result["message"].lower()
+
+    connection = db.scalar(
+        select(EnableBankingConnection).where(EnableBankingConnection.session_id == "session-123")
+    )
+    assert connection is not None
+    assert connection.active is False
+    assert connection.session_status == "EXPIRED"
+
+    skipped_session = db.scalar(select(SyncSession).where(SyncSession.status == "skipped"))
+    assert skipped_session is not None
+    assert "re-authorized" in (skipped_session.error_summary or "")
+    # No transaction fetch should have been attempted for the expired session.
+    assert len(client.transaction_requests) == requests_after_initial_import
 
 
 def test_enable_banking_service_applies_existing_rules_during_import() -> None:
