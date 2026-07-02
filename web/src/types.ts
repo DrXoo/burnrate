@@ -148,6 +148,8 @@ export interface SummaryDashboard {
   runway_drain_label: string;
   runway_message: string;
   monthly_spending_amount: string;
+  monthly_income_amount: string;
+  net_cash_flow_amount: string;
   monthly_budget_amount: string;
   budgeted_spending_amount: string;
   unbudgeted_spending_amount: string;

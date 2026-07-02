@@ -58,6 +58,11 @@ class SummaryService:
         monthly_budget = sum((budget.amount for budget in active_budgets), start=Decimal("0.00"))
 
         monthly_spending = self._get_monthly_spending(month_start=month_start, month_end=month_end)
+        monthly_income = self._get_monthly_income(month_start=month_start, month_end=month_end)
+        # Net cash flow this month: what landed in income categories minus what left
+        # in expense categories. Transfers are excluded on both sides. Pure reporting
+        # of booked transactions -- it does not feed runway or projections.
+        net_cash_flow = (monthly_income - monthly_spending).quantize(Decimal("0.01"))
         spent_by_budget_category = self._get_budget_category_spend(
             month_start=month_start,
             month_end=month_end,
@@ -154,6 +159,8 @@ class SummaryService:
                 runway_drain_amount=runway_drain_amount,
             ),
             "monthly_spending_amount": self._format_decimal(monthly_spending),
+            "monthly_income_amount": self._format_decimal(monthly_income),
+            "net_cash_flow_amount": self._format_decimal(net_cash_flow),
             "monthly_budget_amount": self._format_decimal(monthly_budget),
             "budgeted_spending_amount": self._format_decimal(budgeted_spending),
             "unbudgeted_spending_amount": self._format_decimal(unbudgeted_spending),
@@ -282,6 +289,23 @@ class SummaryService:
             )
         ) or Decimal("0.00")
         return (-Decimal(total_amount)).quantize(Decimal("0.01"))
+
+    def _get_monthly_income(self, *, month_start: date, month_end: date) -> Decimal:
+        total_amount = self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), Decimal("0.00")))
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Category, Category.id == Transaction.category_id)
+            .where(
+                Account.included_in_calculations.is_(True),
+                Transaction.booking_date >= month_start,
+                Transaction.booking_date < month_end,
+                func.lower(Transaction.status) == "booked",
+                Category.type == "income",
+            )
+        ) or Decimal("0.00")
+        # Income transactions are credits (positive amounts), so no sign flip.
+        return Decimal(total_amount).quantize(Decimal("0.01"))
 
     def _get_active_budgets(self, *, month_start: date, month_end: date) -> list[ActiveBudgetWindow]:
         rows = self.db.execute(

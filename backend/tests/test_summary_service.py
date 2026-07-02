@@ -225,6 +225,8 @@ def test_summary_service_returns_phase_3_dashboard_metrics() -> None:
     assert summary["runway_drain_label"] == "Projected overspend"
     assert summary["runway_message"] == "Runway is based on projected monthly overspend against the active category budgets."
     assert summary["monthly_spending_amount"] == "260.00"
+    assert summary["monthly_income_amount"] == "2000.00"
+    assert summary["net_cash_flow_amount"] == "1740.00"
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["budgeted_spending_amount"] == "260.00"
     assert summary["unbudgeted_spending_amount"] == "0.00"

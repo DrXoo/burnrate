@@ -36,6 +36,8 @@ class SummaryResponse(BaseModel):
     runway_drain_label: str
     runway_message: str
     monthly_spending_amount: str
+    monthly_income_amount: str
+    net_cash_flow_amount: str
     monthly_budget_amount: str
     budgeted_spending_amount: str
     unbudgeted_spending_amount: str

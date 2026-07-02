@@ -94,6 +94,17 @@ export function OverviewPanel({
               </p>
             </article>
 
+            <article className={`stat-card ${moneyTone(summary.net_cash_flow_amount)}`.trim()}>
+              <span className="stat-label">Net this month</span>
+              <strong className="stat-value">
+                {formatMoney(summary.net_cash_flow_amount, summary.current_balance_currency)}
+              </strong>
+              <p className="meta-copy">
+                {formatMoney(summary.monthly_income_amount, summary.current_balance_currency)} in −{" "}
+                {formatMoney(summary.monthly_spending_amount, summary.current_balance_currency)} out.
+              </p>
+            </article>
+
             <article className={`stat-card ${moneyTone(summary.money_left_amount)}`.trim()}>
               <span className="stat-label">Money left</span>
               <strong className="stat-value">

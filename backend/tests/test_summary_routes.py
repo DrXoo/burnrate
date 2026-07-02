@@ -27,6 +27,8 @@ class FakeSummaryService:
             "runway_drain_label": "Projected overspend",
             "runway_message": "Runway is based on projected monthly overspend against the active category budgets.",
             "monthly_spending_amount": "260.00",
+            "monthly_income_amount": "2000.00",
+            "net_cash_flow_amount": "1740.00",
             "monthly_budget_amount": "400.00",
             "budgeted_spending_amount": "260.00",
             "unbudgeted_spending_amount": "0.00",
