@@ -31,6 +31,7 @@ export function TransactionDetailModal({
   onClose,
 }: TransactionDetailModalProps) {
   const initialField = suggestRuleField(transaction);
+  const hasRule = Boolean(transaction.matched_rule_id || transaction.matched_rule_name);
   const [categoryId, setCategoryId] = useState(transaction.category_id ?? "");
   const [busy, setBusy] = useState<"assign" | "clear" | "rule" | null>(null);
   const [showRuleForm, setShowRuleForm] = useState(false);
@@ -88,6 +89,7 @@ export function TransactionDetailModal({
         name: ruleDraft.name.trim(),
         match_value: ruleDraft.match_value.trim(),
       });
+      setShowRuleForm(false);
       setBusy(null);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -141,17 +143,19 @@ export function TransactionDetailModal({
             >
               {busy === "assign" ? "Saving..." : transaction.category_id ? "Update" : "Assign"}
             </button>
-            <button
-              type="button"
-              className="button button-secondary"
-              disabled={(!categoryId && !transaction.category_id) || busy !== null}
-              onClick={() => {
-                setShowRuleForm((current) => !current);
-                setRuleDraft((current) => ({ ...current, category_id: categoryId || transaction.category_id || "" }));
-              }}
-            >
-              Save rule
-            </button>
+            {hasRule ? null : (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={(!categoryId && !transaction.category_id) || busy !== null}
+                onClick={() => {
+                  setShowRuleForm((current) => !current);
+                  setRuleDraft((current) => ({ ...current, category_id: categoryId || transaction.category_id || "" }));
+                }}
+              >
+                Add rule
+              </button>
+            )}
             <button
               type="button"
               className="button button-secondary"
@@ -208,7 +212,7 @@ export function TransactionDetailModal({
             </label>
             <div className="inline-actions">
               <button type="submit" className="button" disabled={busy === "rule"}>
-                {busy === "rule" ? "Creating..." : "Create rule"}
+                {busy === "rule" ? "Saving..." : "Save rule"}
               </button>
               <button type="button" className="button button-secondary" onClick={() => setShowRuleForm(false)}>
                 Cancel

@@ -217,7 +217,12 @@ export default function App() {
       {activeTab === "automation" ? (
         <section className="workspace-grid">
           <div className="workspace-stack">
-            <RulesPanel rules={data.rules} onToggleRule={data.toggleRule} onUpdateRule={data.updateRule} />
+            <RulesPanel
+              rules={data.rules}
+              onToggleRule={data.toggleRule}
+              onUpdateRule={data.updateRule}
+              onDeleteRule={data.deleteRule}
+            />
           </div>
           <BudgetsPanel
             budgets={data.budgets}

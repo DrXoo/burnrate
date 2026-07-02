@@ -59,6 +59,27 @@ The initial implementation scaffold uses:
 
 The `web` service is currently a lightweight placeholder so the deployment shape stays aligned with the architecture while the backend and integration work are built first.
 
+## Telegram Bot
+
+BurnRate ships a read-only Telegram bot as a secondary interface. It runs as its
+own `telegram-bot` worker and reuses the same backend services as the Web UI, so
+it never computes metrics on its own.
+
+To enable it:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy the token into `TELEGRAM_BOT_TOKEN`.
+2. Message the bot once and check `docker compose logs telegram-bot` for your chat id.
+3. Add that id to `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated for more than one) and restart the worker.
+
+Messages from any chat id not on the allow-list are ignored. Available commands:
+
+* `/summary [YYYY-MM]` — money left, spending, burn rate, and runway
+* `/budgets [YYYY-MM]` — budget status per category
+* `/unknown` — transactions still waiting to be categorized
+* `/help` — list commands
+
+Leaving `TELEGRAM_BOT_TOKEN` empty keeps the bot disabled.
+
 ## Documentation
 
 * [Product Overview](./docs/product/overview.md)

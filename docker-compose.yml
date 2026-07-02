@@ -47,6 +47,21 @@ services:
       postgres:
         condition: service_healthy
 
+  telegram-bot:
+    build:
+      context: ./backend
+    container_name: burnrate-telegram-bot
+    command: ["python", "-m", "burnrate.telegram_bot"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - ./secrets:/run/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
     build:
       context: ./web

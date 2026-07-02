@@ -198,6 +198,46 @@ def test_ledger_service_counts_uncategorized_transactions_for_filters() -> None:
     assert count == 1
 
 
+def test_ledger_service_lists_pending_transaction_without_booking_date_by_value_date() -> None:
+    db = make_session()
+    primary_account, _ = seed_ledger_data(db)
+    # Held/pending transactions have no booking_date yet; the month filter must fall
+    # back to value_date so they still surface in the current month.
+    db.add(
+        Transaction(
+            account_id=primary_account.id,
+            enable_banking_transaction_id="tx-pending",
+            booking_date=None,
+            value_date=datetime(2026, 6, 20, tzinfo=timezone.utc).date(),
+            amount=Decimal("-9.99"),
+            currency="EUR",
+            description="Held card authorization",
+            merchant_name="Store",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=None,
+            matched_rule_id=None,
+            raw_payload={"source": "test"},
+            imported_at=datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(
+        account_id=str(primary_account.id),
+        month="2026-06",
+        status="pending",
+        limit=10,
+        offset=0,
+    )
+
+    assert response["total_count"] == 1
+    assert response["transactions"][0]["description"] == "Held card authorization"
+    assert response["transactions"][0]["booking_date"] is None
+
+
 def test_ledger_service_rejects_invalid_month_format() -> None:
     db = make_session()
     seed_ledger_data(db)

@@ -1,4 +1,5 @@
 import { useEffect, type PropsWithChildren } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps extends PropsWithChildren {
   title?: string;
@@ -16,7 +17,15 @@ export function Modal({ title, onClose, children }: ModalProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return createPortal(
     <div className="modal-overlay" role="presentation" onClick={onClose}>
       <div
         className="modal-panel"
@@ -33,6 +42,7 @@ export function Modal({ title, onClose, children }: ModalProps) {
         </div>
         <div className="modal-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

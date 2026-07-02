@@ -51,10 +51,10 @@ The expected first runtime layout is:
 * `backend`
 * `web`
 * `sync-worker`
+* `telegram-bot`
 
 Optional later services:
 
-* `telegram-worker`
 * `reverse-proxy`
 
 ---
@@ -122,17 +122,19 @@ Notes:
 
 ---
 
-### `telegram-worker` (Optional)
+### `telegram-bot`
 
 Responsibilities:
 
-* Handle Telegram bot interactions
-* Expose backend-derived summaries through chat
+* Run the Telegram bot as a long-polling worker (`python -m burnrate.telegram_bot`)
+* Expose backend-derived summaries, budget status, and the unknown queue through chat
+* Restrict access to an allow-list of chat ids (`TELEGRAM_ALLOWED_CHAT_IDS`)
 
 Notes:
 
-* This should only be introduced after the main backend capabilities are stable
-* It should remain secondary to the Web UI
+* This is a separate runtime component that reuses the same application services as the backend
+* It is read-only and secondary to the Web UI; it implements no financial logic of its own
+* If `TELEGRAM_BOT_TOKEN` is empty the process logs and exits, so the bot can be left disabled
 
 ---
 
@@ -166,6 +168,8 @@ flowchart TD
     Worker --> Postgres
     Backend --> EnableBanking[Enable Banking API]
     Worker --> EnableBanking
+    TelegramBot[Telegram Bot] --> Postgres
+    Telegram[Telegram API] --> TelegramBot
 ```
 
 This reflects the intended runtime structure without requiring complex orchestration.
@@ -285,7 +289,7 @@ This is one of the strongest practical reasons to prefer Docker Compose for Burn
 
 BurnRate uses simple, structured stdout logging so `docker compose logs` is the primary diagnostic tool.
 
-* The `backend` and `sync-worker` configure logging on startup at the level set by `LOG_LEVEL` (default `INFO`), using a shared format.
+* The `backend`, `sync-worker`, and `telegram-bot` configure logging on startup at the level set by `LOG_LEVEL` (default `INFO`), using a shared format.
 * Each HTTP request is logged with method, path, status code, and duration.
 * Unexpected server errors are logged with a full traceback and returned to clients as a consistent `{"detail": "Internal server error"}` 500 response — stack traces are never exposed to the client.
 * Deliberate `HTTPException` responses keep their own status and detail and are not converted into 500s.
@@ -315,7 +319,7 @@ When implementation begins, the repository will likely need:
 * `docker-compose.yml`
 * `docker-compose.override.yml` for local development, if needed
 * `.env.example`
-* Container definitions for `backend`, `web`, and `sync-worker`
+* Container definitions for `backend`, `web`, `sync-worker`, and `telegram-bot`
 
 Optional later files:
 

@@ -6,9 +6,10 @@ interface RulesPanelProps {
   rules: Rule[];
   onToggleRule: (ruleId: string, active: boolean) => Promise<void>;
   onUpdateRule: (ruleId: string, draft: RuleUpdateDraft) => Promise<void>;
+  onDeleteRule: (ruleId: string) => Promise<void>;
 }
 
-export function RulesPanel({ rules, onToggleRule, onUpdateRule }: RulesPanelProps) {
+export function RulesPanel({ rules, onToggleRule, onUpdateRule, onDeleteRule }: RulesPanelProps) {
   return (
     <Card title="Saved rules" subtitle="Text-based rules that auto-categorize matching transactions.">
       <div className="stack">
@@ -23,6 +24,7 @@ export function RulesPanel({ rules, onToggleRule, onUpdateRule }: RulesPanelProp
               rule={rule}
               onToggleRule={onToggleRule}
               onUpdateRule={onUpdateRule}
+              onDeleteRule={onDeleteRule}
             />
           ))
         )}

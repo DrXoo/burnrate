@@ -64,22 +64,45 @@ class SummaryService:
             category_ids=[budget.category_id for budget in active_budgets],
         )
         budgeted_spending = sum(spent_by_budget_category.values(), start=Decimal("0.00"))
+        # Spend in categorized expense categories that have no budget. Together with
+        # budgeted_spending this reconciles monthly_spending (= budgeted + unbudgeted),
+        # so the dashboard's two spend figures no longer look like they disagree.
+        unbudgeted_spending = (monthly_spending - budgeted_spending).quantize(Decimal("0.01"))
         money_left = monthly_budget - budgeted_spending
 
-        raw_average_daily_spend = Decimal("0.00")
         average_daily_spend = Decimal("0.00")
-        projected_month_end_spend = Decimal("0.00")
         if days_elapsed > 0:
-            raw_average_daily_spend = monthly_spending / Decimal(days_elapsed)
-            average_daily_spend = raw_average_daily_spend.quantize(Decimal("0.01"))
-            if days_elapsed == days_in_month:
-                projected_month_end_spend = monthly_spending
-            else:
-                projected_month_end_spend = (raw_average_daily_spend * Decimal(days_in_month)).quantize(
-                    Decimal("0.01")
-                )
+            average_daily_spend = (monthly_spending / Decimal(days_elapsed)).quantize(Decimal("0.01"))
 
-        projected_overspend = max(projected_month_end_spend - monthly_budget, Decimal("0.00"))
+        # Full-month spend projections. When budgets exist we regress the observed
+        # daily pace toward the budgeted pace, weighted by how far into the month we
+        # are, so an early-month spike (e.g. rent on day 1) doesn't blow the
+        # projection out of proportion. Overspend/runway compare on the *budgeted*
+        # basis so both sides live in the same universe as the budget. Without
+        # budgets there is no prior to lean on, so we fall back to a straight linear
+        # extrapolation of actual spend.
+        if monthly_budget > 0:
+            projected_month_end_spend = self._project_spend(
+                spend_to_date=monthly_spending,
+                budget_reference=monthly_budget,
+                days_elapsed=days_elapsed,
+                days_in_month=days_in_month,
+            )
+            projected_budgeted_spend = self._project_spend(
+                spend_to_date=budgeted_spending,
+                budget_reference=monthly_budget,
+                days_elapsed=days_elapsed,
+                days_in_month=days_in_month,
+            )
+        else:
+            projected_month_end_spend = self._extrapolate_spend(
+                spend_to_date=monthly_spending,
+                days_elapsed=days_elapsed,
+                days_in_month=days_in_month,
+            )
+            projected_budgeted_spend = projected_month_end_spend
+
+        projected_overspend = max(projected_budgeted_spend - monthly_budget, Decimal("0.00"))
         runway_drain_amount, runway_drain_label = self._runway_drain(
             projected_month_end_spend=projected_month_end_spend,
             projected_overspend=projected_overspend,
@@ -133,6 +156,7 @@ class SummaryService:
             "monthly_spending_amount": self._format_decimal(monthly_spending),
             "monthly_budget_amount": self._format_decimal(monthly_budget),
             "budgeted_spending_amount": self._format_decimal(budgeted_spending),
+            "unbudgeted_spending_amount": self._format_decimal(unbudgeted_spending),
             "money_left_amount": self._format_decimal(money_left),
             "uncategorized_count": uncategorized_count,
             "days_elapsed": days_elapsed,
@@ -347,6 +371,44 @@ class SummaryService:
         if utilization >= Decimal("85.0"):
             return "watch"
         return "on_track"
+
+    def _extrapolate_spend(
+        self, *, spend_to_date: Decimal, days_elapsed: int, days_in_month: int
+    ) -> Decimal:
+        """Straight linear extrapolation of spend to the full month (no budget prior)."""
+        if days_elapsed <= 0:
+            return Decimal("0.00")
+        if days_elapsed >= days_in_month:
+            return spend_to_date.quantize(Decimal("0.01"))
+        daily = spend_to_date / Decimal(days_elapsed)
+        return (daily * Decimal(days_in_month)).quantize(Decimal("0.01"))
+
+    def _project_spend(
+        self,
+        *,
+        spend_to_date: Decimal,
+        budget_reference: Decimal,
+        days_elapsed: int,
+        days_in_month: int,
+    ) -> Decimal:
+        """Budget-anchored, confidence-weighted full-month spend projection.
+
+        The remaining-day daily rate blends the observed pace with the budgeted
+        pace, weighted by ``days_elapsed / days_in_month``. Early in the month the
+        budget dominates (little signal); late in the month the observed pace does.
+        """
+        if days_elapsed <= 0:
+            # No signal yet: assume spending simply tracks the budget.
+            return budget_reference.quantize(Decimal("0.01"))
+        if days_elapsed >= days_in_month:
+            return spend_to_date.quantize(Decimal("0.01"))
+
+        days_remaining = days_in_month - days_elapsed
+        confidence = Decimal(days_elapsed) / Decimal(days_in_month)
+        actual_daily = spend_to_date / Decimal(days_elapsed)
+        budget_daily = budget_reference / Decimal(days_in_month)
+        blended_daily = confidence * actual_daily + (Decimal("1") - confidence) * budget_daily
+        return (spend_to_date + Decimal(days_remaining) * blended_daily).quantize(Decimal("0.01"))
 
     def _runway_drain(
         self,

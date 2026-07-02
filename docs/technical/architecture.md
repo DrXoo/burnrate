@@ -187,6 +187,7 @@ Suggested runtime components:
 
 * Backend API service
 * Sync worker
+* Telegram bot worker
 * Web UI service
 * PostgreSQL database
 
@@ -196,7 +197,7 @@ The sync worker should execute synchronization use cases and scheduled jobs, whi
 
 The Web UI should remain a presentation client over the backend APIs.
 
-Telegram support can live inside the backend service at first, or move into its own small worker later if operational needs justify it.
+The Telegram bot runs as its own long-polling worker (`burnrate.telegram_bot`). It is a read-only presentation client: it dispatches chat commands to the same application services the API uses and formats their output, without implementing any financial logic of its own. Access is restricted to an allow-list of chat ids (`TELEGRAM_ALLOWED_CHAT_IDS`), matching the single-owner model.
 
 ---
 
@@ -206,6 +207,7 @@ For an initial self-hosted deployment, BurnRate can be shipped as:
 
 * One backend service
 * One sync worker
+* One Telegram bot worker
 * One Web UI service
 * One PostgreSQL database
 

@@ -221,24 +221,68 @@ def test_summary_service_returns_phase_3_dashboard_metrics() -> None:
     assert summary["runway_balance_amount"] == "1500.00"
     assert summary["runway_account_count"] == 1
     assert summary["runway_accounts"][0]["display_name"] == "Savings"
-    assert summary["runway_drain_amount"] == "120.00"
+    assert summary["runway_drain_amount"] == "90.00"
     assert summary["runway_drain_label"] == "Projected overspend"
     assert summary["runway_message"] == "Runway is based on projected monthly overspend against the active category budgets."
     assert summary["monthly_spending_amount"] == "260.00"
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["budgeted_spending_amount"] == "260.00"
+    assert summary["unbudgeted_spending_amount"] == "0.00"
     assert summary["money_left_amount"] == "140.00"
     assert summary["uncategorized_count"] == 1
     assert summary["days_elapsed"] == 15
     assert summary["days_in_month"] == 30
     assert summary["average_daily_spend_amount"] == "17.33"
-    assert summary["projected_month_end_spend_amount"] == "520.00"
-    assert summary["projected_overspend_amount"] == "120.00"
-    assert summary["runway_months_left"] == "12.50"
+    # Budget-anchored projection: 260 spent + 15 remaining days x blended daily
+    # (0.5*17.333 actual + 0.5*13.333 budget) = 490.00, so overspend = 490 - 400.
+    assert summary["projected_month_end_spend_amount"] == "490.00"
+    assert summary["projected_overspend_amount"] == "90.00"
+    assert summary["runway_months_left"] == "16.67"
     assert summary["runway_status"] == "stable"
     assert summary["budget_usage"][0]["category_name"] == "Utilities"
     assert summary["budget_usage"][0]["status"] == "over"
     assert summary["budget_usage"][0]["remaining_amount"] == "-20.00"
+
+
+def test_summary_service_splits_budgeted_and_unbudgeted_spend() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    # A categorized expense in a category that has no budget.
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    entertainment = Category(name="Entertainment", type="expense", active=True)
+    db.add(entertainment)
+    db.flush()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-entertainment",
+            booking_date=date(2026, 6, 6),
+            value_date=date(2026, 6, 6),
+            amount=Decimal("-30.00"),
+            currency="EUR",
+            description="Cinema",
+            merchant_name="Theatre",
+            counterparty_name=None,
+            direction="debit",
+            status="booked",
+            category_id=entertainment.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 6, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # monthly_spending reconciles as budgeted + unbudgeted.
+    assert summary["monthly_spending_amount"] == "290.00"
+    assert summary["budgeted_spending_amount"] == "260.00"
+    assert summary["unbudgeted_spending_amount"] == "30.00"
+    assert (
+        Decimal(summary["budgeted_spending_amount"]) + Decimal(summary["unbudgeted_spending_amount"])
+        == Decimal(summary["monthly_spending_amount"])
+    )
 
 
 def test_summary_service_marks_runway_not_available_without_runway_accounts() -> None:

@@ -6,6 +6,7 @@ import {
   createCategory,
   createRuleFromTransaction,
   deactivateBudget,
+  deleteRule,
   detectApiBase,
   getAccounts,
   getBudgets,
@@ -424,9 +425,8 @@ export function useBurnRateData() {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await updateRule(apiBase, ruleId, draft);
-    const nextRules = await getRules(apiBase);
-    setRules(nextRules);
+    const updated = await updateRule(apiBase, ruleId, draft);
+    setRules((current) => current.map((rule) => (rule.rule_id === updated.rule_id ? updated : rule)));
     await refreshLedgerViews();
   }
 
@@ -434,9 +434,17 @@ export function useBurnRateData() {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await toggleRule(apiBase, ruleId, active);
-    const nextRules = await getRules(apiBase);
-    setRules(nextRules);
+    const updated = await toggleRule(apiBase, ruleId, active);
+    setRules((current) => current.map((rule) => (rule.rule_id === updated.rule_id ? updated : rule)));
+  }
+
+  async function deleteRuleAction(ruleId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await deleteRule(apiBase, ruleId);
+    setRules((current) => current.filter((rule) => rule.rule_id !== ruleId));
+    await refreshLedgerViews();
   }
 
   async function createBudgetAction(draft: BudgetDraft) {
@@ -501,6 +509,7 @@ export function useBurnRateData() {
     createRule: createRuleAction,
     updateRule: updateRuleAction,
     toggleRule: toggleRuleAction,
+    deleteRule: deleteRuleAction,
     createBudget: createBudgetAction,
     updateBudget: updateBudgetAction,
     deactivateBudget: deactivateBudgetAction,

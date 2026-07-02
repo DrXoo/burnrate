@@ -38,6 +38,7 @@ class SummaryResponse(BaseModel):
     monthly_spending_amount: str
     monthly_budget_amount: str
     budgeted_spending_amount: str
+    unbudgeted_spending_amount: str
     money_left_amount: str
     uncategorized_count: int
     days_elapsed: int

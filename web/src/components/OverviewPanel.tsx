@@ -83,6 +83,12 @@ export function OverviewPanel({
               <strong className="stat-value">
                 {formatMoney(summary.monthly_spending_amount, summary.current_balance_currency)}
               </strong>
+              {summary.unbudgeted_spending_amount !== "0.00" ? (
+                <p className="meta-copy">
+                  {formatMoney(summary.budgeted_spending_amount, summary.current_balance_currency)} budgeted +{" "}
+                  {formatMoney(summary.unbudgeted_spending_amount, summary.current_balance_currency)} unbudgeted.
+                </p>
+              ) : null}
               <p className="meta-copy">
                 {formatMoney(summary.average_daily_spend_amount, summary.current_balance_currency)} per day so far.
               </p>
@@ -102,12 +108,13 @@ export function OverviewPanel({
             <article
               className={`stat-card ${summary.projected_overspend_amount !== "0.00" ? "stat-card-danger" : ""}`.trim()}
             >
-              <span className="stat-label">Projected month end</span>
+              <span className="stat-label">Projected spend</span>
               <strong className="stat-value">
                 {formatMoney(summary.projected_month_end_spend_amount, summary.current_balance_currency)}
               </strong>
               <p className="meta-copy">
-                Based on {summary.days_elapsed} of {summary.days_in_month} days elapsed.
+                Full-month estimate, blended toward your budget early on ({summary.days_elapsed} of{" "}
+                {summary.days_in_month} days elapsed).
               </p>
             </article>
 

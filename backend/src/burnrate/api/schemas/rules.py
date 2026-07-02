@@ -26,6 +26,12 @@ class RuleListResponse(BaseModel):
     rules: list[RuleSummaryResponse]
 
 
+class RuleDeletionResponse(BaseModel):
+    transactions_touched: int
+    transactions_rematched: int
+    transactions_returned_to_queue: int
+
+
 class CreateRuleFromTransactionRequest(BaseModel):
     name: str | None = None
     match_field: MatchField | None = None

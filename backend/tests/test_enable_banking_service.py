@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from cryptography.hazmat.primitives import serialization
@@ -81,6 +81,7 @@ class FakeEnableBankingClient:
         account_id: str,
         date_from=None,
         date_to=None,
+        transaction_status: str | None = None,
         continuation_key: str | None = None,
     ):
         assert account_id == "account-uid-1"
@@ -90,9 +91,13 @@ class FakeEnableBankingClient:
                 "account_id": account_id,
                 "date_from": date_from,
                 "date_to": date_to,
+                "transaction_status": transaction_status,
                 "continuation_key": continuation_key,
             }
         )
+        if transaction_status is not None:
+            # This bank exposes no pending transactions over open banking.
+            return {"transactions": {"booked": [], "pending": []}}
         return {
             "transactions": {
                 "booked": [
@@ -121,6 +126,7 @@ class EmptyTransactionsClient(FakeEnableBankingClient):
         account_id: str,
         date_from=None,
         date_to=None,
+        transaction_status: str | None = None,
         continuation_key: str | None = None,
     ):
         assert account_id == "account-uid-1"
@@ -130,6 +136,7 @@ class EmptyTransactionsClient(FakeEnableBankingClient):
                 "account_id": account_id,
                 "date_from": date_from,
                 "date_to": date_to,
+                "transaction_status": transaction_status,
                 "continuation_key": continuation_key,
             }
         )
@@ -143,6 +150,7 @@ class NullPartyTransactionsClient(FakeEnableBankingClient):
         account_id: str,
         date_from=None,
         date_to=None,
+        transaction_status: str | None = None,
         continuation_key: str | None = None,
     ):
         assert account_id == "account-uid-1"
@@ -152,9 +160,12 @@ class NullPartyTransactionsClient(FakeEnableBankingClient):
                 "account_id": account_id,
                 "date_from": date_from,
                 "date_to": date_to,
+                "transaction_status": transaction_status,
                 "continuation_key": continuation_key,
             }
         )
+        if transaction_status is not None:
+            return {"transactions": [], "continuation_key": None}
         return {
             "transactions": [
                 {
@@ -273,9 +284,14 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     assert callback["accounts_imported"] == 1
     assert callback["transactions_imported"] == 1
     today = datetime.now(timezone.utc).date()
-    request = client.transaction_requests[0]
-    assert request["date_from"] == today.replace(day=1)
-    assert request["date_to"] == today
+    booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
+    pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
+    # Booked transactions are fetched for the current month.
+    assert booked_requests[0]["date_from"] == today.replace(day=1)
+    assert booked_requests[0]["date_to"] == today
+    # Pending transactions are fetched separately over a trailing 30-day window.
+    assert pending_requests[0]["date_from"] == today - timedelta(days=30)
+    assert pending_requests[0]["date_to"] == today
 
 
 def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:
@@ -296,7 +312,7 @@ def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:
     db.commit()
 
     assert callback["transactions_imported"] == 0
-    assert "Fetched Enable Banking transactions for account account-uid-1 page=1 window=" in caplog.text
+    assert "Fetched Enable Banking transactions for account account-uid-1 status=BOOK page=1 window=" in caplog.text
     assert "'transactions_count': 0" in caplog.text
 
 
@@ -337,8 +353,13 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     assert len(sync_sessions) == 2
     assert sync_sessions[-1].imported_transactions_count == 2
     today = datetime.now(timezone.utc).date()
-    assert client.transaction_requests[-1]["date_from"] == today.replace(day=1)
-    assert client.transaction_requests[-1]["date_to"] == today
+    booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
+    pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
+    # The most recent resync fetched booked for the current month and pending over a trailing window.
+    assert booked_requests[-1]["date_from"] == today.replace(day=1)
+    assert booked_requests[-1]["date_to"] == today
+    assert pending_requests[-1]["date_from"] == today - timedelta(days=30)
+    assert pending_requests[-1]["date_to"] == today
 
 
 def test_enable_banking_service_handles_null_creditor_and_debtor() -> None:

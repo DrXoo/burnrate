@@ -80,6 +80,7 @@ class EnableBankingClient:
         account_id: str,
         date_from: date | None = None,
         date_to: date | None = None,
+        transaction_status: str | None = None,
         continuation_key: str | None = None,
     ) -> dict[str, Any]:
         params: dict[str, Any] = {}
@@ -87,6 +88,8 @@ class EnableBankingClient:
             params["date_from"] = date_from.isoformat()
         if date_to is not None:
             params["date_to"] = date_to.isoformat()
+        if transaction_status is not None:
+            params["transaction_status"] = transaction_status
         if continuation_key:
             params["continuation_key"] = continuation_key
         return self._request("GET", f"/accounts/{account_id}/transactions", params=params)

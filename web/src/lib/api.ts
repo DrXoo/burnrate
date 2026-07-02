@@ -188,6 +188,10 @@ export async function toggleRule(apiBase: string, ruleId: string, active: boolea
   });
 }
 
+export async function deleteRule(apiBase: string, ruleId: string): Promise<void> {
+  await fetchJson(`${apiBase}/rules/${ruleId}`, { method: "DELETE" });
+}
+
 export async function getBudgets(apiBase: string): Promise<Budget[]> {
   const payload = await fetchJson<{ budgets: Budget[] }>(`${apiBase}/budgets`);
   return payload.budgets ?? [];

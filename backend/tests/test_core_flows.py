@@ -81,9 +81,13 @@ class FakeBankClient:
             ]
         }
 
-    def get_account_transactions(self, *, account_id: str, date_from=None, date_to=None, continuation_key=None):
+    def get_account_transactions(
+        self, *, account_id: str, date_from=None, date_to=None, transaction_status=None, continuation_key=None
+    ):
         assert account_id == "acc-1"
         assert continuation_key is None
+        if transaction_status is not None:
+            return {"transactions": {"booked": [], "pending": []}}
         return {"transactions": {"booked": list(self.booked), "pending": []}}
 
 
@@ -218,3 +222,99 @@ def test_core_flow_rule_auto_categorizes_matching_transaction_on_resync() -> Non
     summary = SummaryService(db=db).get_summary(month=MONTH, today=REFERENCE_DAY)
     assert summary["uncategorized_count"] == 0
     assert summary["monthly_spending_amount"] == "36.00"
+
+
+def test_delete_rule_returns_matched_transactions_to_the_unknown_queue() -> None:
+    db = make_session()
+    client = FakeBankClient()
+    bank = EnableBankingService(db=db, settings=make_settings(), client=client)
+
+    connection_id = link_and_import(db, bank)
+
+    categorization = CategorizationService(db=db)
+    food = categorization.create_category(name="Food", category_type="expense")
+    db.commit()
+    first = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-1"))
+    assert first is not None
+    categorization.categorize_transaction(transaction_id=str(first.id), category_id=food["category_id"])
+    db.commit()
+    rules = RulesService(db=db)
+    created = rules.create_rule_from_transaction(transaction_id=str(first.id))
+    db.commit()
+
+    # A new Mercadona transaction is auto-categorized by the rule on the next sync.
+    client.booked.append(
+        _booked_transaction(txid="tx-2", amount="20.01", booking_date="2026-01-05", merchant="Mercadona")
+    )
+    bank.sync_connection(connection_id=connection_id)
+    db.commit()
+    second = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-2"))
+    assert second is not None
+    assert second.matched_rule_id is not None
+
+    # Deleting the rule de-assigns both rule-matched transactions; with no other
+    # rule to catch them, they return to the unknown queue.
+    result = rules.delete_rule(rule_id=created["rule_id"])
+    db.commit()
+
+    assert result["transactions_touched"] == 2
+    assert result["transactions_rematched"] == 0
+    assert result["transactions_returned_to_queue"] == 2
+    assert rules.list_rules() == []
+
+    for txn in (first, second):
+        db.refresh(txn)
+        assert txn.category_id is None
+        assert txn.matched_rule_id is None
+
+    summary = SummaryService(db=db).get_summary(month=MONTH, today=REFERENCE_DAY)
+    assert summary["uncategorized_count"] == 2
+
+
+def test_delete_rule_rematches_transactions_to_another_active_rule() -> None:
+    db = make_session()
+    client = FakeBankClient()
+    bank = EnableBankingService(db=db, settings=make_settings(), client=client)
+
+    connection_id = link_and_import(db, bank)
+
+    categorization = CategorizationService(db=db)
+    food = categorization.create_category(name="Food", category_type="expense")
+    snacks = categorization.create_category(name="Snacks", category_type="expense")
+    db.commit()
+    first = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-1"))
+    assert first is not None
+    categorization.categorize_transaction(transaction_id=str(first.id), category_id=food["category_id"])
+    db.commit()
+    rules = RulesService(db=db)
+    primary = rules.create_rule_from_transaction(transaction_id=str(first.id))
+    # A second, lower-priority rule that also matches "Mercadona".
+    fallback = rules.create_rule_from_transaction(
+        transaction_id=str(first.id),
+        match_field="merchant_name",
+        match_operator="contains",
+        match_value="Mercadona",
+        category_id=snacks["category_id"],
+    )
+    db.commit()
+
+    client.booked.append(
+        _booked_transaction(txid="tx-2", amount="20.01", booking_date="2026-01-05", merchant="Mercadona")
+    )
+    bank.sync_connection(connection_id=connection_id)
+    db.commit()
+    second = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-2"))
+    assert second is not None
+    assert str(second.matched_rule_id) == primary["rule_id"]
+
+    # Deleting the primary rule re-runs matching; the fallback rule picks it up.
+    result = rules.delete_rule(rule_id=primary["rule_id"])
+    db.commit()
+
+    assert result["transactions_rematched"] >= 1
+    assert result["transactions_returned_to_queue"] == 0
+    assert {rule["rule_id"] for rule in rules.list_rules()} == {fallback["rule_id"]}
+
+    db.refresh(second)
+    assert str(second.category_id) == snacks["category_id"]
+    assert str(second.matched_rule_id) == fallback["rule_id"]

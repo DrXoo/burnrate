@@ -29,6 +29,7 @@ class FakeSummaryService:
             "monthly_spending_amount": "260.00",
             "monthly_budget_amount": "400.00",
             "budgeted_spending_amount": "260.00",
+            "unbudgeted_spending_amount": "0.00",
             "money_left_amount": "140.00",
             "uncategorized_count": 1,
             "days_elapsed": 15,

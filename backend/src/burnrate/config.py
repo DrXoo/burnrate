@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         alias="ENABLE_BANKING_RETRY_BACKOFF_SECONDS",
     )
     sync_cron: str = Field(default="*/30 * * * *", alias="SYNC_CRON")
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
+    telegram_api_base_url: str = Field(default="https://api.telegram.org", alias="TELEGRAM_API_BASE_URL")
+    telegram_poll_timeout_seconds: int = Field(default=30, ge=0, alias="TELEGRAM_POLL_TIMEOUT_SECONDS")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -59,6 +63,15 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.app_cors_origins.split(",") if origin.strip()]
+
+    @property
+    def telegram_allowed_chat_id_set(self) -> set[int]:
+        ids: set[int] = set()
+        for raw in self.telegram_allowed_chat_ids.split(","):
+            candidate = raw.strip()
+            if candidate:
+                ids.add(int(candidate))
+        return ids
 
     @property
     def enable_banking_private_key_value(self) -> str:

@@ -103,6 +103,33 @@ class RulesService:
         rule.active = active
         return self._serialize_rule(rule=rule, category_name=category.name)
 
+    def delete_rule(self, *, rule_id: str) -> dict[str, Any]:
+        rule = self.db.get(CategorizationRule, self._parse_uuid(rule_id, "Rule id"))
+        if rule is None:
+            raise ValueError(f"Rule not found for id {rule_id}")
+
+        matched = self.db.scalars(
+            select(Transaction).where(Transaction.matched_rule_id == rule.id)
+        ).all()
+
+        # De-assign so we can drop the rule without a foreign-key violation.
+        for txn in matched:
+            txn.category_id = None
+            txn.matched_rule_id = None
+
+        self.db.delete(rule)
+        # autoflush=False: flush the delete so the rule is gone before re-matching,
+        # otherwise apply_rule_to_transaction could re-match the same transactions.
+        self.db.flush()
+
+        rematched = sum(1 for txn in matched if self.apply_rule_to_transaction(transaction=txn))
+
+        return {
+            "transactions_touched": len(matched),
+            "transactions_rematched": rematched,
+            "transactions_returned_to_queue": len(matched) - rematched,
+        }
+
     def update_rule(
         self,
         *,

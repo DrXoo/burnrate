@@ -89,7 +89,7 @@ export function TransactionsPanel({
           >
             <option value="">Any status</option>
             <option value="booked">Booked</option>
-            <option value="pending">Pending</option>
+            <option value="pending">Pending *</option>
             <option value="ignored">Ignored</option>
           </select>
         </label>
@@ -148,6 +148,12 @@ export function TransactionsPanel({
           <Pager total={total} offset={paging.offset} limit={paging.limit} onMove={onMovePage} />
         </>
       )}
+
+      <p className="hint-copy" role="note">
+        * Held or pending transactions may not appear here. Many banks only share a transaction through open
+        banking once it has fully posted, so BurnRate can display it only after your bank finalizes it —
+        usually within a few days.
+      </p>
 
       {selectedTransaction ? (
         <TransactionDetailModal

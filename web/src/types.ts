@@ -150,6 +150,7 @@ export interface SummaryDashboard {
   monthly_spending_amount: string;
   monthly_budget_amount: string;
   budgeted_spending_amount: string;
+  unbudgeted_spending_amount: string;
   money_left_amount: string;
   uncategorized_count: number;
   days_elapsed: number;

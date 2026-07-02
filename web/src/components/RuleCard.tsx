@@ -9,11 +9,12 @@ interface RuleCardProps {
   rule: Rule;
   onToggleRule: (ruleId: string, active: boolean) => Promise<void>;
   onUpdateRule: (ruleId: string, draft: RuleUpdateDraft) => Promise<void>;
+  onDeleteRule: (ruleId: string) => Promise<void>;
 }
 
-export function RuleCard({ rule, onToggleRule, onUpdateRule }: RuleCardProps) {
+export function RuleCard({ rule, onToggleRule, onUpdateRule, onDeleteRule }: RuleCardProps) {
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<"toggle" | "save" | null>(null);
+  const [busy, setBusy] = useState<"toggle" | "save" | "delete" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<RuleUpdateDraft>({
     name: rule.name || "",
@@ -41,6 +42,25 @@ export function RuleCard({ rule, onToggleRule, onUpdateRule }: RuleCardProps) {
       setBusy("toggle");
       setError(null);
       await onToggleRule(rule.rule_id, !rule.active);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setBusy(null);
+    }
+  }
+
+  async function handleDelete() {
+    if (
+      !window.confirm(
+        `Delete the "${rule.name || `${rule.category_name} rule`}" rule? Transactions matched by it will be returned to the unknown queue and re-categorized using your other active rules.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      setBusy("delete");
+      setError(null);
+      await onDeleteRule(rule.rule_id);
+      // On success this card unmounts (rule removed from list); no state reset needed.
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
       setBusy(null);
@@ -87,6 +107,9 @@ export function RuleCard({ rule, onToggleRule, onUpdateRule }: RuleCardProps) {
         </button>
         <button type="button" className="button button-secondary" disabled={busy === "toggle"} onClick={handleToggle}>
           {busy === "toggle" ? "Updating..." : rule.active ? "Disable rule" : "Enable rule"}
+        </button>
+        <button type="button" className="button button-secondary" disabled={busy !== null} onClick={handleDelete}>
+          {busy === "delete" ? "Deleting..." : "Delete rule"}
         </button>
       </div>
 

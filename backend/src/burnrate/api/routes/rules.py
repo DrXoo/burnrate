@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from burnrate.api.dependencies import get_rules_service
 from burnrate.api.schemas.rules import (
     CreateRuleFromTransactionRequest,
+    RuleDeletionResponse,
     RuleListResponse,
     RuleSummaryResponse,
     SetRuleStatusRequest,
@@ -62,6 +63,22 @@ def set_rule_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
     return RuleSummaryResponse.model_validate(payload)
+
+
+@router.delete("/rules/{rule_id}", response_model=RuleDeletionResponse)
+def delete_rule(
+    rule_id: str,
+    service: RulesService = Depends(get_rules_service),
+) -> RuleDeletionResponse:
+    try:
+        payload = service.delete_rule(rule_id=rule_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+
+    return RuleDeletionResponse.model_validate(payload)
 
 
 @router.patch("/rules/{rule_id}", response_model=RuleSummaryResponse)

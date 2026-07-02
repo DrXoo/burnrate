@@ -304,39 +304,10 @@ class EnableBankingService:
             balances_payload = self.client.get_account_balances(account_id=account_uid)
             self._apply_latest_balance(local_account=local_account, balances_payload=balances_payload)
 
-            date_from, date_to = self._current_month_transaction_window()
-            continuation_key: str | None = None
-            page_number = 1
-            while True:
-                transactions_payload = self.client.get_account_transactions(
-                    account_id=account_uid,
-                    date_from=date_from,
-                    date_to=date_to,
-                    continuation_key=continuation_key,
-                )
-                transactions = self._extract_transactions(transactions_payload)
-                payload_summary = self._summarize_transactions_payload(transactions_payload)
-                log_level = logging.INFO if transactions else logging.WARNING
-                logger.log(
-                    log_level,
-                    "Fetched Enable Banking transactions for account %s page=%s window=%s..%s imported=%s summary=%s",
-                    account_uid,
-                    page_number,
-                    date_from.isoformat(),
-                    date_to.isoformat(),
-                    len(transactions),
-                    payload_summary,
-                )
-                for transaction_payload in transactions:
-                    self._upsert_transaction(
-                        local_account=local_account,
-                        transaction_payload=transaction_payload,
-                    )
-                summary.transactions_imported += len(transactions)
-                continuation_key = transactions_payload.get("continuation_key")
-                if not continuation_key:
-                    break
-                page_number += 1
+            summary.transactions_imported += self._import_account_transactions(
+                local_account=local_account,
+                account_uid=account_uid,
+            )
 
         return summary
 
@@ -370,39 +341,10 @@ class EnableBankingService:
             balances_payload = self.client.get_account_balances(account_id=mapping.external_account_id)
             self._apply_latest_balance(local_account=local_account, balances_payload=balances_payload)
 
-            date_from, date_to = self._current_month_transaction_window()
-            continuation_key: str | None = None
-            page_number = 1
-            while True:
-                transactions_payload = self.client.get_account_transactions(
-                    account_id=mapping.external_account_id,
-                    date_from=date_from,
-                    date_to=date_to,
-                    continuation_key=continuation_key,
-                )
-                transactions = self._extract_transactions(transactions_payload)
-                payload_summary = self._summarize_transactions_payload(transactions_payload)
-                log_level = logging.INFO if transactions else logging.WARNING
-                logger.log(
-                    log_level,
-                    "Fetched Enable Banking transactions for account %s page=%s window=%s..%s imported=%s summary=%s",
-                    mapping.external_account_id,
-                    page_number,
-                    date_from.isoformat(),
-                    date_to.isoformat(),
-                    len(transactions),
-                    payload_summary,
-                )
-                for transaction_payload in transactions:
-                    self._upsert_transaction(
-                        local_account=local_account,
-                        transaction_payload=transaction_payload,
-                    )
-                summary.transactions_imported += len(transactions)
-                continuation_key = transactions_payload.get("continuation_key")
-                if not continuation_key:
-                    break
-                page_number += 1
+            summary.transactions_imported += self._import_account_transactions(
+                local_account=local_account,
+                account_uid=mapping.external_account_id,
+            )
 
         return summary
 
@@ -453,9 +395,86 @@ class EnableBankingService:
         self.db.flush()
         return account
 
+    def _import_account_transactions(self, *, local_account: Account, account_uid: str) -> int:
+        """Import booked and pending transactions for one external account.
+
+        Booked transactions are fetched for the current month (the amounts that drive
+        budgets/runway). Pending transactions are fetched separately with ``PDNG`` over a
+        trailing window, because Enable Banking returns a single status per call and a held
+        transaction may have originated in the previous month. Banks that do not expose
+        pending transactions over open banking simply return nothing for the pending call.
+        """
+        booked_from, booked_to = self._current_month_transaction_window()
+        imported = self._fetch_and_upsert_transactions(
+            local_account=local_account,
+            account_uid=account_uid,
+            date_from=booked_from,
+            date_to=booked_to,
+            transaction_status=None,
+        )
+        pending_from, pending_to = self._pending_transaction_window()
+        imported += self._fetch_and_upsert_transactions(
+            local_account=local_account,
+            account_uid=account_uid,
+            date_from=pending_from,
+            date_to=pending_to,
+            transaction_status="PDNG",
+        )
+        return imported
+
+    def _fetch_and_upsert_transactions(
+        self,
+        *,
+        local_account: Account,
+        account_uid: str,
+        date_from: date,
+        date_to: date,
+        transaction_status: str | None,
+    ) -> int:
+        imported = 0
+        continuation_key: str | None = None
+        page_number = 1
+        while True:
+            transactions_payload = self.client.get_account_transactions(
+                account_id=account_uid,
+                date_from=date_from,
+                date_to=date_to,
+                transaction_status=transaction_status,
+                continuation_key=continuation_key,
+            )
+            transactions = self._extract_transactions(transactions_payload)
+            payload_summary = self._summarize_transactions_payload(transactions_payload)
+            log_level = logging.INFO if transactions else logging.WARNING
+            logger.log(
+                log_level,
+                "Fetched Enable Banking transactions for account %s status=%s page=%s window=%s..%s imported=%s summary=%s",
+                account_uid,
+                transaction_status or "BOOK",
+                page_number,
+                date_from.isoformat(),
+                date_to.isoformat(),
+                len(transactions),
+                payload_summary,
+            )
+            for transaction_payload in transactions:
+                self._upsert_transaction(
+                    local_account=local_account,
+                    transaction_payload=transaction_payload,
+                )
+            imported += len(transactions)
+            continuation_key = transactions_payload.get("continuation_key")
+            if not continuation_key:
+                break
+            page_number += 1
+        return imported
+
     def _current_month_transaction_window(self) -> tuple[date, date]:
         today = datetime.now(UTC).date()
         return date(today.year, today.month, 1), today
+
+    def _pending_transaction_window(self) -> tuple[date, date]:
+        today = datetime.now(UTC).date()
+        return today - timedelta(days=30), today
 
     def _serialize_connection_summary(
         self,
