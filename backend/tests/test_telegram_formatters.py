@@ -17,6 +17,9 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "runway_balance_amount": "1500.00",
         "runway_balance_currency": "EUR",
         "monthly_spending_amount": "120.00",
+        "monthly_income_amount": "0.00",
+        "net_cash_flow_amount": "-120.00",
+        "unbudgeted_spending_amount": "0.00",
         "monthly_budget_amount": "200.00",
         "money_left_amount": "80.00",
         "average_daily_spend_amount": "4.00",
@@ -36,11 +39,34 @@ def test_format_summary_includes_core_metrics_and_budget() -> None:
 
     assert "Summary for 2026-06" in text
     assert "Balance: 500.00 EUR" in text
-    assert "Spent this month: 120.00 EUR" in text
+    assert "Spent: 120.00 EUR" in text
     assert "Budget: 200.00 EUR" in text
-    assert "Money left: 80.00 EUR" in text
+    assert "Left: 80.00 EUR" in text
+    assert "60% used" in text
     assert "Avg/day: 4.00 EUR (30/30 days)" in text
     assert "Runway: 12.50 months" in text
+
+
+def test_format_summary_includes_income_net_and_unbudgeted_when_present() -> None:
+    text = format_summary(
+        make_summary(
+            monthly_income_amount="2000.00",
+            net_cash_flow_amount="1880.00",
+            unbudgeted_spending_amount="15.00",
+        )
+    )
+
+    assert "Income: 2000.00 EUR" in text
+    assert "Net: 1880.00 EUR" in text
+    assert "unbudgeted" in text
+    assert "Projected: 120.00 EUR" in text
+
+
+def test_format_summary_hides_income_line_without_income() -> None:
+    text = format_summary(make_summary())
+
+    assert "Income:" not in text
+    assert "unbudgeted" not in text
 
 
 def test_format_summary_hides_budget_lines_when_no_budget() -> None:

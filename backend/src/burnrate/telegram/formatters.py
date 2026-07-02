@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 HELP_TEXT = "\n".join(
@@ -30,38 +30,61 @@ def format_summary(payload: dict[str, Any]) -> str:
     currency = payload["current_balance_currency"]
     lines = [
         f"📊 Summary for {payload['month']}",
+        "━━━━━━━━━━━━━━━━━━",
         "",
-        f"Balance: {_money(payload['current_balance_amount'], currency)}",
-        f"Spent this month: {_money(payload['monthly_spending_amount'], currency)}",
+        f"💰 Balance: {_money(payload['current_balance_amount'], currency)}",
+        "",
+        f"💸 Spent: {_money(payload['monthly_spending_amount'], currency)}",
     ]
 
-    if Decimal(payload["monthly_budget_amount"]) > 0:
-        lines.append(f"Budget: {_money(payload['monthly_budget_amount'], currency)}")
-        lines.append(f"Money left: {_money(payload['money_left_amount'], currency)}")
+    if Decimal(payload.get("unbudgeted_spending_amount", "0.00")) != 0:
+        lines.append(f"   ↳ incl. {_money(payload['unbudgeted_spending_amount'], currency)} unbudgeted")
 
+    if Decimal(payload.get("monthly_income_amount", "0.00")) > 0:
+        net_icon = "📈" if Decimal(payload["net_cash_flow_amount"]) >= 0 else "📉"
+        lines.append(f"💵 Income: {_money(payload['monthly_income_amount'], currency)}")
+        lines.append(f"{net_icon} Net: {_money(payload['net_cash_flow_amount'], currency)}")
+
+    if Decimal(payload["monthly_budget_amount"]) > 0:
+        lines.append("")
+        lines.append(f"🎯 Budget: {_money(payload['monthly_budget_amount'], currency)}")
+        lines.append(f"✅ Left: {_money(payload['money_left_amount'], currency)}")
+        lines.append(f"   {_budget_bar(payload)}")
+
+    lines.append("")
     lines.append(
-        f"Avg/day: {_money(payload['average_daily_spend_amount'], currency)} "
+        f"⏱ Avg/day: {_money(payload['average_daily_spend_amount'], currency)} "
         f"({payload['days_elapsed']}/{payload['days_in_month']} days)"
     )
-    lines.append(f"Projected month-end: {_money(payload['projected_month_end_spend_amount'], currency)}")
+    lines.append(f"🔮 Projected: {_money(payload['projected_month_end_spend_amount'], currency)}")
     lines.append("")
     lines.append(_runway_line(payload))
     return "\n".join(lines)
 
 
+def _budget_bar(payload: dict[str, Any], *, segments: int = 10) -> str:
+    budget = Decimal(payload["monthly_budget_amount"])
+    money_left = Decimal(payload["money_left_amount"])
+    used_pct = ((budget - money_left) / budget * 100) if budget > 0 else Decimal("0")
+    ratio = max(Decimal("0"), used_pct) / Decimal("100")
+    filled = min(segments, int((ratio * segments).to_integral_value(rounding=ROUND_HALF_UP)))
+    bar = "█" * filled + "░" * (segments - filled)
+    return f"[{bar}] {used_pct:.0f}% used"
+
+
 def _runway_line(payload: dict[str, Any]) -> str:
     status = payload["runway_status"]
     if status == "not_available":
-        return "Runway: not tracked (select reserve accounts in the web app)"
+        return "🛟 Runway: not tracked\n   (select reserve accounts in the web app)"
 
     months_left = payload["runway_months_left"]
     if months_left is None:
-        return "Runway: stable (spending within budget)"
+        return "🛟 Runway: stable\n   (spending within budget)"
 
     currency = payload["runway_balance_currency"]
     return (
-        f"Runway: {months_left} months "
-        f"({_money(payload['runway_balance_amount'], currency)} reserve, status: {status})"
+        f"🛟 Runway: {months_left} months\n"
+        f"   {_money(payload['runway_balance_amount'], currency)} reserve · {status}"
     )
 
 
