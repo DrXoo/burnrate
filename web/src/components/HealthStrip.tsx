@@ -50,7 +50,7 @@ export function HealthStrip({ connection, onSync }: HealthStripProps) {
   }
 
   return (
-    <div style={{ padding: "12px 30px 0" }}>
+    <div className="br-health" style={{ padding: "12px 30px 0" }}>
       <div
         style={{
           display: "flex",

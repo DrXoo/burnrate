@@ -14,6 +14,7 @@ import type { Section } from "../lib/viewTypes";
 interface SidebarProps {
   section: Section;
   reviewCount: number;
+  isOpen: boolean;
   onNavigate: (section: Section) => void;
 }
 
@@ -59,9 +60,10 @@ function NavItem({
   );
 }
 
-export function Sidebar({ section, reviewCount, onNavigate }: SidebarProps) {
+export function Sidebar({ section, reviewCount, isOpen, onNavigate }: SidebarProps) {
   return (
     <aside
+      className={`br-sidebar ${isOpen ? "br-sidebar-open" : ""}`.trim()}
       style={{
         flex: "none",
         width: 236,

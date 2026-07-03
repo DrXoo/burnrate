@@ -40,6 +40,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [heroMode, setHeroMode] = useState<HeroMode>("dial");
   const [connectOpen, setConnectOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimer = useRef<number | null>(null);
 
@@ -174,7 +175,16 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <div style={{ display: "flex", minHeight: "100vh" }}>
-        <Sidebar section={section} reviewCount={data.uncategorizedCount} onNavigate={setSection} />
+        <Sidebar
+          section={section}
+          reviewCount={data.uncategorizedCount}
+          isOpen={menuOpen}
+          onNavigate={(next) => {
+            setSection(next);
+            setMenuOpen(false);
+          }}
+        />
+        {menuOpen ? <div className="br-overlay" onClick={() => setMenuOpen(false)} /> : null}
 
         <main className="br-scroll" style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: "auto" }}>
           <TopBar
@@ -184,11 +194,12 @@ export default function App() {
             heroMode={heroMode}
             onToggleTheme={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}
             onSetHeroMode={setHeroMode}
+            onToggleMenu={() => setMenuOpen((value) => !value)}
           />
 
           {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} /> : null}
 
-          <div style={{ padding: "22px 30px 60px", maxWidth: 1160 }}>
+          <div className="br-content" style={{ padding: "22px 30px 60px", maxWidth: 1160 }}>
             {section === "dashboard" ? (
               <DashboardPage
                 summary={data.summary}

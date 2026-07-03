@@ -159,6 +159,7 @@ function DashboardContent({
     <div>
       {/* HERO */}
       <div
+        className="br-hero"
         style={{
           position: "relative",
           background: "var(--bg-2)",

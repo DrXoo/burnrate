@@ -1,4 +1,4 @@
-import { IconMoon } from "./icons";
+import { IconMenu, IconMoon } from "./icons";
 import type { HeroMode, Section, Theme } from "../lib/viewTypes";
 import { SECTION_TITLES } from "../lib/viewTypes";
 
@@ -9,11 +9,13 @@ interface TopBarProps {
   heroMode: HeroMode;
   onToggleTheme: () => void;
   onSetHeroMode: (mode: HeroMode) => void;
+  onToggleMenu: () => void;
 }
 
-export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, onSetHeroMode }: TopBarProps) {
+export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, onSetHeroMode, onToggleMenu }: TopBarProps) {
   return (
     <div
+      className="br-topbar"
       style={{
         position: "sticky",
         top: 0,
@@ -27,6 +29,26 @@ export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, on
         gap: 16,
       }}
     >
+      <button
+        type="button"
+        className="br-hamburger"
+        aria-label="Open menu"
+        onClick={onToggleMenu}
+        style={{
+          flex: "none",
+          width: 34,
+          height: 34,
+          borderRadius: 9,
+          border: "1px solid var(--line)",
+          background: "var(--bg-3)",
+          color: "var(--text-2)",
+          cursor: "pointer",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <IconMenu />
+      </button>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="num" style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}>
           {SECTION_TITLES[section]}

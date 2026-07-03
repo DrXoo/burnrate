@@ -139,3 +139,65 @@ body {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Horizontally scrollable dense tables (keeps column alignment on small screens). */
+.br-hscroll {
+  overflow-x: auto;
+}
+
+.br-hmin {
+  min-width: 620px;
+}
+
+/* Off-canvas nav trigger + backdrop are desktop-hidden by default. */
+.br-hamburger {
+  display: none;
+}
+
+.br-overlay {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .br-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    z-index: 40;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .br-sidebar-open {
+    transform: translateX(0) !important;
+  }
+
+  .br-hamburger {
+    display: inline-flex !important;
+  }
+
+  .br-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 35;
+  }
+
+  .br-topbar {
+    padding: 12px 14px !important;
+  }
+
+  .br-health {
+    padding: 10px 14px 0 !important;
+  }
+
+  .br-content {
+    padding: 16px 14px 56px !important;
+  }
+
+  .br-hero {
+    padding: 20px !important;
+  }
+}
