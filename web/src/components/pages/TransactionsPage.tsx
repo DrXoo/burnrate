@@ -577,7 +577,7 @@ export function TransactionsPage({
                           {transactionMeta(transaction)}
                         </div>
                       </div>
-                      <div className="num" style={{ fontSize: 12, color: "var(--text-2)", paddingTop: 7 }}>
+                      <div className="num" style={{ fontSize: 12, color: "var(--text-2)", paddingTop: 7, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {shortAccount(transaction.account_display_name)}
                       </div>
                       <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>

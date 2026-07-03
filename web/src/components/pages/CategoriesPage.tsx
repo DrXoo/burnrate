@@ -411,7 +411,12 @@ function CategoryDetail({
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {transactionTitle(transaction)}
                 </div>
-                <div className="num" style={{ fontSize: 12, color: "var(--text-3)" }}>{shortAccount(transaction.account_display_name)}</div>
+                <div
+                  className="num"
+                  style={{ fontSize: 12, color: "var(--text-3)", flex: "none", maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                >
+                  {shortAccount(transaction.account_display_name)}
+                </div>
                 <div className="num" style={{ fontSize: 13.5, fontWeight: 600, color: positive ? "var(--good)" : "var(--text)", flex: "none" }}>
                   {eur(transaction.amount)}
                 </div>
