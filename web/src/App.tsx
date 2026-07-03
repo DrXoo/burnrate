@@ -203,6 +203,7 @@ export default function App() {
               <TransactionsPage
                 accounts={data.accounts}
                 categories={data.categories}
+                rules={data.rules}
                 filters={data.filters}
                 applyFilters={data.applyFilters}
                 items={data.transactions.items}
@@ -215,6 +216,8 @@ export default function App() {
                 onCategorize={categorize}
                 onUncategorize={uncategorize}
                 onCreateRule={createRule}
+                onUpdateRule={updateRule}
+                onDeleteRule={deleteRule}
               />
             ) : null}
 

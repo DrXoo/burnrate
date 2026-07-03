@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
 import { IconSearch, IconSliders } from "../icons";
 import {
@@ -17,13 +17,16 @@ import type {
   MatchField,
   MatchOperator,
   PagingState,
+  Rule,
   RuleDraft,
+  RuleUpdateDraft,
   Transaction,
 } from "../../types";
 
 interface TransactionsPageProps {
   accounts: Account[];
   categories: Category[];
+  rules: Rule[];
   filters: FiltersState;
   applyFilters: (filters: FiltersState) => void;
   items: Transaction[];
@@ -36,9 +39,13 @@ interface TransactionsPageProps {
   onCategorize: (transactionId: string, categoryId: string) => Promise<void>;
   onUncategorize: (transactionId: string) => Promise<void>;
   onCreateRule: (transactionId: string, draft: RuleDraft) => Promise<void>;
+  onUpdateRule: (ruleId: string, draft: RuleUpdateDraft) => Promise<void>;
+  onDeleteRule: (ruleId: string) => Promise<void>;
 }
 
 interface RuleFormState {
+  mode: "create" | "edit";
+  editRuleId: string | null;
   name: string;
   match_field: MatchField;
   match_operator: MatchOperator;
@@ -46,7 +53,7 @@ interface RuleFormState {
   category_id: string;
 }
 
-const GRID = "72px 1fr 132px 172px 96px 34px";
+const GRID = "76px 1fr 138px 204px 96px";
 
 const FIELD_OPTIONS: Array<{ value: MatchField; label: string }> = [
   { value: "merchant_name", label: "Merchant" },
@@ -103,6 +110,7 @@ function shortDate(value: string | null | undefined): string {
 export function TransactionsPage({
   accounts,
   categories,
+  rules,
   filters,
   applyFilters,
   items,
@@ -115,11 +123,14 @@ export function TransactionsPage({
   onCategorize,
   onUncategorize,
   onCreateRule,
+  onUpdateRule,
+  onDeleteRule,
 }: TransactionsPageProps) {
   const [search, setSearch] = useState("");
   const [ruleTxnId, setRuleTxnId] = useState<string | null>(null);
   const [ruleForm, setRuleForm] = useState<RuleFormState | null>(null);
 
+  const rulesById = useMemo(() => new Map(rules.map((rule) => [rule.rule_id, rule])), [rules]);
   const categoryValue = filters.categoryId ? filters.categoryId : filters.categorized === "false" ? "uncat" : "all";
 
   function handleAccount(value: string) {
@@ -136,15 +147,21 @@ export function TransactionsPage({
     }
   }
 
-  function openRuleForm(transaction: Transaction) {
-    if (ruleTxnId === transaction.transaction_id) {
-      setRuleTxnId(null);
-      setRuleForm(null);
+  function closeForm() {
+    setRuleTxnId(null);
+    setRuleForm(null);
+  }
+
+  function openCreate(transaction: Transaction) {
+    if (ruleTxnId === transaction.transaction_id && ruleForm?.mode === "create") {
+      closeForm();
       return;
     }
     const field = suggestRuleField(transaction);
     setRuleTxnId(transaction.transaction_id);
     setRuleForm({
+      mode: "create",
+      editRuleId: null,
       name: "",
       match_field: field,
       match_operator: "contains",
@@ -153,20 +170,53 @@ export function TransactionsPage({
     });
   }
 
+  function openEdit(transaction: Transaction, rule: Rule) {
+    if (ruleTxnId === transaction.transaction_id && ruleForm?.mode === "edit") {
+      closeForm();
+      return;
+    }
+    setRuleTxnId(transaction.transaction_id);
+    setRuleForm({
+      mode: "edit",
+      editRuleId: rule.rule_id,
+      name: rule.name ?? "",
+      match_field: rule.match_field,
+      match_operator: rule.match_operator,
+      match_value: rule.match_value,
+      category_id: rule.category_id,
+    });
+  }
+
   async function submitRule() {
     if (!ruleTxnId || !ruleForm || !ruleForm.category_id) {
       return;
     }
-    await onCreateRule(ruleTxnId, {
-      name: ruleForm.name,
-      category_id: ruleForm.category_id,
-      match_field: ruleForm.match_field,
-      match_operator: ruleForm.match_operator,
-      match_value: ruleForm.match_value,
-      apply_to_existing_uncategorized: true,
-    });
-    setRuleTxnId(null);
-    setRuleForm(null);
+    if (ruleForm.mode === "edit" && ruleForm.editRuleId) {
+      await onUpdateRule(ruleForm.editRuleId, {
+        name: ruleForm.name,
+        match_field: ruleForm.match_field,
+        match_operator: ruleForm.match_operator,
+        match_value: ruleForm.match_value,
+        apply_to_existing_uncategorized: true,
+      });
+    } else {
+      await onCreateRule(ruleTxnId, {
+        name: ruleForm.name,
+        category_id: ruleForm.category_id,
+        match_field: ruleForm.match_field,
+        match_operator: ruleForm.match_operator,
+        match_value: ruleForm.match_value,
+        apply_to_existing_uncategorized: true,
+      });
+    }
+    closeForm();
+  }
+
+  async function removeRule() {
+    if (ruleForm?.editRuleId) {
+      await onDeleteRule(ruleForm.editRuleId);
+    }
+    closeForm();
   }
 
   const visible = items.filter(
@@ -241,9 +291,8 @@ export function TransactionsPage({
           <div>Date</div>
           <div>Merchant</div>
           <div>Account</div>
-          <div>Category</div>
+          <div>Category &amp; rule</div>
           <div style={{ textAlign: "right" }}>Amount</div>
-          <div />
         </div>
 
         {error ? (
@@ -257,14 +306,15 @@ export function TransactionsPage({
         ) : (
           visible.map((transaction) => {
             const positive = amountTone(transaction.amount, transaction.direction) === "positive";
-            const ruleOpen = ruleTxnId === transaction.transaction_id;
+            const matchedRule = transaction.matched_rule_id ? rulesById.get(transaction.matched_rule_id) : undefined;
+            const formOpen = ruleTxnId === transaction.transaction_id && ruleForm !== null;
             return (
               <div key={transaction.transaction_id} style={{ borderBottom: "1px solid var(--line)" }}>
-                <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 12, padding: "12px 18px", alignItems: "center" }}>
-                  <div className="num" style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 12, padding: "12px 18px", alignItems: "start" }}>
+                  <div className="num" style={{ fontSize: 12.5, color: "var(--text-3)", paddingTop: 7 }}>
                     {shortDate(transaction.booking_date || transaction.value_date)}
                   </div>
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, paddingTop: 4 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {transactionTitle(transaction)}
                     </div>
@@ -272,10 +322,10 @@ export function TransactionsPage({
                       {transactionMeta(transaction)}
                     </div>
                   </div>
-                  <div className="num" style={{ fontSize: 12, color: "var(--text-2)" }}>
+                  <div className="num" style={{ fontSize: 12, color: "var(--text-2)", paddingTop: 7 }}>
                     {shortAccount(transaction.account_display_name)}
                   </div>
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 6 }}>
                     <select
                       className="br-sel"
                       style={{ maxWidth: "100%", borderColor: transaction.category_id ? "var(--line-2)" : "var(--watch)" }}
@@ -296,46 +346,70 @@ export function TransactionsPage({
                         </option>
                       ))}
                     </select>
-                    {transaction.matched_rule_id ? (
-                      <div style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        Rule: {transaction.matched_rule_name || "attached"}
-                      </div>
-                    ) : null}
+                    {matchedRule ? (
+                      <button
+                        type="button"
+                        title="Edit the rule that categorized this transaction"
+                        onClick={() => openEdit(transaction, matchedRule)}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          alignSelf: "flex-start",
+                          maxWidth: "100%",
+                          border: `1px solid ${formOpen && ruleForm?.mode === "edit" ? "var(--accent)" : "var(--line-2)"}`,
+                          background: "var(--bg-3)",
+                          color: "var(--text-2)",
+                          borderRadius: 7,
+                          padding: "3px 8px",
+                          font: "500 11px 'Hanken Grotesque', sans-serif",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <IconSliders size={12} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          Rule: {matchedRule.name || "attached"}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        title="Create a categorization rule from this transaction"
+                        onClick={() => openCreate(transaction)}
+                        disabled={categories.length === 0}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          alignSelf: "flex-start",
+                          border: `1px solid ${formOpen && ruleForm?.mode === "create" ? "var(--accent)" : "var(--line-2)"}`,
+                          background: "transparent",
+                          color: formOpen && ruleForm?.mode === "create" ? "var(--accent)" : "var(--text-2)",
+                          borderRadius: 7,
+                          padding: "3px 8px",
+                          font: "500 11px 'Hanken Grotesque', sans-serif",
+                          cursor: categories.length === 0 ? "not-allowed" : "pointer",
+                          opacity: categories.length === 0 ? 0.5 : 1,
+                        }}
+                      >
+                        <IconSliders size={12} />
+                        Create rule
+                      </button>
+                    )}
                   </div>
                   <div
                     className="num"
-                    style={{ textAlign: "right", fontSize: 14, fontWeight: 600, color: positive ? "var(--good)" : "var(--text)" }}
+                    style={{ textAlign: "right", fontSize: 14, fontWeight: 600, color: positive ? "var(--good)" : "var(--text)", paddingTop: 6 }}
                   >
                     {eur(transaction.amount)}
                   </div>
-                  <button
-                    type="button"
-                    title="Create rule from this transaction"
-                    onClick={() => openRuleForm(transaction)}
-                    disabled={categories.length === 0}
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 7,
-                      border: `1px solid ${ruleOpen ? "var(--accent)" : "var(--line-2)"}`,
-                      background: ruleOpen ? "color-mix(in oklab, var(--accent) 16%, transparent)" : "var(--bg-3)",
-                      color: ruleOpen ? "var(--accent)" : "var(--text-3)",
-                      cursor: categories.length === 0 ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: categories.length === 0 ? 0.5 : 1,
-                    }}
-                  >
-                    <IconSliders />
-                  </button>
                 </div>
 
-                {ruleOpen && ruleForm ? (
+                {formOpen && ruleForm ? (
                   <div style={{ padding: "0 18px 16px" }}>
                     <div style={{ background: "var(--bg-3)", border: "1px solid var(--accent)", borderRadius: 11, padding: "13px 14px" }}>
                       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 700, marginBottom: 9 }}>
-                        New rule from “{transactionTitle(transaction)}”
+                        {ruleForm.mode === "edit" ? "Edit rule" : `New rule from “${transactionTitle(transaction)}”`}
                       </div>
                       <input
                         className="br-input"
@@ -392,13 +466,26 @@ export function TransactionsPage({
                           ))}
                         </select>
                       </div>
-                      <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
-                        <button type="button" style={ghostButton} onClick={() => { setRuleTxnId(null); setRuleForm(null); }}>
-                          Cancel
-                        </button>
-                        <button type="button" style={accentButton} onClick={() => void submitRule()}>
-                          Create rule
-                        </button>
+                      <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "space-between", alignItems: "center" }}>
+                        {ruleForm.mode === "edit" ? (
+                          <button
+                            type="button"
+                            onClick={() => void removeRule()}
+                            style={{ border: "1px solid var(--over)", background: "transparent", color: "var(--over)", borderRadius: 8, padding: "7px 12px", font: "500 12px 'Hanken Grotesque', sans-serif", cursor: "pointer" }}
+                          >
+                            Delete rule
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button type="button" style={ghostButton} onClick={closeForm}>
+                            Cancel
+                          </button>
+                          <button type="button" style={accentButton} onClick={() => void submitRule()}>
+                            {ruleForm.mode === "edit" ? "Save rule" : "Create rule"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
