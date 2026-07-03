@@ -145,7 +145,7 @@ export function CategoriesPage({
   const selectedTxns = selected ? monthTxns.filter((transaction) => transaction.category_id === selected.category.category_id) : [];
 
   return (
-    <div className="br-cols" style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 14 }}>
+    <div className="br-cols" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1.5fr)", gap: 14 }}>
       {/* LIST */}
       <div
         style={{
@@ -155,6 +155,7 @@ export function CategoriesPage({
           padding: 18,
           boxShadow: "var(--card-shadow)",
           alignSelf: "start",
+          minWidth: 0,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -207,7 +208,9 @@ export function CategoriesPage({
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                           <span style={{ width: 9, height: 9, borderRadius: 2, background: stat.color }} />
-                          <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500, color: "var(--text)" }}>{stat.category.name}</span>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {stat.category.name}
+                          </span>
                           <span className="num" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
                             {stat.count} txns
                           </span>
@@ -299,6 +302,7 @@ export function CategoriesPage({
           borderRadius: 16,
           padding: 22,
           boxShadow: "var(--card-shadow)",
+          minWidth: 0,
         }}
       >
         {selected ? (
@@ -347,7 +351,7 @@ function CategoryDetail({
 
       {hasBudget ? (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Spent</div>
               <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(spent)}</div>
@@ -403,9 +407,9 @@ function CategoryDetail({
             return (
               <div
                 key={transaction.transaction_id}
-                style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 2px", borderBottom: "1px solid var(--line)" }}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 2px", borderBottom: "1px solid var(--line)" }}
               >
-                <div className="num" style={{ fontSize: 12, color: "var(--text-3)", width: 54, flex: "none" }}>
+                <div className="num" style={{ fontSize: 12, color: "var(--text-3)", width: 46, flex: "none" }}>
                   {(transaction.booking_date || transaction.value_date || "").slice(5)}
                 </div>
                 <div style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -413,7 +417,7 @@ function CategoryDetail({
                 </div>
                 <div
                   className="num"
-                  style={{ fontSize: 12, color: "var(--text-3)", flex: "none", maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  style={{ fontSize: 12, color: "var(--text-3)", minWidth: 0, maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 >
                   {shortAccount(transaction.account_display_name)}
                 </div>

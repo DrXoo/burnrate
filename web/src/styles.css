@@ -136,7 +136,9 @@ body {
 
 @media (max-width: 860px) {
   .br-cols {
-    grid-template-columns: 1fr !important;
+    /* minmax(0, …) lets the single column shrink below its content's intrinsic
+       width so children can ellipsize instead of overflowing the viewport. */
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 
