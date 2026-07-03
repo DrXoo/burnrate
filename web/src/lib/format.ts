@@ -1,4 +1,132 @@
-import type { MatchField, MatchOperator, RunwayStatus, Transaction } from "../types";
+import type {
+  BudgetUsageStatus,
+  CategoryType,
+  MatchField,
+  MatchOperator,
+  RunwayStatus,
+  Transaction,
+} from "../types";
+
+/** Design status buckets used for category/budget/runway coloring. */
+export type Tone = "good" | "watch" | "over" | "neutral";
+
+export const TONE_COLOR: Record<Tone, string> = {
+  good: "var(--good)",
+  watch: "var(--watch)",
+  over: "var(--over)",
+  neutral: "var(--text-2)",
+};
+
+export const TONE_DIM: Record<Tone, string> = {
+  good: "var(--good-dim)",
+  watch: "var(--watch-dim)",
+  over: "var(--over-dim)",
+  neutral: "var(--bg-4)",
+};
+
+export const TONE_LABEL: Record<Tone, string> = {
+  good: "On track",
+  watch: "Watch",
+  over: "Over budget",
+  neutral: "Neutral",
+};
+
+/** Map the backend budget-usage status to a design tone. */
+export function usageTone(status: BudgetUsageStatus): Tone {
+  if (status === "over") {
+    return "over";
+  }
+  if (status === "watch") {
+    return "watch";
+  }
+  return "good";
+}
+
+/** Map the backend runway status to a design tone. */
+export function runwayTone(status: RunwayStatus): Tone {
+  if (status === "critical") {
+    return "over";
+  }
+  if (status === "watch") {
+    return "watch";
+  }
+  if (status === "stable") {
+    return "good";
+  }
+  return "neutral";
+}
+
+/** Category swatch color: expenses take their budget tone, income is positive, transfers are muted. */
+export function categoryColor(type: CategoryType, tone: Tone): string {
+  if (type === "income") {
+    return "var(--good)";
+  }
+  if (type === "transfer") {
+    return "var(--text-2)";
+  }
+  return TONE_COLOR[tone];
+}
+
+function toNumber(value: number | string): number {
+  return typeof value === "string" ? Number(value) : value;
+}
+
+/** Signed, whole-euro amount with the design's unicode minus (−€1,234 / €1,234). */
+export function eur(value: number | string): string {
+  const numeric = toNumber(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value);
+  }
+  const body = Math.round(Math.abs(numeric)).toLocaleString("en-US");
+  return (numeric < 0 ? "−€" : "€") + body;
+}
+
+/** Unsigned, whole-euro amount (€1,234) for budgeted figures. */
+export function eurPlain(value: number | string): string {
+  const numeric = toNumber(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value);
+  }
+  return "€" + Math.round(numeric).toLocaleString("en-US");
+}
+
+/** Compact relative time ("8 min ago") for last-sync labels. */
+export function timeAgo(iso: string | null | undefined): string {
+  if (!iso) {
+    return "never";
+  }
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return "unknown";
+  }
+  const seconds = Math.max(0, (Date.now() - then) / 1000);
+  if (seconds < 60) {
+    return "just now";
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} d ago`;
+}
+
+/** Short account label ("Checking ···4021" → "Chk ···4021"). */
+export function shortAccount(name: string): string {
+  return name
+    .replace("Checking ···", "Chk ···")
+    .replace("Credit ···", "Cr ···")
+    .replace("Savings ···", "Sav ···");
+}
+
+/** Capitalize a lowercase word ("expense" → "Expense"). */
+export function capitalize(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
 
 export function currentMonthValue(): string {
   return new Date().toISOString().slice(0, 7);

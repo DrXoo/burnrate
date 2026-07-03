@@ -1,32 +1,66 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { AccountsPanel } from "./components/AccountsPanel";
-import { BudgetsPanel } from "./components/BudgetsPanel";
-import { CategoriesPanel } from "./components/CategoriesPanel";
 import { ConnectBankModal } from "./components/ConnectBankModal";
-import { ConnectionHealthStrip } from "./components/ConnectionHealthStrip";
-import { ConnectionsPanel } from "./components/ConnectionsPanel";
-import { GettingStarted } from "./components/GettingStarted";
-import { Hero } from "./components/Hero";
-import { OverviewPanel } from "./components/OverviewPanel";
-import { RulesPanel } from "./components/RulesPanel";
-import { TransactionsPanel } from "./components/TransactionsPanel";
-import { UnknownQueuePanel } from "./components/UnknownQueuePanel";
+import { FirstRun } from "./components/FirstRun";
+import { HealthStrip } from "./components/HealthStrip";
+import { Sidebar } from "./components/Sidebar";
+import { Toast } from "./components/Toast";
+import { TopBar } from "./components/TopBar";
+import { CategoriesPage } from "./components/pages/CategoriesPage";
+import { DashboardPage } from "./components/pages/DashboardPage";
+import { ReviewPage } from "./components/pages/ReviewPage";
+import { RulesBudgetsPage } from "./components/pages/RulesBudgetsPage";
+import { SettingsPage } from "./components/pages/SettingsPage";
+import { TransactionsPage } from "./components/pages/TransactionsPage";
 import { useBurnRateData } from "./hooks/useBurnRateData";
+import { formatMonthLabel } from "./lib/format";
+import type { HeroMode, Section, Theme } from "./lib/viewTypes";
 
-type WorkspaceTab = "dashboard" | "ledger" | "review" | "automation" | "settings";
-
-interface ConnectResult {
-  banner: "success-banner" | "warn-banner" | "error-banner";
+interface ToastState {
   message: string;
+  tone: "good" | "over";
+}
+
+function CenteredNotice({ title, body, tone }: { title: string; body: string; tone: "neutral" | "over" }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }}>
+      <div style={{ maxWidth: 420, textAlign: "center" }}>
+        <div className="num" style={{ fontSize: 20, fontWeight: 600, marginBottom: 8, color: tone === "over" ? "var(--over)" : "var(--text)" }}>
+          {title}
+        </div>
+        <p style={{ fontSize: 14, color: "var(--text-2)", lineHeight: 1.6, margin: 0 }}>{body}</p>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
   const data = useBurnRateData();
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("dashboard");
+  const [section, setSection] = useState<Section>("dashboard");
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [heroMode, setHeroMode] = useState<HeroMode>("dial");
   const [connectOpen, setConnectOpen] = useState(false);
-  const [connectResult, setConnectResult] = useState<ConnectResult | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const toastTimer = useRef<number | null>(null);
 
+  function showToast(message: string, tone: "good" | "over" = "good") {
+    if (toastTimer.current) {
+      window.clearTimeout(toastTimer.current);
+    }
+    setToast({ message, tone });
+    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+  }
+
+  // Apply the theme at the document root so tokens cascade to fixed toasts/modals too.
+  useEffect(() => {
+    if (theme === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+  }, [theme]);
+
+  // Surface the bank-connect redirect result (?connect=...) as a toast, then clean the URL.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const connect = params.get("connect");
@@ -36,222 +70,209 @@ export default function App() {
     if (connect === "success") {
       const accounts = params.get("accounts") ?? "0";
       const imported = params.get("imported") ?? "0";
-      setConnectResult({
-        banner: "success-banner",
-        message: `Bank connected. Imported ${imported} transaction(s) across ${accounts} account(s).`,
-      });
+      showToast(`Bank connected — imported ${imported} transaction(s) across ${accounts} account(s).`);
     } else if (connect === "empty") {
-      setConnectResult({
-        banner: "warn-banner",
-        message:
-          "Authorized, but no accounts were linked to this application (Enable Banking restricted production mode).",
-      });
+      showToast("Authorized, but no accounts were linked (Enable Banking restricted production).", "over");
     } else if (connect === "error") {
-      setConnectResult({
-        banner: "error-banner",
-        message: params.get("message") || "Bank connection failed.",
-      });
+      showToast(params.get("message") || "Bank connection failed.", "over");
     }
-    // Strip the connect params so a refresh does not re-show the banner.
     window.history.replaceState({}, "", window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const overspentBudgetCount =
-    data.summary?.budget_usage.filter((budget) => budget.status === "over").length ?? 0;
+  const monthLabel = formatMonthLabel(data.filters.month);
+  const includedAccountCount = data.accounts.filter((account) => account.included_in_calculations).length;
 
-  const tabs: Array<{
-    id: WorkspaceTab;
-    label: string;
-    caption: string;
-    badge?: string;
-  }> = [
-    {
-      id: "dashboard",
-      label: "Dashboard",
-      caption: "Summary, balances, and connection health.",
-    },
-    {
-      id: "ledger",
-      label: "Transactions",
-      caption: "Imported transactions and filters for the working month.",
-      badge: String(data.transactions.total),
-    },
-    {
-      id: "review",
-      label: "Review",
-      caption: "Unknown queue and category cleanup.",
-      badge: String(data.uncategorizedCount),
-    },
-    {
-      id: "automation",
-      label: "Rules & Budgets",
-      caption: "Categorization rules and monthly budgets.",
-      badge: overspentBudgetCount > 0 ? String(overspentBudgetCount) : undefined,
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      caption: "Bank connections, accounts, and categories.",
-    },
-  ];
+  function openConnect() {
+    setConnectOpen(true);
+  }
+
+  // Wrap data-layer actions so successful edits fire a confirmation toast.
+  async function categorize(transactionId: string, categoryId: string) {
+    await data.categorizeTransaction(transactionId, categoryId);
+    const category = data.categories.find((entry) => entry.category_id === categoryId);
+    showToast(category ? `Categorized as ${category.name}` : "Categorized");
+  }
+  async function uncategorize(transactionId: string) {
+    await data.uncategorizeTransaction(transactionId);
+    showToast("Moved back to the queue");
+  }
+  async function createRule(transactionId: string, draft: Parameters<typeof data.createRule>[1]) {
+    await data.createRule(transactionId, draft);
+    showToast("Rule created");
+  }
+  async function toggleRule(ruleId: string, active: boolean) {
+    await data.toggleRule(ruleId, active);
+    showToast(active ? "Rule enabled" : "Rule disabled");
+  }
+  async function updateRule(ruleId: string, draft: Parameters<typeof data.updateRule>[1]) {
+    await data.updateRule(ruleId, draft);
+    showToast("Rule updated");
+  }
+  async function deleteRule(ruleId: string) {
+    await data.deleteRule(ruleId);
+    showToast("Rule deleted");
+  }
+  async function createBudget(draft: Parameters<typeof data.createBudget>[0]) {
+    await data.createBudget(draft);
+    showToast("Budget added");
+  }
+  async function updateBudget(budgetId: string, draft: Parameters<typeof data.updateBudget>[1]) {
+    await data.updateBudget(budgetId, draft);
+    showToast("Budget updated");
+  }
+  async function deactivateBudget(budgetId: string) {
+    await data.deactivateBudget(budgetId);
+    showToast("Budget removed");
+  }
+  async function createCategory(name: string, type: Parameters<typeof data.createCategory>[1]) {
+    await data.createCategory(name, type);
+    showToast(`Category “${name}” created`);
+  }
+  async function updateAccount(accountId: string, draft: Parameters<typeof data.updateAccount>[1]) {
+    await data.updateAccount(accountId, draft);
+    showToast("Account updated");
+  }
+  async function syncConnection(connectionId: string) {
+    const result = await data.syncConnection(connectionId);
+    showToast(result?.message || "Synced — booked transactions only");
+    return result;
+  }
+
+  const modal = connectOpen && data.apiBase ? <ConnectBankModal apiBase={data.apiBase} onClose={() => setConnectOpen(false)} /> : null;
+  const toastNode = toast ? <Toast message={toast.message} tone={toast.tone} /> : null;
 
   if (data.bootLoading) {
     return (
-      <main className="app-shell">
-        <Hero />
-        <div className="loading-stage">
-          <div className="loading-orb" />
-          <p>Booting the workspace and locating the backend API...</p>
-        </div>
-      </main>
+      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+        <CenteredNotice title="Starting BurnRate…" body="Locating the backend API and loading your workspace." tone="neutral" />
+      </div>
     );
   }
 
   if (data.bootError) {
     return (
-      <main className="app-shell">
-        <Hero />
-        <section className="fatal-card">
-          <h2>Backend detection failed</h2>
-          <p>{data.bootError}</p>
-        </section>
-      </main>
+      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+        <CenteredNotice title="Backend detection failed" body={data.bootError} tone="over" />
+      </div>
     );
   }
 
+  const isFirstRun = data.connections.length === 0 && data.accounts.length === 0;
+  if (isFirstRun) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+        <FirstRun onConnect={openConnect} />
+        {modal}
+        {toastNode}
+      </div>
+    );
+  }
+
+  const primaryConnection = data.connections[0];
+
   return (
-    <main className="app-shell">
-      <Hero />
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      <div style={{ display: "flex", minHeight: "100vh" }}>
+        <Sidebar section={section} reviewCount={data.uncategorizedCount} onNavigate={setSection} />
 
-      {connectResult ? (
-        <div className={connectResult.banner}>
-          <div className="row">
-            <span>{connectResult.message}</span>
-            <button
-              type="button"
-              className="modal-close"
-              aria-label="Dismiss"
-              onClick={() => setConnectResult(null)}
-            >
-              ×
-            </button>
+        <main className="br-scroll" style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: "auto" }}>
+          <TopBar
+            section={section}
+            monthLabel={monthLabel}
+            theme={theme}
+            heroMode={heroMode}
+            onToggleTheme={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}
+            onSetHeroMode={setHeroMode}
+          />
+
+          {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} /> : null}
+
+          <div style={{ padding: "22px 30px 60px", maxWidth: 1160 }}>
+            {section === "dashboard" ? (
+              <DashboardPage
+                summary={data.summary}
+                loading={data.summaryLoading}
+                error={data.summaryError}
+                heroMode={heroMode}
+                includedAccountCount={includedAccountCount}
+              />
+            ) : null}
+
+            {section === "transactions" ? (
+              <TransactionsPage
+                accounts={data.accounts}
+                categories={data.categories}
+                filters={data.filters}
+                applyFilters={data.applyFilters}
+                items={data.transactions.items}
+                total={data.transactions.total}
+                loading={data.transactions.loading}
+                error={data.transactions.error}
+                paging={data.transactionsPaging}
+                monthLabel={monthLabel}
+                onMovePage={data.moveTransactionsPage}
+                onCategorize={categorize}
+                onUncategorize={uncategorize}
+              />
+            ) : null}
+
+            {section === "review" ? (
+              <ReviewPage
+                items={data.unknownQueue.items}
+                total={data.unknownQueue.total}
+                loading={data.unknownQueue.loading}
+                error={data.unknownQueue.error}
+                paging={data.unknownPaging}
+                categories={data.categories}
+                ledgerItems={data.transactions.items}
+                onMovePage={data.moveUnknownPage}
+                onCategorize={categorize}
+                onCreateRule={createRule}
+              />
+            ) : null}
+
+            {section === "categories" ? (
+              <CategoriesPage
+                categories={data.categories}
+                budgets={data.budgets}
+                summary={data.summary}
+                ledgerItems={data.transactions.items}
+                monthLabel={monthLabel}
+                onCreateCategory={createCategory}
+              />
+            ) : null}
+
+            {section === "rules" ? (
+              <RulesBudgetsPage
+                rules={data.rules}
+                categories={data.categories}
+                budgets={data.budgets}
+                summary={data.summary}
+                onToggleRule={toggleRule}
+                onUpdateRule={updateRule}
+                onDeleteRule={deleteRule}
+                onCreateBudget={createBudget}
+                onUpdateBudget={updateBudget}
+                onDeactivateBudget={deactivateBudget}
+              />
+            ) : null}
+
+            {section === "settings" ? (
+              <SettingsPage
+                connections={data.connections}
+                accounts={data.accounts}
+                onSyncConnection={syncConnection}
+                onConnect={openConnect}
+                onUpdateAccount={updateAccount}
+              />
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        </main>
+      </div>
 
-      <section className="tab-shell">
-        <div className="tab-row" role="tablist" aria-label="BurnRate workspace sections">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              className={`tab-button ${activeTab === tab.id ? "tab-button-active" : ""}`.trim()}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span className="tab-label-row">
-                <span className="tab-label">{tab.label}</span>
-                {tab.badge ? <span className="tab-badge">{tab.badge}</span> : null}
-              </span>
-              <span className="tab-caption">{tab.caption}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {activeTab === "dashboard" ? (
-        <section className="tab-panel-stack">
-          {data.connections.length === 0 && data.accounts.length === 0 ? (
-            <GettingStarted onConnect={() => setConnectOpen(true)} />
-          ) : null}
-          <ConnectionHealthStrip connections={data.connections} onManage={() => setActiveTab("settings")} />
-          <OverviewPanel
-            summary={data.summary}
-            summaryLoading={data.summaryLoading}
-            summaryError={data.summaryError}
-            uncategorizedCount={data.uncategorizedCount}
-            apiBase={data.apiBase}
-            activeMonth={data.filters.month}
-          />
-        </section>
-      ) : null}
-
-      {activeTab === "ledger" ? (
-        <section className="tab-panel-stack">
-          <TransactionsPanel
-            accounts={data.accounts}
-            categories={data.categories}
-            filters={data.filters}
-            paging={data.transactionsPaging}
-            transactions={data.transactions.items}
-            total={data.transactions.total}
-            loading={data.transactions.loading}
-            error={data.transactions.error}
-            onApplyFilters={data.applyFilters}
-            onMovePage={data.moveTransactionsPage}
-            onAssignCategory={data.categorizeTransaction}
-            onClearCategory={data.uncategorizeTransaction}
-            onCreateRule={data.createRule}
-          />
-        </section>
-      ) : null}
-
-      {activeTab === "review" ? (
-        <section className="tab-panel-stack">
-          <UnknownQueuePanel
-            transactions={data.unknownQueue.items}
-            total={data.unknownQueue.total}
-            loading={data.unknownQueue.loading}
-            error={data.unknownQueue.error}
-            paging={data.unknownPaging}
-            categories={data.categories}
-            onMovePage={data.moveUnknownPage}
-            onAssignCategory={data.categorizeTransaction}
-            onClearCategory={data.uncategorizeTransaction}
-            onCreateRule={data.createRule}
-          />
-        </section>
-      ) : null}
-
-      {activeTab === "automation" ? (
-        <section className="workspace-grid">
-          <div className="workspace-stack">
-            <RulesPanel
-              rules={data.rules}
-              onToggleRule={data.toggleRule}
-              onUpdateRule={data.updateRule}
-              onDeleteRule={data.deleteRule}
-            />
-          </div>
-          <BudgetsPanel
-            budgets={data.budgets}
-            categories={data.categories}
-            activeMonth={data.filters.month}
-            onCreateBudget={data.createBudget}
-            onUpdateBudget={data.updateBudget}
-            onDeactivateBudget={data.deactivateBudget}
-          />
-        </section>
-      ) : null}
-
-      {activeTab === "settings" ? (
-        <section className="tab-panel-stack">
-          <ConnectionsPanel
-            connections={data.connections}
-            onSyncConnection={data.syncConnection}
-            onConnect={() => setConnectOpen(true)}
-          />
-          <section className="workspace-grid">
-            <AccountsPanel accounts={data.accounts} onUpdateAccount={data.updateAccount} />
-            <CategoriesPanel categories={data.categories} onCreateCategory={data.createCategory} />
-          </section>
-        </section>
-      ) : null}
-
-      {connectOpen && data.apiBase ? (
-        <ConnectBankModal apiBase={data.apiBase} onClose={() => setConnectOpen(false)} />
-      ) : null}
-    </main>
+      {modal}
+      {toastNode}
+    </div>
   );
 }

@@ -1,13 +1,41 @@
-import { useState, type FormEvent } from "react";
+import { useState, type CSSProperties, type FormEvent } from "react";
 
 import { getAspsps, startBankAuthorization } from "../lib/api";
 import type { Aspsp } from "../types";
-import { Modal } from "./ui/Modal";
 
 interface ConnectBankModalProps {
   apiBase: string;
   onClose: () => void;
 }
+
+const labelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  fontSize: 12.5,
+  fontWeight: 600,
+  color: "var(--text-2)",
+};
+
+const primaryButton: CSSProperties = {
+  border: "none",
+  background: "var(--accent)",
+  color: "#0a0d10",
+  borderRadius: 9,
+  padding: "9px 16px",
+  font: "600 13px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
+};
+
+const secondaryButton: CSSProperties = {
+  border: "1px solid var(--line-2)",
+  background: "var(--bg-3)",
+  color: "var(--text)",
+  borderRadius: 9,
+  padding: "9px 16px",
+  font: "500 13px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
+};
 
 export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
   const [country, setCountry] = useState("ES");
@@ -54,7 +82,6 @@ export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
         aspsp_country: normalizedCountry,
         psu_type: psuType,
       });
-      // Hand the browser off to the bank's authorization page.
       window.location.href = result.url;
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
@@ -63,32 +90,80 @@ export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
   }
 
   return (
-    <Modal title="Connect a bank" onClose={onClose}>
-      <div className="stack">
-        <p className="meta-copy">
-          Choose your country and bank. You will be sent to the bank to authorize access, then returned here.
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        background: "rgba(4, 6, 9, 0.55)",
+        backdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          background: "var(--bg-2)",
+          border: "1px solid var(--line-2)",
+          borderRadius: 16,
+          padding: 24,
+          boxShadow: "0 20px 60px rgba(0,0,0,.45)",
+          animation: "br-rise .25s ease both",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>Connect a bank</div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "var(--text-3)",
+              fontSize: 20,
+              lineHeight: 1,
+              cursor: "pointer",
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.55, margin: "0 0 16px" }}>
+          Choose your country and bank. You'll be sent to the bank to authorize read-only access, then returned here.
         </p>
 
-        <form className="mini-form" onSubmit={handleFindBanks}>
-          <label>
+        <form onSubmit={handleFindBanks} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 14 }}>
+          <label style={{ ...labelStyle, flex: 1 }}>
             Country code
             <input
+              className="br-input"
               value={country}
               maxLength={2}
               onChange={(event) => setCountry(event.target.value)}
               placeholder="ES"
             />
           </label>
-          <button type="submit" className="button button-secondary" disabled={loadingBanks || redirecting}>
-            {loadingBanks ? "Loading banks..." : "Find banks"}
+          <button type="submit" style={secondaryButton} disabled={loadingBanks || redirecting}>
+            {loadingBanks ? "Loading…" : "Find banks"}
           </button>
         </form>
 
         {aspsps.length > 0 ? (
-          <>
-            <label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <label style={labelStyle}>
               Bank
               <select
+                className="br-sel"
+                style={{ padding: "8px 26px 8px 10px" }}
                 value={selectedBank}
                 onChange={(event) => setSelectedBank(event.target.value)}
                 disabled={redirecting}
@@ -101,9 +176,11 @@ export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
                 ))}
               </select>
             </label>
-            <label>
+            <label style={labelStyle}>
               Account type
               <select
+                className="br-sel"
+                style={{ padding: "8px 26px 8px 10px" }}
                 value={psuType}
                 onChange={(event) => setPsuType(event.target.value as "personal" | "business")}
                 disabled={redirecting}
@@ -112,19 +189,34 @@ export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
                 <option value="business">Business</option>
               </select>
             </label>
-            <div className="inline-actions">
-              <button type="button" className="button" disabled={!selectedBank || redirecting} onClick={handleContinue}>
-                {redirecting ? "Redirecting..." : "Continue to bank"}
-              </button>
-              <button type="button" className="button button-secondary" onClick={onClose} disabled={redirecting}>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button type="button" style={secondaryButton} onClick={onClose} disabled={redirecting}>
                 Cancel
               </button>
+              <button type="button" style={primaryButton} disabled={!selectedBank || redirecting} onClick={handleContinue}>
+                {redirecting ? "Redirecting…" : "Continue to bank"}
+              </button>
             </div>
-          </>
+          </div>
         ) : null}
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error ? (
+          <div
+            style={{
+              marginTop: 14,
+              padding: "10px 12px",
+              background: "var(--over-dim)",
+              border: "1px solid color-mix(in oklab, var(--over) 30%, transparent)",
+              borderRadius: 9,
+              color: "var(--over)",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+            }}
+          >
+            {error}
+          </div>
+        ) : null}
       </div>
-    </Modal>
+    </div>
   );
 }
