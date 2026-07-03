@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import {
   TONE_COLOR,
@@ -19,8 +19,9 @@ interface CategoriesPageProps {
   categories: Category[];
   budgets: Budget[];
   summary: SummaryDashboard | null;
-  ledgerItems: Transaction[];
+  month: string;
   monthLabel: string;
+  loadMonthTransactions: () => Promise<Transaction[]>;
   onCreateCategory: (name: string, type: CategoryType) => Promise<void>;
 }
 
@@ -58,18 +59,42 @@ function num(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function CategoriesPage({ categories, budgets, summary, ledgerItems, monthLabel, onCreateCategory }: CategoriesPageProps) {
+export function CategoriesPage({
+  categories,
+  budgets,
+  summary,
+  month,
+  monthLabel,
+  loadMonthTransactions,
+  onCreateCategory,
+}: CategoriesPageProps) {
   const [selectedId, setSelectedId] = useState<string>("");
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<CategoryType>("expense");
+  const [monthTxns, setMonthTxns] = useState<Transaction[]>([]);
+
+  // Pull the whole month once so per-category counts and lists are accurate,
+  // not limited to the paginated ledger view.
+  useEffect(() => {
+    let cancelled = false;
+    void loadMonthTransactions().then((transactions) => {
+      if (!cancelled) {
+        setMonthTxns(transactions);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [month]);
 
   const stats = useMemo<CategoryStat[]>(() => {
     const usageById = new Map((summary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
     const budgetById = new Map(budgets.filter((budget) => budget.active).map((budget) => [budget.category_id, budget]));
     const ledgerCount: Record<string, number> = {};
     const ledgerTotal: Record<string, number> = {};
-    for (const transaction of ledgerItems) {
+    for (const transaction of monthTxns) {
       if (!transaction.category_id) {
         continue;
       }
@@ -105,7 +130,7 @@ export function CategoriesPage({ categories, budgets, summary, ledgerItems, mont
         total: ledgerTotal[category.category_id] ?? 0,
       };
     });
-  }, [categories, budgets, summary, ledgerItems]);
+  }, [categories, budgets, summary, monthTxns]);
 
   const selected = stats.find((stat) => stat.category.category_id === selectedId) ?? stats[0];
 
@@ -117,7 +142,7 @@ export function CategoriesPage({ categories, budgets, summary, ledgerItems, mont
     setNewType("expense");
   }
 
-  const selectedTxns = selected ? ledgerItems.filter((transaction) => transaction.category_id === selected.category.category_id) : [];
+  const selectedTxns = selected ? monthTxns.filter((transaction) => transaction.category_id === selected.category.category_id) : [];
 
   return (
     <div className="br-cols" style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 14 }}>

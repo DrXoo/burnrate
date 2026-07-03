@@ -1,8 +1,25 @@
 import { useState, type CSSProperties } from "react";
 
-import { IconSearch } from "../icons";
-import { amountTone, eur, shortAccount, transactionMeta, transactionTitle } from "../../lib/format";
-import type { Account, Category, FiltersState, PagingState, Transaction } from "../../types";
+import { IconSearch, IconSliders } from "../icons";
+import {
+  amountTone,
+  eur,
+  shortAccount,
+  suggestRuleField,
+  suggestRuleValue,
+  transactionMeta,
+  transactionTitle,
+} from "../../lib/format";
+import type {
+  Account,
+  Category,
+  FiltersState,
+  MatchField,
+  MatchOperator,
+  PagingState,
+  RuleDraft,
+  Transaction,
+} from "../../types";
 
 interface TransactionsPageProps {
   accounts: Account[];
@@ -18,9 +35,31 @@ interface TransactionsPageProps {
   onMovePage: (direction: "prev" | "next") => void;
   onCategorize: (transactionId: string, categoryId: string) => Promise<void>;
   onUncategorize: (transactionId: string) => Promise<void>;
+  onCreateRule: (transactionId: string, draft: RuleDraft) => Promise<void>;
 }
 
-const GRID = "78px 1fr 150px 190px 110px";
+interface RuleFormState {
+  name: string;
+  match_field: MatchField;
+  match_operator: MatchOperator;
+  match_value: string;
+  category_id: string;
+}
+
+const GRID = "72px 1fr 132px 172px 96px 34px";
+
+const FIELD_OPTIONS: Array<{ value: MatchField; label: string }> = [
+  { value: "merchant_name", label: "Merchant" },
+  { value: "description", label: "Description" },
+  { value: "counterparty_name", label: "Counterparty" },
+];
+
+const OPERATOR_OPTIONS: Array<{ value: MatchOperator; label: string }> = [
+  { value: "contains", label: "contains" },
+  { value: "starts_with", label: "starts with" },
+  { value: "ends_with", label: "ends with" },
+  { value: "equals", label: "equals" },
+];
 
 const pagerButton: CSSProperties = {
   border: "1px solid var(--line-2)",
@@ -28,6 +67,26 @@ const pagerButton: CSSProperties = {
   borderRadius: 7,
   padding: "5px 11px",
   font: "500 12px 'Hanken Grotesque', sans-serif",
+};
+
+const accentButton: CSSProperties = {
+  border: "none",
+  background: "var(--accent)",
+  color: "#0a0d10",
+  borderRadius: 8,
+  padding: "7px 16px",
+  font: "600 12px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
+};
+
+const ghostButton: CSSProperties = {
+  border: "1px solid var(--line-2)",
+  background: "transparent",
+  color: "var(--text-2)",
+  borderRadius: 8,
+  padding: "7px 14px",
+  font: "500 12px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
 };
 
 function shortDate(value: string | null | undefined): string {
@@ -55,29 +114,64 @@ export function TransactionsPage({
   onMovePage,
   onCategorize,
   onUncategorize,
+  onCreateRule,
 }: TransactionsPageProps) {
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>(filters.categorized === "false" ? "uncat" : "all");
+  const [ruleTxnId, setRuleTxnId] = useState<string | null>(null);
+  const [ruleForm, setRuleForm] = useState<RuleFormState | null>(null);
+
+  const categoryValue = filters.categoryId ? filters.categoryId : filters.categorized === "false" ? "uncat" : "all";
 
   function handleAccount(value: string) {
     applyFilters({ ...filters, accountId: value === "all" ? "" : value });
   }
 
   function handleCategory(value: string) {
-    setCategoryFilter(value);
-    const categorized: FiltersState["categorized"] = value === "uncat" ? "false" : value === "all" ? "" : "true";
-    applyFilters({ ...filters, categorized });
+    if (value === "all") {
+      applyFilters({ ...filters, categoryId: "", categorized: "" });
+    } else if (value === "uncat") {
+      applyFilters({ ...filters, categoryId: "", categorized: "false" });
+    } else {
+      applyFilters({ ...filters, categoryId: value, categorized: "" });
+    }
   }
 
-  const visible = items.filter((transaction) => {
-    if (search && !transactionTitle(transaction).toLowerCase().includes(search.toLowerCase())) {
-      return false;
+  function openRuleForm(transaction: Transaction) {
+    if (ruleTxnId === transaction.transaction_id) {
+      setRuleTxnId(null);
+      setRuleForm(null);
+      return;
     }
-    if (categoryFilter !== "all" && categoryFilter !== "uncat" && transaction.category_id !== categoryFilter) {
-      return false;
+    const field = suggestRuleField(transaction);
+    setRuleTxnId(transaction.transaction_id);
+    setRuleForm({
+      name: "",
+      match_field: field,
+      match_operator: "contains",
+      match_value: suggestRuleValue(transaction, field),
+      category_id: transaction.category_id ?? categories[0]?.category_id ?? "",
+    });
+  }
+
+  async function submitRule() {
+    if (!ruleTxnId || !ruleForm || !ruleForm.category_id) {
+      return;
     }
-    return true;
-  });
+    await onCreateRule(ruleTxnId, {
+      name: ruleForm.name,
+      category_id: ruleForm.category_id,
+      match_field: ruleForm.match_field,
+      match_operator: ruleForm.match_operator,
+      match_value: ruleForm.match_value,
+      apply_to_existing_uncategorized: true,
+    });
+    setRuleTxnId(null);
+    setRuleForm(null);
+  }
+
+  const visible = items.filter(
+    (transaction) => !search || transactionTitle(transaction).toLowerCase().includes(search.toLowerCase()),
+  );
 
   return (
     <div>
@@ -110,7 +204,7 @@ export function TransactionsPage({
             </option>
           ))}
         </select>
-        <select className="br-sel" value={categoryFilter} onChange={(event) => handleCategory(event.target.value)}>
+        <select className="br-sel" value={categoryValue} onChange={(event) => handleCategory(event.target.value)}>
           <option value="all">All categories</option>
           <option value="uncat">Uncategorized</option>
           {categories.map((category) => (
@@ -149,6 +243,7 @@ export function TransactionsPage({
           <div>Account</div>
           <div>Category</div>
           <div style={{ textAlign: "right" }}>Amount</div>
+          <div />
         </div>
 
         {error ? (
@@ -162,60 +257,152 @@ export function TransactionsPage({
         ) : (
           visible.map((transaction) => {
             const positive = amountTone(transaction.amount, transaction.direction) === "positive";
+            const ruleOpen = ruleTxnId === transaction.transaction_id;
             return (
-              <div
-                key={transaction.transaction_id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: GRID,
-                  gap: 12,
-                  padding: "12px 18px",
-                  borderBottom: "1px solid var(--line)",
-                  alignItems: "center",
-                }}
-              >
-                <div className="num" style={{ fontSize: 12.5, color: "var(--text-3)" }}>
-                  {shortDate(transaction.booking_date || transaction.value_date)}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {transactionTitle(transaction)}
+              <div key={transaction.transaction_id} style={{ borderBottom: "1px solid var(--line)" }}>
+                <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 12, padding: "12px 18px", alignItems: "center" }}>
+                  <div className="num" style={{ fontSize: 12.5, color: "var(--text-3)" }}>
+                    {shortDate(transaction.booking_date || transaction.value_date)}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {transactionMeta(transaction)}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {transactionTitle(transaction)}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {transactionMeta(transaction)}
+                    </div>
                   </div>
-                </div>
-                <div className="num" style={{ fontSize: 12, color: "var(--text-2)" }}>
-                  {shortAccount(transaction.account_display_name)}
-                </div>
-                <div>
-                  <select
-                    className="br-sel"
-                    style={{ maxWidth: "100%", borderColor: transaction.category_id ? "var(--line-2)" : "var(--watch)" }}
-                    value={transaction.category_id ?? "uncat"}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      if (value === "uncat") {
-                        void onUncategorize(transaction.transaction_id);
-                      } else {
-                        void onCategorize(transaction.transaction_id, value);
-                      }
+                  <div className="num" style={{ fontSize: 12, color: "var(--text-2)" }}>
+                    {shortAccount(transaction.account_display_name)}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <select
+                      className="br-sel"
+                      style={{ maxWidth: "100%", borderColor: transaction.category_id ? "var(--line-2)" : "var(--watch)" }}
+                      value={transaction.category_id ?? "uncat"}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (value === "uncat") {
+                          void onUncategorize(transaction.transaction_id);
+                        } else {
+                          void onCategorize(transaction.transaction_id, value);
+                        }
+                      }}
+                    >
+                      <option value="uncat">— Assign —</option>
+                      {categories.map((category) => (
+                        <option key={category.category_id} value={category.category_id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                    {transaction.matched_rule_id ? (
+                      <div style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        Rule: {transaction.matched_rule_name || "attached"}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div
+                    className="num"
+                    style={{ textAlign: "right", fontSize: 14, fontWeight: 600, color: positive ? "var(--good)" : "var(--text)" }}
+                  >
+                    {eur(transaction.amount)}
+                  </div>
+                  <button
+                    type="button"
+                    title="Create rule from this transaction"
+                    onClick={() => openRuleForm(transaction)}
+                    disabled={categories.length === 0}
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 7,
+                      border: `1px solid ${ruleOpen ? "var(--accent)" : "var(--line-2)"}`,
+                      background: ruleOpen ? "color-mix(in oklab, var(--accent) 16%, transparent)" : "var(--bg-3)",
+                      color: ruleOpen ? "var(--accent)" : "var(--text-3)",
+                      cursor: categories.length === 0 ? "not-allowed" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: categories.length === 0 ? 0.5 : 1,
                     }}
                   >
-                    <option value="uncat">— Assign —</option>
-                    {categories.map((category) => (
-                      <option key={category.category_id} value={category.category_id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
+                    <IconSliders />
+                  </button>
                 </div>
-                <div
-                  className="num"
-                  style={{ textAlign: "right", fontSize: 14, fontWeight: 600, color: positive ? "var(--good)" : "var(--text)" }}
-                >
-                  {eur(transaction.amount)}
-                </div>
+
+                {ruleOpen && ruleForm ? (
+                  <div style={{ padding: "0 18px 16px" }}>
+                    <div style={{ background: "var(--bg-3)", border: "1px solid var(--accent)", borderRadius: 11, padding: "13px 14px" }}>
+                      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 700, marginBottom: 9 }}>
+                        New rule from “{transactionTitle(transaction)}”
+                      </div>
+                      <input
+                        className="br-input"
+                        style={{ width: "100%", background: "var(--bg-2)" }}
+                        value={ruleForm.name}
+                        onChange={(event) => setRuleForm({ ...ruleForm, name: event.target.value })}
+                        placeholder="Rule name (optional)"
+                      />
+                      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                        <select
+                          className="br-sel"
+                          style={{ flex: 1, minWidth: 130 }}
+                          value={ruleForm.match_field}
+                          onChange={(event) => setRuleForm({ ...ruleForm, match_field: event.target.value as MatchField })}
+                        >
+                          {FIELD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="br-sel"
+                          style={{ flex: 1, minWidth: 130 }}
+                          value={ruleForm.match_operator}
+                          onChange={(event) => setRuleForm({ ...ruleForm, match_operator: event.target.value as MatchOperator })}
+                        >
+                          {OPERATOR_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <input
+                        className="br-input"
+                        style={{ width: "100%", background: "var(--bg-2)", marginTop: 8 }}
+                        value={ruleForm.match_value}
+                        onChange={(event) => setRuleForm({ ...ruleForm, match_value: event.target.value })}
+                        placeholder="Match value"
+                      />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                        <span style={{ fontSize: 13, color: "var(--text-3)" }}>→ assign to</span>
+                        <select
+                          className="br-sel"
+                          style={{ flex: 1 }}
+                          value={ruleForm.category_id}
+                          onChange={(event) => setRuleForm({ ...ruleForm, category_id: event.target.value })}
+                        >
+                          {categories.map((category) => (
+                            <option key={category.category_id} value={category.category_id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+                        <button type="button" style={ghostButton} onClick={() => { setRuleTxnId(null); setRuleForm(null); }}>
+                          Cancel
+                        </button>
+                        <button type="button" style={accentButton} onClick={() => void submitRule()}>
+                          Create rule
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })

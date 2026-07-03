@@ -243,6 +243,7 @@ export async function getTransactions(
   return fetchJson<{ transactions: Transaction[]; total_count: number; limit: number; offset: number }>(`${apiBase}/transactions${buildQuery({
     month: filters.month || undefined,
     account_id: filters.accountId || undefined,
+    category_id: filters.categoryId || undefined,
     status: filters.status || undefined,
     categorized: filters.categorized || undefined,
     limit: paging.limit,

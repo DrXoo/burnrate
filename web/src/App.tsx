@@ -214,6 +214,7 @@ export default function App() {
                 onMovePage={data.moveTransactionsPage}
                 onCategorize={categorize}
                 onUncategorize={uncategorize}
+                onCreateRule={createRule}
               />
             ) : null}
 
@@ -225,10 +226,8 @@ export default function App() {
                 error={data.unknownQueue.error}
                 paging={data.unknownPaging}
                 categories={data.categories}
-                ledgerItems={data.transactions.items}
                 onMovePage={data.moveUnknownPage}
                 onCategorize={categorize}
-                onCreateRule={createRule}
               />
             ) : null}
 
@@ -237,8 +236,9 @@ export default function App() {
                 categories={data.categories}
                 budgets={data.budgets}
                 summary={data.summary}
-                ledgerItems={data.transactions.items}
+                month={data.filters.month}
                 monthLabel={monthLabel}
+                loadMonthTransactions={data.listMonthTransactions}
                 onCreateCategory={createCategory}
               />
             ) : null}

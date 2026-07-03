@@ -66,6 +66,7 @@ export function useBurnRateData() {
   const [filters, setFilters] = useState<FiltersState>({
     month: currentMonthValue(),
     accountId: "",
+    categoryId: "",
     status: "",
     categorized: "",
   });
@@ -228,6 +229,7 @@ export function useBurnRateData() {
   }, [
     apiBase,
     filters.accountId,
+    filters.categoryId,
     filters.categorized,
     filters.month,
     filters.status,
@@ -310,6 +312,20 @@ export function useBurnRateData() {
       });
       setUnknownPaging((current) => ({ ...current, total: unknownPayload.total_count }));
     });
+  }
+
+  // Fetch every transaction for the working month (ignoring account/category/status
+  // filters) so the Categories view can aggregate accurate counts and per-category lists.
+  async function listMonthTransactions() {
+    if (!apiBase) {
+      return [];
+    }
+    const payload = await getTransactions(
+      apiBase,
+      { month: filters.month, accountId: "", categoryId: "", status: "", categorized: "" },
+      { limit: 200, offset: 0, total: 0 },
+    );
+    return payload.transactions;
   }
 
   function applyFilters(nextFilters: FiltersState) {
@@ -500,6 +516,7 @@ export function useBurnRateData() {
     applyFilters,
     moveTransactionsPage,
     moveUnknownPage,
+    listMonthTransactions,
     refreshReferenceData,
     createCategory: createCategoryAction,
     updateAccount: updateAccountAction,

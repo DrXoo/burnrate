@@ -1,16 +1,8 @@
-import { useMemo, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 
-import { IconCheck, IconSliders } from "../icons";
-import {
-  categoryColor,
-  eur,
-  shortAccount,
-  suggestRuleField,
-  suggestRuleValue,
-  transactionMeta,
-  transactionTitle,
-} from "../../lib/format";
-import type { Category, PagingState, RuleDraft, Transaction } from "../../types";
+import { IconCheck } from "../icons";
+import { eur, shortAccount, transactionMeta, transactionTitle } from "../../lib/format";
+import type { Category, PagingState, Transaction } from "../../types";
 
 interface ReviewPageProps {
   items: Transaction[];
@@ -19,16 +11,8 @@ interface ReviewPageProps {
   error: string | null;
   paging: PagingState;
   categories: Category[];
-  ledgerItems: Transaction[];
   onMovePage: (direction: "prev" | "next") => void;
   onCategorize: (transactionId: string, categoryId: string) => Promise<void>;
-  onCreateRule: (transactionId: string, draft: RuleDraft) => Promise<void>;
-}
-
-interface Suggestion {
-  categoryId: string;
-  name: string;
-  color: string;
 }
 
 const pagerButton: CSSProperties = {
@@ -41,44 +25,7 @@ const pagerButton: CSSProperties = {
   cursor: "pointer",
 };
 
-function merchantKey(transaction: Transaction): string {
-  return (transaction.merchant_name || transactionTitle(transaction)).toLowerCase().trim();
-}
-
-export function ReviewPage({
-  items,
-  total,
-  loading,
-  error,
-  paging,
-  categories,
-  ledgerItems,
-  onMovePage,
-  onCategorize,
-  onCreateRule,
-}: ReviewPageProps) {
-  // Suggest a category by looking at how the same merchant was categorized before.
-  const suggestionByKey = useMemo(() => {
-    const byId = new Map(categories.map((category) => [category.category_id, category]));
-    const map = new Map<string, Suggestion>();
-    for (const transaction of ledgerItems) {
-      if (!transaction.category_id) {
-        continue;
-      }
-      const key = merchantKey(transaction);
-      if (map.has(key)) {
-        continue;
-      }
-      const category = byId.get(transaction.category_id);
-      map.set(key, {
-        categoryId: transaction.category_id,
-        name: transaction.category_name || category?.name || "Category",
-        color: category ? categoryColor(category.type, "good") : "var(--good)",
-      });
-    }
-    return map;
-  }, [ledgerItems, categories]);
-
+export function ReviewPage({ items, total, loading, error, paging, categories, onMovePage, onCategorize }: ReviewPageProps) {
   if (error && items.length === 0) {
     return <div style={{ padding: "24px 4px", color: "var(--over)", fontSize: 13.5 }}>{error}</div>;
   }
@@ -128,7 +75,6 @@ export function ReviewPage({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 720 }}>
         {items.map((transaction) => {
-          const suggestion = suggestionByKey.get(merchantKey(transaction));
           const positive = Number(transaction.amount) > 0;
           return (
             <div
@@ -157,32 +103,7 @@ export function ReviewPage({
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-                {suggestion ? (
-                  <>
-                    <span style={{ fontSize: 12, color: "var(--text-3)" }}>Suggested</span>
-                    <button
-                      type="button"
-                      onClick={() => void onCategorize(transaction.transaction_id, suggestion.categoryId)}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 7,
-                        border: `1px solid color-mix(in oklab, ${suggestion.color} 45%, transparent)`,
-                        background: `color-mix(in oklab, ${suggestion.color} 14%, transparent)`,
-                        color: suggestion.color,
-                        borderRadius: 8,
-                        padding: "7px 12px",
-                        font: "600 12.5px 'Hanken Grotesque', sans-serif",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <span style={{ width: 7, height: 7, borderRadius: 2, background: suggestion.color }} />
-                      {suggestion.name}
-                      <IconCheck />
-                    </button>
-                  </>
-                ) : null}
-
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>Assign a category</span>
                 <select
                   className="br-sel"
                   value="uncat"
@@ -192,50 +113,13 @@ export function ReviewPage({
                     }
                   }}
                 >
-                  <option value="uncat">{suggestion ? "Other category…" : "Assign category…"}</option>
+                  <option value="uncat">Choose category…</option>
                   {categories.map((category) => (
                     <option key={category.category_id} value={category.category_id}>
                       {category.name}
                     </option>
                   ))}
                 </select>
-
-                <button
-                  type="button"
-                  disabled={!suggestion}
-                  title={suggestion ? "Create a rule from this merchant" : "No learned category yet — assign one first"}
-                  onClick={() => {
-                    if (!suggestion) {
-                      return;
-                    }
-                    const field = suggestRuleField(transaction);
-                    void onCreateRule(transaction.transaction_id, {
-                      name: "",
-                      category_id: suggestion.categoryId,
-                      match_field: field,
-                      match_operator: "contains",
-                      match_value: suggestRuleValue(transaction, field),
-                      apply_to_existing_uncategorized: true,
-                    });
-                  }}
-                  style={{
-                    marginLeft: "auto",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    border: "1px solid var(--line-2)",
-                    background: "transparent",
-                    color: "var(--text-2)",
-                    borderRadius: 8,
-                    padding: "7px 11px",
-                    font: "500 12px 'Hanken Grotesque', sans-serif",
-                    cursor: suggestion ? "pointer" : "not-allowed",
-                    opacity: suggestion ? 1 : 0.5,
-                  }}
-                >
-                  <IconSliders />
-                  Create rule
-                </button>
               </div>
             </div>
           );

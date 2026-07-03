@@ -22,6 +22,7 @@ from burnrate.db.models import (
 @dataclass
 class TransactionFilters:
     account_id: UUID | None = None
+    category_id: UUID | None = None
     month_start: date | None = None
     month_end: date | None = None
     status: str | None = None
@@ -99,6 +100,7 @@ class LedgerService:
         self,
         *,
         account_id: str | None = None,
+        category_id: str | None = None,
         month: str | None = None,
         status: str | None = None,
         categorized: bool | None = None,
@@ -107,6 +109,7 @@ class LedgerService:
     ) -> dict[str, Any]:
         filters = self._build_filters(
             account_id=account_id,
+            category_id=category_id,
             month=month,
             status=status,
             categorized=categorized,
@@ -162,6 +165,7 @@ class LedgerService:
     ) -> int:
         filters = self._build_filters(
             account_id=account_id,
+            category_id=None,
             month=month,
             status=status,
             categorized=False,
@@ -173,6 +177,7 @@ class LedgerService:
         self,
         *,
         account_id: str | None,
+        category_id: str | None,
         month: str | None,
         status: str | None,
         categorized: bool | None,
@@ -181,9 +186,14 @@ class LedgerService:
             parsed_account_id = UUID(account_id) if account_id else None
         except ValueError as exc:
             raise ValueError("Account id must be a valid UUID") from exc
+        try:
+            parsed_category_id = UUID(category_id) if category_id else None
+        except ValueError as exc:
+            raise ValueError("Category id must be a valid UUID") from exc
         month_start, month_end = self._parse_month(month) if month else (None, None)
         return TransactionFilters(
             account_id=parsed_account_id,
+            category_id=parsed_category_id,
             month_start=month_start,
             month_end=month_end,
             status=status.strip().lower() if status else None,
@@ -200,6 +210,8 @@ class LedgerService:
 
         if filters.account_id is not None:
             query = query.where(Transaction.account_id == filters.account_id)
+        if filters.category_id is not None:
+            query = query.where(Transaction.category_id == filters.category_id)
         effective_date = func.coalesce(Transaction.booking_date, Transaction.value_date)
         if filters.month_start is not None:
             query = query.where(effective_date >= filters.month_start)

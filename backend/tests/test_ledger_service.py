@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import create_engine
+import pytest
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -182,6 +183,30 @@ def test_ledger_service_lists_transactions_with_filters_and_pagination() -> None
     assert response["transactions"][0]["amount"] == "-12.50"
     assert response["transactions"][0]["category_name"] is None
     assert response["transactions"][0]["matched_rule_id"] is None
+
+
+def test_ledger_service_filters_transactions_by_category() -> None:
+    db = make_session()
+    seed_ledger_data(db)
+    service = LedgerService(db=db)
+
+    category = db.execute(select(Category).where(Category.name == "Food")).scalar_one()
+
+    response = service.list_transactions(category_id=str(category.id))
+
+    assert response["total_count"] == 1
+    assert len(response["transactions"]) == 1
+    assert response["transactions"][0]["description"] == "Groceries"
+    assert response["transactions"][0]["category_name"] == "Food"
+
+
+def test_ledger_service_rejects_invalid_category_id() -> None:
+    db = make_session()
+    seed_ledger_data(db)
+    service = LedgerService(db=db)
+
+    with pytest.raises(ValueError):
+        service.list_transactions(category_id="not-a-uuid")
 
 
 def test_ledger_service_counts_uncategorized_transactions_for_filters() -> None:

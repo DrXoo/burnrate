@@ -175,6 +175,7 @@ export interface TransactionsResponse {
 export interface FiltersState {
   month: string;
   accountId: string;
+  categoryId: string;
   status: string;
   categorized: "" | "true" | "false";
 }

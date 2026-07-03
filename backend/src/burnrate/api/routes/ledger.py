@@ -43,6 +43,7 @@ def update_account(
 @router.get("/transactions", response_model=TransactionListResponse)
 def list_transactions(
     account_id: str | None = Query(default=None),
+    category_id: str | None = Query(default=None),
     month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     status_filter: str | None = Query(default=None, alias="status"),
     categorized: bool | None = Query(default=None),
@@ -53,6 +54,7 @@ def list_transactions(
     try:
         payload = service.list_transactions(
             account_id=account_id,
+            category_id=category_id,
             month=month,
             status=status_filter,
             categorized=categorized,
