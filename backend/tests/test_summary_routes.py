@@ -37,6 +37,7 @@ class FakeSummaryService:
             "days_elapsed": 15,
             "days_in_month": 30,
             "average_daily_spend_amount": "17.33",
+            "expected_daily_spend_amount": "13.33",
             "projected_month_end_spend_amount": "519.90",
             "projected_overspend_amount": "119.90",
             "runway_months_left": "12.51",

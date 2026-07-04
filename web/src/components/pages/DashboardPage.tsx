@@ -335,7 +335,10 @@ function DashboardContent({
 
             <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
               <div style={{ borderLeft: `2px solid ${hero.statusColor}`, paddingLeft: 13 }}>
-                <div style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 600 }}>
+                <div
+                  title="Daily pace of variable spend — fixed payments (rent, utilities) are excluded."
+                  style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 600 }}
+                >
                   Burn rate
                 </div>
                 <div className="num" style={{ fontSize: 23, fontWeight: 600, marginTop: 1 }}>
@@ -343,6 +346,12 @@ function DashboardContent({
                   <span style={{ fontSize: 13, color: "var(--text-3)", fontWeight: 500 }}>/day</span>
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+                  {num(summary.expected_daily_spend_amount) > 0 ? (
+                    <>
+                      vs {eurPlain(summary.expected_daily_spend_amount)}/day planned
+                      <br />
+                    </>
+                  ) : null}
                   proj. {eurPlain(summary.projected_month_end_spend_amount)} month-end
                 </div>
               </div>
@@ -413,9 +422,12 @@ function DashboardContent({
           {summary.budget_usage.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 15 }}>
               {summary.budget_usage.map((usage) => {
-                const tone = usageTone(usage.status);
-                const color = TONE_COLOR[tone];
                 const remaining = num(usage.remaining_amount);
+                // A fixed budget that hasn't been charged yet is neither "on track" nor
+                // "over" — it's just pending. Show it neutral until the payment lands.
+                const isPendingFixed = usage.is_fixed && num(usage.spent_amount) <= 0;
+                const tone = isPendingFixed ? "neutral" : usageTone(usage.status);
+                const color = TONE_COLOR[tone];
                 const barPct = `${Math.min(100, Math.max(0, usage.utilization_percent)).toFixed(0)}%`;
                 return (
                   <div key={usage.category_id}>
@@ -423,6 +435,14 @@ function DashboardContent({
                       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 500 }}>
                         <span style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
                         {usage.category_name}
+                        {usage.is_fixed ? (
+                          <span
+                            title="Fixed payment — not paced day-by-day"
+                            style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-3)", background: "var(--bg-4)", border: "1px solid var(--line-2)", borderRadius: 5, padding: "1px 5px" }}
+                          >
+                            Fixed
+                          </span>
+                        ) : null}
                       </div>
                       <div className="num" style={{ fontSize: 12.5, color: "var(--text-2)" }}>
                         {eurPlain(usage.spent_amount)} <span style={{ color: "var(--text-3)" }}>/ {eurPlain(usage.budget_amount)}</span>
@@ -430,13 +450,20 @@ function DashboardContent({
                     </div>
                     <div style={{ position: "relative", height: 8, background: "var(--bg-4)", borderRadius: 5, overflow: "hidden" }}>
                       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: barPct, background: color, borderRadius: 5 }} />
-                      <div style={{ position: "absolute", top: -1, bottom: -1, left: hero.dayPct, width: 1.5, background: "var(--text-3)", opacity: 0.6 }} />
+                      {/* The "today's pace" marker only makes sense for spend that accrues
+                          daily — a fixed lump has no meaningful pace, so we hide it. */}
+                      {usage.is_fixed ? null : (
+                        <div style={{ position: "absolute", top: -1, bottom: -1, left: hero.dayPct, width: 1.5, background: "var(--text-3)", opacity: 0.6 }} />
+                      )}
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontSize: 11 }}>
-                      <span style={{ color, fontWeight: 600 }}>{TONE_LABEL[tone]}</span>
+                      <span style={{ color, fontWeight: 600 }}>{isPendingFixed ? "Not yet paid" : TONE_LABEL[tone]}</span>
                       <span className="num" style={{ color: "var(--text-3)" }}>
-                        {Math.round(usage.utilization_percent)}% used ·{" "}
-                        {remaining >= 0 ? `${eurPlain(remaining)} left` : `${eurPlain(-remaining)} over`}
+                        {isPendingFixed
+                          ? `${eurPlain(usage.budget_amount)} est.`
+                          : `${Math.round(usage.utilization_percent)}% used · ${
+                              remaining >= 0 ? `${eurPlain(remaining)} left` : `${eurPlain(-remaining)} over`
+                            }`}
                       </span>
                     </div>
                   </div>

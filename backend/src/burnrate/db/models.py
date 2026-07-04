@@ -77,6 +77,10 @@ class Budget(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     period_type: Mapped[str] = mapped_column(Text)
     active_from: Mapped[date] = mapped_column(Date, index=True)
     active_to: Mapped[date | None] = mapped_column(Date, index=True)
+    # True = a lump/scheduled payment (rent, utilities) that lands in one charge and
+    # must NOT be daily-rate extrapolated. The amount can still land over or under
+    # budget month to month; "fixed" refers to the timing, not the amount.
+    is_fixed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class EnableBankingAccountMapping(UUIDPrimaryKeyMixin, TimestampedMixin, Base):

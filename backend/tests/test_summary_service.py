@@ -333,3 +333,57 @@ def test_summary_service_rejects_invalid_month_format() -> None:
         assert str(exc) == "Month must use YYYY-MM format"
     else:
         raise AssertionError("Expected invalid month format to raise ValueError")
+
+
+def test_summary_service_excludes_fixed_budget_from_pace() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    # Utilities is a lump payment (power bill): mark its budget fixed. Its 120 charge
+    # must drop out of the burn rate and be projected as-is instead of rate-scaled.
+    utilities = db.query(Category).filter(Category.name == "Utilities").one()
+    db.query(Budget).filter(Budget.category_id == utilities.id).update({"is_fixed": True})
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # Burn rate now reflects only variable spend (Food 140 / 15 days), not the lump.
+    assert summary["average_daily_spend_amount"] == "9.33"
+    # Planned variable pace: Food budget 300 / 30 days.
+    assert summary["expected_daily_spend_amount"] == "10.00"
+    # Variable slice projects 285 (140 + 15 x blended 9.667); fixed adds its actual 120.
+    assert summary["projected_month_end_spend_amount"] == "405.00"
+    assert summary["projected_overspend_amount"] == "5.00"
+
+    usage = {item["category_name"]: item for item in summary["budget_usage"]}
+    assert usage["Utilities"]["is_fixed"] is True
+    assert usage["Food"]["is_fixed"] is False
+
+
+def test_summary_service_fixed_budget_uses_estimate_until_paid() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    # A fixed Rent budget with no charge booked yet should project at its estimate,
+    # not zero, and not be rate-extrapolated.
+    rent = Category(name="Rent", type="expense", active=True)
+    db.add(rent)
+    db.flush()
+    db.add(
+        Budget(
+            category_id=rent.id,
+            amount=Decimal("900.00"),
+            currency="EUR",
+            period_type="monthly",
+            active_from=date(2026, 6, 1),
+            active_to=None,
+            is_fixed=True,
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # Variable slice unchanged at 490; fixed Rent adds its 900 budgeted estimate.
+    assert summary["projected_month_end_spend_amount"] == "1390.00"
+    usage = {item["category_name"]: item for item in summary["budget_usage"]}
+    assert usage["Rent"]["is_fixed"] is True
+    assert usage["Rent"]["spent_amount"] == "0.00"

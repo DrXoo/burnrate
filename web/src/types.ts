@@ -113,6 +113,7 @@ export interface Budget {
   period_type: "monthly";
   active_from: string;
   active_to: string | null;
+  is_fixed: boolean;
   active: boolean;
   status: BudgetStatus;
 }
@@ -126,6 +127,7 @@ export interface BudgetUsage {
   currency: string;
   utilization_percent: number;
   status: BudgetUsageStatus;
+  is_fixed: boolean;
 }
 
 export interface RunwayAccount {
@@ -158,6 +160,7 @@ export interface SummaryDashboard {
   days_elapsed: number;
   days_in_month: number;
   average_daily_spend_amount: string;
+  expected_daily_spend_amount: string;
   projected_month_end_spend_amount: string;
   projected_overspend_amount: string;
   runway_months_left: string | null;
@@ -207,9 +210,11 @@ export interface BudgetDraft {
   category_id: string;
   amount: string;
   currency: string;
+  is_fixed: boolean;
 }
 
 export interface BudgetUpdateDraft {
   amount: string;
   currency: string;
+  is_fixed: boolean;
 }

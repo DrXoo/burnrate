@@ -18,6 +18,7 @@ class ActiveBudgetWindow:
     category_name: str
     amount: Decimal
     currency: str
+    is_fixed: bool
 
 
 @dataclass(frozen=True)
@@ -75,37 +76,73 @@ class SummaryService:
         unbudgeted_spending = (monthly_spending - budgeted_spending).quantize(Decimal("0.01"))
         money_left = monthly_budget - budgeted_spending
 
+        # Fixed budgets (rent, utilities) are lump/scheduled payments: they must not
+        # be extrapolated from a daily rate. Each one projects as a step -- its actual
+        # charge once anything has booked (which can land over or under the budgeted
+        # estimate), otherwise the budgeted estimate. Carving them out keeps a day-1
+        # rent charge from inflating the burn rate and the projection.
+        fixed_budgets = [budget for budget in active_budgets if budget.is_fixed]
+        fixed_budget_total = sum((budget.amount for budget in fixed_budgets), start=Decimal("0.00"))
+        fixed_spent = sum(
+            (spent_by_budget_category.get(budget.category_id, Decimal("0.00")) for budget in fixed_budgets),
+            start=Decimal("0.00"),
+        )
+        fixed_projected = sum(
+            (
+                self._project_fixed(
+                    budget=budget,
+                    spent=spent_by_budget_category.get(budget.category_id, Decimal("0.00")),
+                )
+                for budget in fixed_budgets
+            ),
+            start=Decimal("0.00"),
+        )
+
+        # Everything else accrues day by day, so it keeps the pace-based projection.
+        variable_budget_total = monthly_budget - fixed_budget_total
+        variable_spend = (monthly_spending - fixed_spent).quantize(Decimal("0.01"))
+        variable_budgeted_spend = (budgeted_spending - fixed_spent).quantize(Decimal("0.01"))
+
+        # Burn rate reflects the *variable* daily pace only -- fixed lumps are excluded
+        # so it captures controllable day-to-day spend. Expected burn is the planned
+        # variable pace (variable budgets spread evenly across the month).
         average_daily_spend = Decimal("0.00")
         if days_elapsed > 0:
-            average_daily_spend = (monthly_spending / Decimal(days_elapsed)).quantize(Decimal("0.01"))
+            average_daily_spend = (variable_spend / Decimal(days_elapsed)).quantize(Decimal("0.01"))
+        expected_daily_spend = Decimal("0.00")
+        if days_in_month > 0:
+            expected_daily_spend = (variable_budget_total / Decimal(days_in_month)).quantize(Decimal("0.01"))
 
-        # Full-month spend projections. When budgets exist we regress the observed
-        # daily pace toward the budgeted pace, weighted by how far into the month we
-        # are, so an early-month spike (e.g. rent on day 1) doesn't blow the
-        # projection out of proportion. Overspend/runway compare on the *budgeted*
-        # basis so both sides live in the same universe as the budget. Without
-        # budgets there is no prior to lean on, so we fall back to a straight linear
-        # extrapolation of actual spend.
-        if monthly_budget > 0:
-            projected_month_end_spend = self._project_spend(
-                spend_to_date=monthly_spending,
-                budget_reference=monthly_budget,
+        # Full-month spend projections. For the variable slice, when budgets exist we
+        # regress the observed daily pace toward the budgeted pace, weighted by how
+        # far into the month we are, so an early-month spike doesn't blow the
+        # projection out of proportion; without budgets we fall back to a straight
+        # linear extrapolation. The fixed slice is added back as its step projection.
+        # Overspend/runway compare on the *budgeted* basis so both sides live in the
+        # same universe as the budget.
+        if variable_budget_total > 0:
+            variable_projected = self._project_spend(
+                spend_to_date=variable_spend,
+                budget_reference=variable_budget_total,
                 days_elapsed=days_elapsed,
                 days_in_month=days_in_month,
             )
-            projected_budgeted_spend = self._project_spend(
-                spend_to_date=budgeted_spending,
-                budget_reference=monthly_budget,
+            variable_budgeted_projected = self._project_spend(
+                spend_to_date=variable_budgeted_spend,
+                budget_reference=variable_budget_total,
                 days_elapsed=days_elapsed,
                 days_in_month=days_in_month,
             )
         else:
-            projected_month_end_spend = self._extrapolate_spend(
-                spend_to_date=monthly_spending,
+            variable_projected = self._extrapolate_spend(
+                spend_to_date=variable_spend,
                 days_elapsed=days_elapsed,
                 days_in_month=days_in_month,
             )
-            projected_budgeted_spend = projected_month_end_spend
+            variable_budgeted_projected = variable_budgeted_spend
+
+        projected_month_end_spend = (variable_projected + fixed_projected).quantize(Decimal("0.01"))
+        projected_budgeted_spend = (variable_budgeted_projected + fixed_projected).quantize(Decimal("0.01"))
 
         projected_overspend = max(projected_budgeted_spend - monthly_budget, Decimal("0.00"))
         runway_drain_amount, runway_drain_label = self._runway_drain(
@@ -169,6 +206,7 @@ class SummaryService:
             "days_elapsed": days_elapsed,
             "days_in_month": days_in_month,
             "average_daily_spend_amount": self._format_decimal(average_daily_spend),
+            "expected_daily_spend_amount": self._format_decimal(expected_daily_spend),
             "projected_month_end_spend_amount": self._format_decimal(projected_month_end_spend),
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "runway_months_left": self._format_decimal(runway_months_left) if runway_months_left is not None else None,
@@ -324,6 +362,7 @@ class SummaryService:
                 category_name=category_name,
                 amount=budget.amount.quantize(Decimal("0.01")),
                 currency=budget.currency,
+                is_fixed=budget.is_fixed,
             )
             for budget, category_name in rows
         ]
@@ -380,6 +419,7 @@ class SummaryService:
             "currency": budget.currency,
             "utilization_percent": float(utilization),
             "status": status,
+            "is_fixed": budget.is_fixed,
         }
 
     def _budget_usage_sort_key(self, *, budget_amount: Decimal, spent_amount: Decimal) -> tuple[int, Decimal]:
@@ -395,6 +435,17 @@ class SummaryService:
         if utilization >= Decimal("85.0"):
             return "watch"
         return "on_track"
+
+    def _project_fixed(self, *, budget: ActiveBudgetWindow, spent: Decimal) -> Decimal:
+        """Step projection for a fixed/lump budget (rent, utilities).
+
+        Once any spend has booked in the category we trust the actual amount -- it can
+        land over or under the budgeted estimate. Until the charge appears we assume it
+        will cost the budgeted amount. Never rate-extrapolated.
+        """
+        if spent > 0:
+            return spent.quantize(Decimal("0.01"))
+        return budget.amount.quantize(Decimal("0.01"))
 
     def _extrapolate_spend(
         self, *, spend_to_date: Decimal, days_elapsed: int, days_in_month: int

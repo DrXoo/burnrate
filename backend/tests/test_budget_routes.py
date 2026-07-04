@@ -21,6 +21,7 @@ class FakeBudgetService:
                 "period_type": "monthly",
                 "active_from": date(2026, 7, 1),
                 "active_to": None,
+                "is_fixed": False,
                 "active": False,
                 "status": "scheduled",
             }
@@ -29,11 +30,13 @@ class FakeBudgetService:
     def create_budget(self, **_: object):
         return self.list_budgets()[0]
 
-    def update_budget(self, *, budget_id: str, amount: Decimal, currency: str):
+    def update_budget(self, *, budget_id: str, amount: Decimal, currency: str, is_fixed: bool | None = None):
         assert budget_id == "budget-1"
         payload = self.list_budgets()[0]
         payload["amount"] = f"{amount:.2f}"
         payload["currency"] = currency.upper()
+        if is_fixed is not None:
+            payload["is_fixed"] = is_fixed
         return payload
 
     def deactivate_budget(self, *, budget_id: str):

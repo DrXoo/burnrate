@@ -14,6 +14,7 @@ class BudgetUsageResponse(BaseModel):
     currency: str
     utilization_percent: float
     status: Literal["on_track", "watch", "over"]
+    is_fixed: bool = False
 
 
 class RunwayAccountResponse(BaseModel):
@@ -46,6 +47,7 @@ class SummaryResponse(BaseModel):
     days_elapsed: int
     days_in_month: int
     average_daily_spend_amount: str
+    expected_daily_spend_amount: str
     projected_month_end_spend_amount: str
     projected_overspend_amount: str
     runway_months_left: str | None

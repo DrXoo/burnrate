@@ -17,6 +17,7 @@ class BudgetSummaryResponse(BaseModel):
     period_type: Literal["monthly"]
     active_from: date
     active_to: date | None = None
+    is_fixed: bool = False
     active: bool
     status: Literal["active", "scheduled", "inactive"]
 
@@ -30,8 +31,10 @@ class CreateBudgetRequest(BaseModel):
     amount: Decimal = Field(gt=0, decimal_places=2)
     currency: str = Field(min_length=3, max_length=3, default="EUR")
     active_from: date
+    is_fixed: bool = False
 
 
 class UpdateBudgetRequest(BaseModel):
     amount: Decimal = Field(gt=0, decimal_places=2)
     currency: str = Field(min_length=3, max_length=3)
+    is_fixed: bool | None = None

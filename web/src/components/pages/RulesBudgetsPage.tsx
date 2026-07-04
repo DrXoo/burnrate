@@ -138,8 +138,10 @@ export function RulesBudgetsPage({
   const [showNewBudget, setShowNewBudget] = useState(false);
   const [newBudgetCat, setNewBudgetCat] = useState("");
   const [newBudgetAmount, setNewBudgetAmount] = useState("");
+  const [newBudgetFixed, setNewBudgetFixed] = useState(false);
   const [editBudgetId, setEditBudgetId] = useState<string | null>(null);
   const [editBudgetAmount, setEditBudgetAmount] = useState("");
+  const [editBudgetFixed, setEditBudgetFixed] = useState(false);
 
   function startEditRule(rule: Rule) {
     setEditRuleId(rule.rule_id);
@@ -172,17 +174,18 @@ export function RulesBudgetsPage({
     if (!categoryId || !newBudgetAmount.trim()) {
       return;
     }
-    await onCreateBudget({ category_id: categoryId, amount: newBudgetAmount.trim(), currency: "EUR" });
+    await onCreateBudget({ category_id: categoryId, amount: newBudgetAmount.trim(), currency: "EUR", is_fixed: newBudgetFixed });
     setShowNewBudget(false);
     setNewBudgetCat("");
     setNewBudgetAmount("");
+    setNewBudgetFixed(false);
   }
 
   async function saveBudget(budget: Budget) {
     if (!editBudgetAmount.trim()) {
       return;
     }
-    await onUpdateBudget(budget.budget_id, { amount: editBudgetAmount.trim(), currency: budget.currency });
+    await onUpdateBudget(budget.budget_id, { amount: editBudgetAmount.trim(), currency: budget.currency, is_fixed: editBudgetFixed });
     setEditBudgetId(null);
     setEditBudgetAmount("");
   }
@@ -354,6 +357,18 @@ export function RulesBudgetsPage({
                   Add
                 </button>
               </div>
+              <label style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={newBudgetFixed}
+                  onChange={(event) => setNewBudgetFixed(event.target.checked)}
+                  style={{ marginTop: 2, accentColor: "var(--accent)", cursor: "pointer" }}
+                />
+                <span style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.45 }}>
+                  <span style={{ fontWeight: 600, color: "var(--text)" }}>Fixed payment</span> — a single charge like rent
+                  or utilities. Tracked against its budget, but not spread across the month or paced day-by-day.
+                </span>
+              </label>
             </div>
           ) : null}
 
@@ -367,29 +382,53 @@ export function RulesBudgetsPage({
             const color = categoryColor(budget.category_type, toneById.get(budget.category_id) ?? "good");
             if (editBudgetId === budget.budget_id) {
               return (
-                <div key={budget.budget_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "var(--bg-3)", border: "1px solid var(--accent)", borderRadius: 11 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flex: "none" }} />
-                  <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{budget.category_name}</span>
-                  <input
-                    className="br-input"
-                    style={{ width: 96, background: "var(--bg-2)" }}
-                    value={editBudgetAmount}
-                    onChange={(event) => setEditBudgetAmount(event.target.value)}
-                    inputMode="decimal"
-                  />
-                  <button type="button" style={accentButton} onClick={() => void saveBudget(budget)}>
-                    Save
-                  </button>
-                  <button type="button" style={ghostButton} onClick={() => setEditBudgetId(null)}>
-                    Cancel
-                  </button>
+                <div key={budget.budget_id} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "11px 14px", background: "var(--bg-3)", border: "1px solid var(--accent)", borderRadius: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flex: "none" }} />
+                    <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{budget.category_name}</span>
+                    <input
+                      className="br-input"
+                      style={{ width: 96, background: "var(--bg-2)" }}
+                      value={editBudgetAmount}
+                      onChange={(event) => setEditBudgetAmount(event.target.value)}
+                      inputMode="decimal"
+                    />
+                    <button type="button" style={accentButton} onClick={() => void saveBudget(budget)}>
+                      Save
+                    </button>
+                    <button type="button" style={ghostButton} onClick={() => setEditBudgetId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                  <label style={{ display: "flex", gap: 9, alignItems: "flex-start", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={editBudgetFixed}
+                      onChange={(event) => setEditBudgetFixed(event.target.checked)}
+                      style={{ marginTop: 2, accentColor: "var(--accent)", cursor: "pointer" }}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.45 }}>
+                      <span style={{ fontWeight: 600, color: "var(--text)" }}>Fixed payment</span> — a single charge like
+                      rent or utilities. Not paced day-by-day.
+                    </span>
+                  </label>
                 </div>
               );
             }
             return (
               <div key={budget.budget_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", background: "var(--bg-3)", border: "1px solid var(--line)", borderRadius: 11 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flex: "none" }} />
-                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{budget.category_name}</span>
+                <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{budget.category_name}</span>
+                  {budget.is_fixed ? (
+                    <span
+                      title="Fixed payment — not paced day-by-day"
+                      style={{ flex: "none", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-2)", background: "var(--bg-4)", border: "1px solid var(--line-2)", borderRadius: 6, padding: "1px 6px" }}
+                    >
+                      Fixed
+                    </span>
+                  ) : null}
+                </span>
                 <span className="num" style={{ fontSize: 13.5, fontWeight: 600 }}>
                   {eurPlain(num(budget.amount))}
                   <span style={{ color: "var(--text-3)", fontWeight: 400, fontSize: 12 }}>/mo</span>
@@ -398,7 +437,7 @@ export function RulesBudgetsPage({
                   type="button"
                   title="Edit budget"
                   style={{ ...iconButton, color: "var(--text-2)" }}
-                  onClick={() => { setEditBudgetId(budget.budget_id); setEditBudgetAmount(String(num(budget.amount))); }}
+                  onClick={() => { setEditBudgetId(budget.budget_id); setEditBudgetAmount(String(num(budget.amount))); setEditBudgetFixed(budget.is_fixed); }}
                 >
                   <IconPencil />
                 </button>

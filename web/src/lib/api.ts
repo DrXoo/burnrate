@@ -214,6 +214,7 @@ export async function createBudgetForMonth(
       amount: draft.amount,
       currency: draft.currency.trim().toUpperCase(),
       active_from: activeFrom,
+      is_fixed: draft.is_fixed,
     }),
   });
 }
@@ -225,6 +226,7 @@ export async function updateBudget(apiBase: string, budgetId: string, draft: Bud
     body: JSON.stringify({
       amount: draft.amount,
       currency: draft.currency.trim().toUpperCase(),
+      is_fixed: draft.is_fixed,
     }),
   });
 }

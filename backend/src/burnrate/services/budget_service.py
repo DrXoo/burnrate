@@ -37,6 +37,7 @@ class BudgetService:
         amount: Decimal,
         currency: str,
         active_from: date,
+        is_fixed: bool = False,
     ) -> dict[str, Any]:
         category = self._resolve_budget_category(category_id)
         normalized_currency = self._normalize_currency(currency)
@@ -59,6 +60,7 @@ class BudgetService:
             period_type="monthly",
             active_from=active_from,
             active_to=None,
+            is_fixed=is_fixed,
         )
         self.db.add(budget)
         self.db.flush()
@@ -75,6 +77,7 @@ class BudgetService:
         budget_id: str,
         amount: Decimal,
         currency: str,
+        is_fixed: bool | None = None,
     ) -> dict[str, Any]:
         budget = self.db.get(Budget, self._parse_uuid(budget_id, "Budget id"))
         if budget is None:
@@ -85,6 +88,8 @@ class BudgetService:
 
         budget.amount = self._normalize_amount(amount)
         budget.currency = self._normalize_currency(currency)
+        if is_fixed is not None:
+            budget.is_fixed = is_fixed
 
         return self._serialize_budget(
             budget=budget,
@@ -132,6 +137,7 @@ class BudgetService:
             "period_type": budget.period_type,
             "active_from": budget.active_from,
             "active_to": budget.active_to,
+            "is_fixed": budget.is_fixed,
             "active": status == "active",
             "status": status,
         }

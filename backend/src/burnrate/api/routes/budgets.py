@@ -32,6 +32,7 @@ def create_budget(
             amount=request.amount,
             currency=request.currency,
             active_from=request.active_from,
+            is_fixed=request.is_fixed,
         )
     except ValueError as exc:
         message = str(exc)
@@ -53,6 +54,7 @@ def update_budget(
             budget_id=budget_id,
             amount=request.amount,
             currency=request.currency,
+            is_fixed=request.is_fixed,
         )
     except ValueError as exc:
         message = str(exc)
