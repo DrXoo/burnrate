@@ -463,12 +463,15 @@ class EnableBankingService:
                 len(transactions),
                 payload_summary,
             )
+            # Count only genuinely-new rows: booked transactions are re-fetched for the
+            # whole current month on every sync, so counting all fetched rows would
+            # re-report the same transactions (and falsely trigger "N new" alerts).
             for transaction_payload in transactions:
-                self._upsert_transaction(
+                if self._upsert_transaction(
                     local_account=local_account,
                     transaction_payload=transaction_payload,
-                )
-            imported += len(transactions)
+                ):
+                    imported += 1
             continuation_key = transactions_payload.get("continuation_key")
             if not continuation_key:
                 break
@@ -568,7 +571,8 @@ class EnableBankingService:
         if currency:
             local_account.latest_balance_currency = currency
 
-    def _upsert_transaction(self, *, local_account: Account, transaction_payload: dict[str, Any]) -> None:
+    def _upsert_transaction(self, *, local_account: Account, transaction_payload: dict[str, Any]) -> bool:
+        """Insert or update one transaction. Returns True only when a new row was created."""
         external_id = self._transaction_external_id(local_account.id, transaction_payload)
         transaction = self.db.scalar(
             select(Transaction).where(Transaction.enable_banking_transaction_id == external_id)
@@ -590,6 +594,7 @@ class EnableBankingService:
         merchant_name = creditor.get("name")
         counterparty_name = debtor.get("name")
 
+        created = transaction is None
         if transaction is None:
             transaction = Transaction(
                 account_id=local_account.id,
@@ -610,6 +615,7 @@ class EnableBankingService:
         transaction.raw_payload = transaction_payload
 
         RulesService(db=self.db).apply_rule_to_transaction(transaction=transaction)
+        return created
 
     def _extract_transactions(self, transactions_payload: dict[str, Any]) -> list[dict[str, Any]]:
         transactions_node = transactions_payload.get("transactions")

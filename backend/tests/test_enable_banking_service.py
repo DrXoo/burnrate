@@ -368,6 +368,8 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     )
     db.commit()
 
+    # tx-1 was already imported on the initial callback; re-syncing it plus a new
+    # tx-2 must count only the genuinely-new transaction (tx-2), not the re-fetched one.
     client.transaction_ids = ["tx-1", "tx-2"]
     sync_result = service.sync_connection(connection_id=initial_callback["connection_id"])
     db.commit()
@@ -376,12 +378,12 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     sync_sessions = db.scalars(select(SyncSession).order_by(SyncSession.started_at)).all()
 
     assert sync_result["accounts_synced"] == 1
-    assert sync_result["transactions_imported"] == 2
+    assert sync_result["transactions_imported"] == 1
     assert len(transactions) == 2
     assert transactions[0].enable_banking_transaction_id == "tx-1"
     assert transactions[1].enable_banking_transaction_id == "tx-2"
     assert len(sync_sessions) == 2
-    assert sync_sessions[-1].imported_transactions_count == 2
+    assert sync_sessions[-1].imported_transactions_count == 1
     today = datetime.now(timezone.utc).date()
     booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
     pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
@@ -390,6 +392,32 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     assert booked_requests[-1]["date_to"] == today
     assert pending_requests[-1]["date_from"] == today - timedelta(days=30)
     assert pending_requests[-1]["date_to"] == today
+
+
+def test_resync_of_unchanged_month_counts_zero_new_transactions() -> None:
+    # Booked transactions are re-fetched for the whole current month every sync, so a
+    # resync that returns the same transactions must report 0 new (not re-announce them).
+    db = make_session()
+    client = FakeEnableBankingClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+    initial = service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+    db.commit()
+    assert initial["transactions_imported"] == 1
+
+    resync = service.sync_connection(connection_id=initial["connection_id"])
+    db.commit()
+
+    assert resync["transactions_imported"] == 0
+    assert len(db.scalars(select(Transaction)).all()) == 1
 
 
 def test_enable_banking_service_handles_null_creditor_and_debtor() -> None:
