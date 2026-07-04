@@ -52,10 +52,16 @@ def format_summary(payload: dict[str, Any]) -> str:
         lines.append(f"   {_budget_bar(payload)}")
 
     lines.append("")
-    lines.append(
+    # Burn rate is the variable daily pace (fixed lump payments excluded). When a
+    # planned pace is available, show it alongside so over/under-pace is obvious.
+    avg_line = (
         f"⏱ Avg/day: {_money(payload['average_daily_spend_amount'], currency)} "
         f"({payload['days_elapsed']}/{payload['days_in_month']} days)"
     )
+    expected_daily = payload.get("expected_daily_spend_amount")
+    if expected_daily is not None and Decimal(expected_daily) > 0:
+        avg_line += f" · plan {_money(expected_daily, currency)}/day"
+    lines.append(avg_line)
     lines.append(f"🔮 Projected: {_money(payload['projected_month_end_spend_amount'], currency)}")
     lines.append("")
     lines.append(_runway_line(payload))
@@ -95,10 +101,17 @@ def format_budgets(payload: dict[str, Any]) -> str:
 
     lines = [f"💰 Budget status for {payload['month']}", ""]
     for item in budget_usage:
-        icon = _BUDGET_STATUS_ICONS.get(item["status"], "•")
         currency = item["currency"]
+        is_fixed = item.get("is_fixed", False)
+        label = f"{item['category_name']} (fixed)" if is_fixed else item["category_name"]
+        # A fixed lump payment that hasn't been charged yet isn't "on track" — it's
+        # pending. Show its estimate instead of a green 0%-used line.
+        if is_fixed and Decimal(item["spent_amount"]) <= 0:
+            lines.append(f"⚪ {label}: not yet paid · {_money(item['budget_amount'], currency)} est.")
+            continue
+        icon = _BUDGET_STATUS_ICONS.get(item["status"], "•")
         lines.append(
-            f"{icon} {item['category_name']}: "
+            f"{icon} {label}: "
             f"{item['spent_amount']} / {_money(item['budget_amount'], currency)} "
             f"({item['utilization_percent']:g}%) — {_money(item['remaining_amount'], currency)} left"
         )

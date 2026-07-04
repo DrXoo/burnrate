@@ -112,6 +112,61 @@ def test_format_budgets_lists_categories_with_status_icons() -> None:
     assert "-20.00 EUR left" in text
 
 
+def test_format_summary_shows_planned_daily_pace_when_available() -> None:
+    text = format_summary(make_summary(expected_daily_spend_amount="10.00"))
+
+    assert "Avg/day: 4.00 EUR (30/30 days) · plan 10.00 EUR/day" in text
+
+
+def test_format_summary_omits_planned_pace_without_variable_budget() -> None:
+    text = format_summary(make_summary(expected_daily_spend_amount="0.00"))
+
+    assert "plan" not in text
+
+
+def test_format_budgets_marks_fixed_pending_as_estimate() -> None:
+    payload = make_summary(
+        budget_usage=[
+            {
+                "category_name": "Rent",
+                "spent_amount": "0.00",
+                "budget_amount": "900.00",
+                "remaining_amount": "900.00",
+                "currency": "EUR",
+                "utilization_percent": 0.0,
+                "status": "on_track",
+                "is_fixed": True,
+            }
+        ]
+    )
+
+    text = format_budgets(payload)
+
+    assert "⚪ Rent (fixed): not yet paid · 900.00 EUR est." in text
+    assert "0% used" not in text
+
+
+def test_format_budgets_marks_fixed_paid_with_tag() -> None:
+    payload = make_summary(
+        budget_usage=[
+            {
+                "category_name": "Utilities",
+                "spent_amount": "120.00",
+                "budget_amount": "100.00",
+                "remaining_amount": "-20.00",
+                "currency": "EUR",
+                "utilization_percent": 120.0,
+                "status": "over",
+                "is_fixed": True,
+            }
+        ]
+    )
+
+    text = format_budgets(payload)
+
+    assert "🔴 Utilities (fixed): 120.00 / 100.00 EUR (120%)" in text
+
+
 def test_format_budgets_handles_no_budgets() -> None:
     assert format_budgets(make_summary(budget_usage=[])) == "No active budgets for 2026-06."
 
