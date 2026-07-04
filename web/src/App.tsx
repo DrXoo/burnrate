@@ -199,7 +199,7 @@ export default function App() {
 
           {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} /> : null}
 
-          <div className="br-content" style={{ padding: "22px 30px 60px", maxWidth: 1160 }}>
+          <div className="br-content" style={{ padding: "22px 30px 60px" }}>
             {section === "dashboard" ? (
               <DashboardPage
                 summary={data.summary}

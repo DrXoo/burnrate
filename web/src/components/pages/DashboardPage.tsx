@@ -178,7 +178,7 @@ function DashboardContent({
             pointerEvents: "none",
           }}
         />
-        <div style={{ position: "relative", display: "flex", gap: 38, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="br-hero-row" style={{ position: "relative", display: "flex", gap: 38, flexWrap: "wrap", alignItems: "center" }}>
           <div style={{ flex: "none" }}>
             {heroMode === "dial" ? (
               <div style={{ position: "relative", width: 260, height: 210 }}>

@@ -202,4 +202,10 @@ body {
   .br-hero {
     padding: 20px !important;
   }
+
+  /* Once the hero's two columns wrap onto separate lines, center the gauge/bar
+     instead of leaving it pinned to the left edge. */
+  .br-hero-row {
+    justify-content: center;
+  }
 }
