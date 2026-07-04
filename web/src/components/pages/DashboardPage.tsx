@@ -155,6 +155,13 @@ function DashboardContent({
   const hero = useHeroModel(summary);
   const net = num(summary.net_cash_flow_amount);
 
+  // The dial's centered "money left" figure has to sit inside the ring's inner
+  // opening (~150px of safe width once the arc's blur glow is accounted for). Now
+  // that amounts carry cents they get wider, so size the type to fit that width:
+  // ~0.62em per glyph in Space Grotesk, clamped to a sensible 24–44px range.
+  const moneyLeftText = eur(summary.money_left_amount);
+  const moneyLeftFontSize = Math.max(24, Math.min(44, Math.floor(150 / (moneyLeftText.length * 0.62))));
+
   return (
     <div>
       {/* HERO */}
@@ -239,8 +246,8 @@ function DashboardContent({
                   >
                     Money left
                   </div>
-                  <div className="num" style={{ fontSize: 44, fontWeight: 600, lineHeight: 1.05, marginTop: 2 }}>
-                    {eur(summary.money_left_amount)}
+                  <div className="num" style={{ fontSize: moneyLeftFontSize, fontWeight: 600, lineHeight: 1.05, marginTop: 2, whiteSpace: "nowrap" }}>
+                    {moneyLeftText}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--text-3)" }}>of {eurPlain(hero.budget)} budget</div>
                 </div>
