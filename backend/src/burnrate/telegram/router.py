@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -27,8 +28,14 @@ class TelegramCommandRouter:
     to the application services, and formats their output for Telegram.
     """
 
-    def __init__(self, *, session_factory: Callable[[], Session]) -> None:
+    def __init__(
+        self,
+        *,
+        session_factory: Callable[[], Session],
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def handle(self, text: str) -> str:
         command, argument = self._parse(text)
@@ -73,8 +80,12 @@ class TelegramCommandRouter:
         return format_budgets(payload)
 
     def _unknown(self, session: Session, argument: str | None) -> str:
+        # Scope to the current month by default -- last month's leftovers are no
+        # longer actionable for the running month. An explicit YYYY-MM still works.
+        month = argument or self._clock().strftime("%Y-%m")
         result = LedgerService(db=session).list_transactions(
             categorized=False,
+            month=month,
             limit=UNKNOWN_QUEUE_LIMIT,
         )
         return format_unknown(result)

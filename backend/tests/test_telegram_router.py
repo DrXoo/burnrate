@@ -84,10 +84,13 @@ def seed(session_factory: sessionmaker) -> None:
     session.close()
 
 
-def make_router() -> TelegramCommandRouter:
+def make_router(*, now: datetime | None = None) -> TelegramCommandRouter:
     factory = make_session_factory()
     seed(factory)
-    return TelegramCommandRouter(session_factory=factory)
+    # The seeded uncategorized transaction is dated June 2026, so default the test
+    # clock there to keep the current-month /unknown default deterministic.
+    clock = (lambda: now) if now is not None else (lambda: datetime(2026, 6, 15, tzinfo=timezone.utc))
+    return TelegramCommandRouter(session_factory=factory, clock=clock)
 
 
 def test_help_lists_commands() -> None:
@@ -119,6 +122,21 @@ def test_budgets_reports_category_status() -> None:
 
 def test_unknown_lists_uncategorized_transactions() -> None:
     text = make_router().handle("/unknown")
+
+    assert "1 unknown transaction(s)" in text
+    assert "Coffee Shop" in text
+
+
+def test_unknown_defaults_to_current_month_and_excludes_older() -> None:
+    # In July the June leftover should no longer show under the bare /unknown.
+    text = make_router(now=datetime(2026, 7, 4, tzinfo=timezone.utc)).handle("/unknown")
+
+    assert "No unknown transactions" in text
+    assert "Coffee Shop" not in text
+
+
+def test_unknown_accepts_explicit_month() -> None:
+    text = make_router(now=datetime(2026, 7, 4, tzinfo=timezone.utc)).handle("/unknown 2026-06")
 
     assert "1 unknown transaction(s)" in text
     assert "Coffee Shop" in text

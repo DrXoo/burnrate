@@ -9,7 +9,7 @@ HELP_TEXT = "\n".join(
         "",
         "/summary [YYYY-MM] — money left, spending, burn rate, and runway",
         "/budgets [YYYY-MM] — budget status per category",
-        "/unknown — transactions still waiting to be categorized",
+        "/unknown [YYYY-MM] — transactions still waiting to be categorized (this month)",
         "/help — show this message",
         "",
         "Month is optional and defaults to the current month.",
