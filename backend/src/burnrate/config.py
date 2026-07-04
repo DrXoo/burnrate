@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
     telegram_api_base_url: str = Field(default="https://api.telegram.org", alias="TELEGRAM_API_BASE_URL")
     telegram_poll_timeout_seconds: int = Field(default=30, ge=0, alias="TELEGRAM_POLL_TIMEOUT_SECONDS")
+    telegram_notify_on_sync: bool = Field(default=True, alias="TELEGRAM_NOTIFY_ON_SYNC")
 
     model_config = SettingsConfigDict(
         env_file=".env",

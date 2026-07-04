@@ -118,6 +118,15 @@ def format_budgets(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_sync_notification(*, new_count: int, uncategorized_count: int) -> str:
+    plural = "s" if new_count != 1 else ""
+    lines = [f"🔔 {new_count} new transaction{plural} imported."]
+    if uncategorized_count > 0:
+        verb = "needs" if uncategorized_count == 1 else "need"
+        lines.append(f"{uncategorized_count} still {verb} a category — send /unknown.")
+    return "\n".join(lines)
+
+
 def format_unknown(result: dict[str, Any]) -> str:
     total = result["total_count"]
     if total == 0:

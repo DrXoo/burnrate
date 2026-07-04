@@ -4,13 +4,16 @@ import logging
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy.orm import Session
 
 from burnrate.config import Settings, get_settings
 from burnrate.db.session import SessionLocal
 from burnrate.integrations.enable_banking.client import EnableBankingClient
+from burnrate.integrations.telegram.client import TelegramClient
 from burnrate.logging_config import configure_logging
 from burnrate.services.enable_banking_service import EnableBankingService
-from burnrate.services.sync_service import SyncService
+from burnrate.services.sync_service import SyncRunResult, SyncService
+from burnrate.telegram.notifier import send_sync_notification
 
 logger = logging.getLogger("burnrate.sync_worker")
 
@@ -38,11 +41,27 @@ def run_scheduled_sync(settings: Settings | None = None) -> None:
             result.succeeded,
             result.failed,
         )
+        _notify_new_transactions(session=session, result=result, settings=settings)
     except Exception:
         session.rollback()
         logger.exception("Scheduled sync run failed unexpectedly")
     finally:
         session.close()
+
+
+def _notify_new_transactions(*, session: Session, result: SyncRunResult, settings: Settings) -> None:
+    """Best-effort Telegram push after a sync; never disturbs the sync run.
+
+    Kept separate (and fully guarded) so a Telegram outage or misconfiguration
+    can't trip the sync's own error path.
+    """
+    if not settings.telegram_bot_token or not settings.telegram_notify_on_sync:
+        return
+    try:
+        client = TelegramClient(settings=settings)
+        send_sync_notification(run_result=result, session=session, client=client, settings=settings)
+    except Exception:
+        logger.exception("Failed to send new-transaction notification")
 
 
 def build_scheduler(settings: Settings) -> BlockingScheduler:

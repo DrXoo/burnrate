@@ -5,6 +5,7 @@ from typing import Any
 from burnrate.telegram.formatters import (
     format_budgets,
     format_summary,
+    format_sync_notification,
     format_unknown,
 )
 
@@ -200,6 +201,26 @@ def test_format_unknown_lists_transactions() -> None:
     assert "2026-06-10  -30.00 EUR  Coffee Shop" in text
     assert "(no description)" in text
     assert "and 1 more" in text
+
+
+def test_format_sync_notification_includes_uncategorized_nudge() -> None:
+    text = format_sync_notification(new_count=3, uncategorized_count=2)
+
+    assert "🔔 3 new transactions imported." in text
+    assert "2 still need a category — send /unknown." in text
+
+
+def test_format_sync_notification_singular_and_no_nudge() -> None:
+    text = format_sync_notification(new_count=1, uncategorized_count=0)
+
+    assert "🔔 1 new transaction imported." in text
+    assert "/unknown" not in text
+
+
+def test_format_sync_notification_singular_uncategorized() -> None:
+    text = format_sync_notification(new_count=2, uncategorized_count=1)
+
+    assert "1 still needs a category — send /unknown." in text
 
 
 def test_format_unknown_handles_empty_queue() -> None:
