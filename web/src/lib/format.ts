@@ -71,23 +71,32 @@ function toNumber(value: number | string): number {
   return typeof value === "string" ? Number(value) : value;
 }
 
-/** Signed, whole-euro amount with the design's unicode minus (−€1,234 / €1,234). */
+/** Signed euro amount with 2 decimals and the design's unicode minus (−€1,234.50 / €1,234.50). */
 export function eur(value: number | string): string {
   const numeric = toNumber(value);
   if (!Number.isFinite(numeric)) {
     return String(value);
   }
-  const body = Math.round(Math.abs(numeric)).toLocaleString("en-US");
+  const body = Math.abs(numeric).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
   return (numeric < 0 ? "−€" : "€") + body;
 }
 
-/** Unsigned, whole-euro amount (€1,234) for budgeted figures. */
+/** Unsigned euro amount with 2 decimals (€1,234.50) for budgeted figures. */
 export function eurPlain(value: number | string): string {
   const numeric = toNumber(value);
   if (!Number.isFinite(numeric)) {
     return String(value);
   }
-  return "€" + Math.round(numeric).toLocaleString("en-US");
+  return (
+    "€" +
+    numeric.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  );
 }
 
 /** Compact relative time ("8 min ago") for last-sync labels. */
