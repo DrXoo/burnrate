@@ -13,7 +13,7 @@ from burnrate.integrations.telegram.client import TelegramClient
 from burnrate.logging_config import configure_logging
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.sync_service import SyncRunResult, SyncService
-from burnrate.telegram.notifier import send_sync_notification
+from burnrate.telegram.notifier import send_expiry_alerts, send_sync_notification
 
 logger = logging.getLogger("burnrate.sync_worker")
 
@@ -42,6 +42,7 @@ def run_scheduled_sync(settings: Settings | None = None) -> None:
             result.failed,
         )
         _notify_new_transactions(session=session, result=result, settings=settings)
+        _alert_expiring_connections(session=session, settings=settings)
     except Exception:
         session.rollback()
         logger.exception("Scheduled sync run failed unexpectedly")
@@ -62,6 +63,24 @@ def _notify_new_transactions(*, session: Session, result: SyncRunResult, setting
         send_sync_notification(run_result=result, session=session, client=client, settings=settings)
     except Exception:
         logger.exception("Failed to send new-transaction notification")
+
+
+def _alert_expiring_connections(*, session: Session, settings: Settings) -> None:
+    """Best-effort proactive Telegram warning for lapsing bank connections.
+
+    Fully guarded like the transaction notifier, and commits its own debounce
+    bookkeeping so a warning is not repeated on every sync tick.
+    """
+    if not settings.telegram_bot_token or not settings.telegram_notify_on_sync:
+        return
+    try:
+        client = TelegramClient(settings=settings)
+        sent = send_expiry_alerts(session=session, client=client, settings=settings)
+        if sent:
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to send connection-expiry alert")
 
 
 def build_scheduler(settings: Settings) -> BlockingScheduler:

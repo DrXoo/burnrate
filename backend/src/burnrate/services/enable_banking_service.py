@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from burnrate.api.schemas.enable_banking import StartAuthorizationRequest
 from burnrate.config import Settings
+from burnrate.services.connection_expiry import as_utc, expiry_status
 from burnrate.db.models import (
     Account,
     EnableBankingAccountMapping,
@@ -115,10 +116,16 @@ class EnableBankingService:
             session_status=session_data.get("status", "AUTHORIZED"),
             authorized_at=self._parse_datetime(session_data.get("authorized")) or datetime.now(UTC),
             last_synced_at=datetime.now(UTC),
+            # Consent expiry we requested at auth start, so we can warn before it lapses.
+            expires_at=auth_request.expires_at,
             active=True,
         )
         self.db.add(connection)
         self.db.flush()
+
+        # A fresh authorization for the same bank supersedes the prior one, so a
+        # reconnect renews access instead of leaving a stale duplicate behind.
+        self._supersede_previous_connections(connection)
 
         auth_request.enable_banking_connection_id = connection.id
 
@@ -476,6 +483,38 @@ class EnableBankingService:
         today = datetime.now(UTC).date()
         return today - timedelta(days=30), today
 
+    def _supersede_previous_connections(self, connection: EnableBankingConnection) -> None:
+        """Deactivate earlier connections to the same bank/account-type.
+
+        Matching on aspsp + psu_type keeps a distinct personal vs. business link to
+        the same bank independent, while a re-authorization of the same link retires
+        the old row.
+        """
+        previous = self.db.scalars(
+            select(EnableBankingConnection).where(
+                EnableBankingConnection.id != connection.id,
+                EnableBankingConnection.aspsp_name == connection.aspsp_name,
+                EnableBankingConnection.aspsp_country == connection.aspsp_country,
+                EnableBankingConnection.psu_type == connection.psu_type,
+                EnableBankingConnection.active.is_(True),
+            )
+        ).all()
+        for stale in previous:
+            stale.active = False
+
+    def _expiry_fields(self, connection: EnableBankingConnection) -> dict[str, Any]:
+        status, days = expiry_status(
+            connection.expires_at,
+            now=datetime.now(UTC),
+            warning_days=self.settings.connection_expiry_warning_days,
+        )
+        expires = as_utc(connection.expires_at)
+        return {
+            "expires_at": expires.isoformat() if expires else None,
+            "days_until_expiry": days,
+            "expiry_status": status,
+        }
+
     def _serialize_connection_summary(
         self,
         connection: EnableBankingConnection,
@@ -499,6 +538,7 @@ class EnableBankingService:
             "active": connection.active,
             "authorized_at": connection.authorized_at.isoformat() if connection.authorized_at else None,
             "last_synced_at": connection.last_synced_at.isoformat() if connection.last_synced_at else None,
+            **self._expiry_fields(connection),
             "linked_account_count": linked_account_count,
             "latest_sync_status": latest_sync.status if latest_sync else None,
             "latest_sync_started_at": latest_sync.started_at.isoformat() if latest_sync else None,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -10,9 +10,9 @@ from sqlalchemy.pool import StaticPool
 
 from burnrate.config import Settings
 from burnrate.db.base import Base
-from burnrate.db.models import Account, Category, Transaction
+from burnrate.db.models import Account, Category, EnableBankingConnection, Transaction
 from burnrate.services.sync_service import ConnectionSyncResult, SyncRunResult
-from burnrate.telegram.notifier import send_sync_notification
+from burnrate.telegram.notifier import send_expiry_alerts, send_sync_notification
 
 NOW = datetime(2026, 7, 4, tzinfo=UTC)
 
@@ -62,6 +62,40 @@ def make_session() -> Session:
         )
     session.commit()
     return session
+
+
+def empty_session() -> Session:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
+
+def add_connection(
+    session: Session,
+    *,
+    name: str,
+    expires_at: datetime | None,
+    active: bool = True,
+    alerted_at: datetime | None = None,
+) -> EnableBankingConnection:
+    connection = EnableBankingConnection(
+        aspsp_name=name,
+        aspsp_country="ES",
+        psu_type="personal",
+        session_id=f"sess-{name}",
+        session_status="AUTHORIZED",
+        expires_at=expires_at,
+        expiry_alerted_at=alerted_at,
+        active=active,
+    )
+    session.add(connection)
+    session.commit()
+    return connection
 
 
 def make_settings(**overrides: Any) -> Settings:
@@ -148,6 +182,57 @@ def test_skips_when_no_recipients_configured() -> None:
         settings=make_settings(TELEGRAM_ALLOWED_CHAT_IDS=""),
         now=NOW,
     )
+
+    assert sent == 0
+    assert client.sent == []
+
+
+def test_expiry_alert_warns_on_soon_and_expired_and_debounces() -> None:
+    session = empty_session()
+    soon = add_connection(session, name="ING", expires_at=NOW + timedelta(days=3))
+    add_connection(session, name="BBVA", expires_at=NOW - timedelta(days=1))
+    # Healthy connection well within its window must not be reported.
+    add_connection(session, name="Sabadell", expires_at=NOW + timedelta(days=60))
+    client = FakeClient()
+
+    sent = send_expiry_alerts(session=session, client=client, settings=make_settings(), now=NOW)
+
+    assert sent == 2  # both chats notified once
+    text = client.sent[0][1]
+    assert "ING — access expires in 3 days" in text
+    assert "BBVA — access expired" in text
+    assert "Sabadell" not in text
+    # Debounce: alerted_at is stamped so a second run stays quiet.
+    assert soon.expiry_alerted_at is not None
+    client.sent.clear()
+    again = send_expiry_alerts(session=session, client=client, settings=make_settings(), now=NOW)
+    assert again == 0
+    assert client.sent == []
+
+
+def test_expiry_alert_rewarns_after_cooldown() -> None:
+    session = empty_session()
+    add_connection(
+        session,
+        name="ING",
+        expires_at=NOW + timedelta(days=2),
+        alerted_at=NOW - timedelta(days=2),  # last warned two days ago
+    )
+    client = FakeClient()
+
+    sent = send_expiry_alerts(session=session, client=client, settings=make_settings(), now=NOW)
+
+    assert sent == 2
+    assert "ING" in client.sent[0][1]
+
+
+def test_expiry_alert_skips_inactive_and_unknown_expiry() -> None:
+    session = empty_session()
+    add_connection(session, name="Old", expires_at=NOW - timedelta(days=1), active=False)
+    add_connection(session, name="NoExpiry", expires_at=None)
+    client = FakeClient()
+
+    sent = send_expiry_alerts(session=session, client=client, settings=make_settings(), now=NOW)
 
     assert sent == 0
     assert client.sent == []

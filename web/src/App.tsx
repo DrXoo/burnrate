@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ConnectBankModal } from "./components/ConnectBankModal";
+import { ConnectBankModal, type ReconnectPrefill } from "./components/ConnectBankModal";
 import { FirstRun } from "./components/FirstRun";
 import { HealthStrip } from "./components/HealthStrip";
 import { Sidebar } from "./components/Sidebar";
@@ -15,6 +15,7 @@ import { TransactionsPage } from "./components/pages/TransactionsPage";
 import { useBurnRateData } from "./hooks/useBurnRateData";
 import { formatMonthLabel } from "./lib/format";
 import type { HeroMode, Section, Theme } from "./lib/viewTypes";
+import type { Connection } from "./types";
 
 interface ToastState {
   message: string;
@@ -40,6 +41,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("dark");
   const [heroMode, setHeroMode] = useState<HeroMode>("dial");
   const [connectOpen, setConnectOpen] = useState(false);
+  const [connectPrefill, setConnectPrefill] = useState<ReconnectPrefill | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -85,7 +87,22 @@ export default function App() {
   const includedAccountCount = data.accounts.filter((account) => account.included_in_calculations).length;
 
   function openConnect() {
+    setConnectPrefill(null);
     setConnectOpen(true);
+  }
+
+  function openReconnect(connection: Connection) {
+    setConnectPrefill({
+      country: connection.aspsp_country,
+      aspspName: connection.aspsp_name,
+      psuType: connection.psu_type === "business" ? "business" : "personal",
+    });
+    setConnectOpen(true);
+  }
+
+  function closeConnect() {
+    setConnectOpen(false);
+    setConnectPrefill(null);
   }
 
   // Wrap data-layer actions so successful edits fire a confirmation toast.
@@ -140,7 +157,7 @@ export default function App() {
     return result;
   }
 
-  const modal = connectOpen && data.apiBase ? <ConnectBankModal apiBase={data.apiBase} onClose={() => setConnectOpen(false)} /> : null;
+  const modal = connectOpen && data.apiBase ? <ConnectBankModal apiBase={data.apiBase} prefill={connectPrefill} onClose={closeConnect} /> : null;
   const toastNode = toast ? <Toast message={toast.message} tone={toast.tone} /> : null;
 
   if (data.bootLoading) {
@@ -197,7 +214,7 @@ export default function App() {
             onToggleMenu={() => setMenuOpen((value) => !value)}
           />
 
-          {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} /> : null}
+          {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} onReconnect={openReconnect} /> : null}
 
           <div className="br-content" style={{ padding: "22px 30px 60px" }}>
             {section === "dashboard" ? (
@@ -278,6 +295,7 @@ export default function App() {
                 accounts={data.accounts}
                 onSyncConnection={syncConnection}
                 onConnect={openConnect}
+                onReconnect={openReconnect}
                 onUpdateAccount={updateAccount}
               />
             ) : null}

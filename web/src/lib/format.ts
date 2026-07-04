@@ -1,6 +1,7 @@
 import type {
   BudgetUsageStatus,
   CategoryType,
+  Connection,
   MatchField,
   MatchOperator,
   RunwayStatus,
@@ -97,6 +98,28 @@ export function eurPlain(value: number | string): string {
       maximumFractionDigits: 2,
     })
   );
+}
+
+/** A bank connection needs re-authorizing if it's inactive or its consent is lapsing/lapsed. */
+export function needsReconnect(connection: Connection): boolean {
+  return (
+    !connection.active ||
+    connection.expiry_status === "expired" ||
+    connection.expiry_status === "expiring_soon"
+  );
+}
+
+/** Consent-expiry badge for a connection, or null when there's nothing to flag. */
+export function expiryBadge(connection: Connection): { text: string; tone: Tone } | null {
+  if (connection.expiry_status === "expired") {
+    return { text: "Access expired", tone: "over" };
+  }
+  if (connection.expiry_status === "expiring_soon") {
+    const days = connection.days_until_expiry;
+    const when = days == null ? "soon" : days <= 0 ? "today" : `in ${days} day${days === 1 ? "" : "s"}`;
+    return { text: `Expires ${when}`, tone: "watch" };
+  }
+  return null;
 }
 
 /** Compact relative time ("8 min ago") for last-sync labels. */

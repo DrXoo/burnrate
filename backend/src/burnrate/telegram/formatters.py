@@ -127,6 +127,25 @@ def format_sync_notification(*, new_count: int, uncategorized_count: int) -> str
     return "\n".join(lines)
 
 
+def format_expiry_alert(items: list[dict[str, Any]]) -> str:
+    """Warn that one or more bank connections are lapsing (or have lapsed).
+
+    ``items`` are dicts with ``aspsp_name``, ``expired`` (bool) and ``days`` (int).
+    """
+    lines = ["⚠️ Bank connection needs attention:", ""]
+    for item in items:
+        name = item["aspsp_name"]
+        if item["expired"]:
+            lines.append(f"• {name} — access expired, syncing has stopped")
+        else:
+            days = item["days"]
+            when = "today" if days <= 0 else (f"in {days} day" + ("" if days == 1 else "s"))
+            lines.append(f"• {name} — access expires {when}")
+    lines.append("")
+    lines.append("Reconnect the account in the app to keep your data fresh.")
+    return "\n".join(lines)
+
+
 def format_unknown(result: dict[str, Any]) -> str:
     total = result["total_count"]
     if total == 0:

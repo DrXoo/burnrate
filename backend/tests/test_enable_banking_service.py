@@ -294,6 +294,36 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     assert pending_requests[0]["date_to"] == today
 
 
+def test_reconnect_supersedes_previous_connection_for_same_bank() -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=FakeEnableBankingClient())
+
+    def connect() -> None:
+        start = service.start_authorization(
+            StartAuthorizationRequest(
+                aspsp_name="Nordea",
+                aspsp_country="FI",
+                psu_type="personal",
+                access_valid_for_days=10,
+            )
+        )
+        db.commit()
+        service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+        db.commit()
+
+    connect()
+    connect()  # a reconnect of the same bank
+
+    connections = db.scalars(
+        select(EnableBankingConnection).order_by(EnableBankingConnection.created_at.asc())
+    ).all()
+    assert len(connections) == 2
+    assert connections[0].active is False  # the earlier one retired
+    assert connections[1].active is True  # the reconnect is live
+    # Exactly one active connection remains for the bank.
+    assert sum(1 for c in connections if c.active) == 1
+
+
 def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:
     db = make_session()
     service = EnableBankingService(db=db, settings=make_settings(), client=EmptyTransactionsClient())

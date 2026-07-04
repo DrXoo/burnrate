@@ -1,17 +1,28 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from burnrate.config import Settings
+from burnrate.db.models import EnableBankingConnection
 from burnrate.integrations.telegram.client import TelegramClient
+from burnrate.services.connection_expiry import (
+    EXPIRY_EXPIRED,
+    EXPIRY_EXPIRING_SOON,
+    as_utc,
+    expiry_status,
+)
 from burnrate.services.ledger_service import LedgerService
 from burnrate.services.sync_service import SyncRunResult
-from burnrate.telegram.formatters import format_sync_notification
+from burnrate.telegram.formatters import format_expiry_alert, format_sync_notification
 
 logger = logging.getLogger("burnrate.telegram_notifier")
+
+# Don't re-warn about the same lapsing connection more than once a day.
+_ALERT_COOLDOWN = timedelta(days=1)
 
 
 def send_sync_notification(
@@ -44,11 +55,74 @@ def send_sync_notification(
     uncategorized_count = LedgerService(db=session).get_uncategorized_transaction_count(month=month)
     text = format_sync_notification(new_count=new_count, uncategorized_count=uncategorized_count)
 
+    return _broadcast(client=client, chat_ids=chat_ids, text=text, kind="sync notification")
+
+
+def send_expiry_alerts(
+    *,
+    session: Session,
+    client: TelegramClient,
+    settings: Settings,
+    now: datetime | None = None,
+) -> int:
+    """Warn on Telegram about connections whose consent is lapsing or has lapsed.
+
+    Debounced per connection via ``expiry_alerted_at`` so a nearing-expiry bank is
+    not re-reported every sync. Marks alerted connections and expects the caller to
+    commit. Never raises. Returns how many chats were notified.
+    """
+    if not settings.telegram_notify_on_sync:
+        return 0
+
+    chat_ids = settings.telegram_allowed_chat_id_set
+    if not settings.telegram_bot_token or not chat_ids:
+        return 0
+
+    now = now or datetime.now(UTC)
+    warning_days = settings.connection_expiry_warning_days
+
+    connections = session.scalars(
+        select(EnableBankingConnection).where(
+            EnableBankingConnection.active.is_(True),
+            EnableBankingConnection.expires_at.is_not(None),
+        )
+    ).all()
+
+    due: list[EnableBankingConnection] = []
+    items: list[dict[str, object]] = []
+    for connection in connections:
+        status, days = expiry_status(connection.expires_at, now=now, warning_days=warning_days)
+        if status not in (EXPIRY_EXPIRING_SOON, EXPIRY_EXPIRED):
+            continue
+        last_alerted = as_utc(connection.expiry_alerted_at)
+        if last_alerted is not None and last_alerted > now - _ALERT_COOLDOWN:
+            continue
+        due.append(connection)
+        items.append(
+            {
+                "aspsp_name": connection.aspsp_name,
+                "expired": status == EXPIRY_EXPIRED,
+                "days": days if days is not None else 0,
+            }
+        )
+
+    if not due:
+        return 0
+
+    text = format_expiry_alert(items)
+    sent = _broadcast(client=client, chat_ids=chat_ids, text=text, kind="expiry alert")
+    if sent:
+        for connection in due:
+            connection.expiry_alerted_at = now
+    return sent
+
+
+def _broadcast(*, client: TelegramClient, chat_ids: set[int], text: str, kind: str) -> int:
     sent = 0
     for chat_id in chat_ids:
         try:
             client.send_message(chat_id=chat_id, text=text)
             sent += 1
         except Exception:
-            logger.exception("Failed to send sync notification to chat_id=%s", chat_id)
+            logger.exception("Failed to send %s to chat_id=%s", kind, chat_id)
     return sent

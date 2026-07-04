@@ -4,6 +4,7 @@ from typing import Any
 
 from burnrate.telegram.formatters import (
     format_budgets,
+    format_expiry_alert,
     format_summary,
     format_sync_notification,
     format_unknown,
@@ -221,6 +222,25 @@ def test_format_sync_notification_singular_uncategorized() -> None:
     text = format_sync_notification(new_count=2, uncategorized_count=1)
 
     assert "1 still needs a category — send /unknown." in text
+
+
+def test_format_expiry_alert_covers_soon_and_expired() -> None:
+    text = format_expiry_alert(
+        [
+            {"aspsp_name": "ING", "expired": False, "days": 3},
+            {"aspsp_name": "BBVA", "expired": True, "days": -1},
+        ]
+    )
+
+    assert "ING — access expires in 3 days" in text
+    assert "BBVA — access expired" in text
+    assert "Reconnect the account" in text
+
+
+def test_format_expiry_alert_singular_day() -> None:
+    text = format_expiry_alert([{"aspsp_name": "ING", "expired": False, "days": 1}])
+
+    assert "expires in 1 day" in text
 
 
 def test_format_unknown_handles_empty_queue() -> None:

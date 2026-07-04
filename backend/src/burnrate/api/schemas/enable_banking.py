@@ -54,6 +54,9 @@ class EnableBankingConnectionSummary(BaseModel):
     active: bool
     authorized_at: str | None = None
     last_synced_at: str | None = None
+    expires_at: str | None = None
+    days_until_expiry: int | None = None
+    expiry_status: Literal["unknown", "active", "expiring_soon", "expired"] = "unknown"
     linked_account_count: int
     latest_sync_status: str | None = None
     latest_sync_started_at: str | None = None

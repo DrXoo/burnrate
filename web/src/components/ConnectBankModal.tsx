@@ -1,11 +1,18 @@
-import { useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
 import { getAspsps, startBankAuthorization } from "../lib/api";
 import type { Aspsp } from "../types";
 
+export interface ReconnectPrefill {
+  country: string;
+  aspspName: string;
+  psuType: "personal" | "business";
+}
+
 interface ConnectBankModalProps {
   apiBase: string;
   onClose: () => void;
+  prefill?: ReconnectPrefill | null;
 }
 
 const labelStyle: CSSProperties = {
@@ -37,16 +44,52 @@ const secondaryButton: CSSProperties = {
   cursor: "pointer",
 };
 
-export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
-  const [country, setCountry] = useState("ES");
+export function ConnectBankModal({ apiBase, onClose, prefill }: ConnectBankModalProps) {
+  const [country, setCountry] = useState(prefill?.country ?? "ES");
   const [aspsps, setAspsps] = useState<Aspsp[]>([]);
   const [selectedBank, setSelectedBank] = useState("");
-  const [psuType, setPsuType] = useState<"personal" | "business">("personal");
+  const [psuType, setPsuType] = useState<"personal" | "business">(prefill?.psuType ?? "personal");
   const [loadingBanks, setLoadingBanks] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const normalizedCountry = country.trim().toUpperCase();
+
+  // Reconnect: auto-load the bank list for the existing connection and preselect it,
+  // so the user only has to confirm and re-authorize.
+  useEffect(() => {
+    if (!prefill) {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoadingBanks(true);
+        setError(null);
+        const banks = await getAspsps(apiBase, prefill.country.trim().toUpperCase());
+        if (cancelled) {
+          return;
+        }
+        setAspsps(banks);
+        if (banks.some((bank) => bank.name === prefill.aspspName)) {
+          setSelectedBank(prefill.aspspName);
+        } else if (banks.length === 0) {
+          setError(`No banks available for ${prefill.country.trim().toUpperCase()}.`);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : String(nextError));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingBanks(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [prefill, apiBase]);
 
   async function handleFindBanks(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -120,7 +163,7 @@ export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>Connect a bank</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{prefill ? `Reconnect ${prefill.aspspName}` : "Connect a bank"}</div>
           <button
             type="button"
             onClick={onClose}
@@ -138,7 +181,9 @@ export function ConnectBankModal({ apiBase, onClose }: ConnectBankModalProps) {
           </button>
         </div>
         <p style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.55, margin: "0 0 16px" }}>
-          Choose your country and bank. You'll be sent to the bank to authorize read-only access, then returned here.
+          {prefill
+            ? "Re-authorize read-only access to resume syncing. You'll be sent to the bank and returned here."
+            : "Choose your country and bank. You'll be sent to the bank to authorize read-only access, then returned here."}
         </p>
 
         <form onSubmit={handleFindBanks} style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 14 }}>

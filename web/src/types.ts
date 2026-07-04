@@ -5,6 +5,8 @@ export type BudgetStatus = "active" | "scheduled" | "inactive";
 export type BudgetUsageStatus = "on_track" | "watch" | "over";
 export type RunwayStatus = "stable" | "watch" | "critical" | "not_available";
 
+export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
+
 export interface Connection {
   connection_id: string;
   aspsp_name: string;
@@ -15,6 +17,9 @@ export interface Connection {
   active: boolean;
   authorized_at: string | null;
   last_synced_at: string | null;
+  expires_at: string | null;
+  days_until_expiry: number | null;
+  expiry_status: ConnectionExpiryStatus;
   linked_account_count: number;
   latest_sync_status: string | null;
   latest_sync_started_at: string | null;

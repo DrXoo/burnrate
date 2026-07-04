@@ -52,6 +52,11 @@ class EnableBankingConnection(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     session_status: Mapped[str | None] = mapped_column(Text)
     authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the bank consent lapses (PSD2 access window). Copied from the auth request
+    # at callback so we can warn before a connection silently stops syncing.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last time an expiry warning was pushed, so proactive alerts don't repeat every run.
+    expiry_alerted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

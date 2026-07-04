@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from "react";
 
-import { eur, timeAgo } from "../../lib/format";
+import { TONE_COLOR, TONE_DIM, eur, expiryBadge, needsReconnect, timeAgo } from "../../lib/format";
 import type { Account, Connection } from "../../types";
 
 interface SettingsPageProps {
@@ -8,6 +8,7 @@ interface SettingsPageProps {
   accounts: Account[];
   onSyncConnection: (connectionId: string) => Promise<unknown>;
   onConnect: () => void;
+  onReconnect: (connection: Connection) => void;
   onUpdateAccount: (accountId: string, draft: Pick<Account, "included_in_calculations" | "included_in_runway">) => Promise<void>;
 }
 
@@ -33,10 +34,20 @@ function chip(active: boolean, tone: "accent" | "good"): CSSProperties {
   };
 }
 
-function ConnectionRow({ connection, onSync }: { connection: Connection; onSync: (id: string) => Promise<unknown> }) {
+function ConnectionRow({
+  connection,
+  onSync,
+  onReconnect,
+}: {
+  connection: Connection;
+  onSync: (id: string) => Promise<unknown>;
+  onReconnect: (connection: Connection) => void;
+}) {
   const [syncing, setSyncing] = useState(false);
   const healthy = connection.active && !connection.latest_sync_error_summary;
   const statusColor = healthy ? "var(--good)" : "var(--over)";
+  const badge = expiryBadge(connection);
+  const showReconnect = needsReconnect(connection);
 
   async function handleSync() {
     setSyncing(true);
@@ -53,12 +64,38 @@ function ConnectionRow({ connection, onSync }: { connection: Connection; onSync:
         {connection.aspsp_name.charAt(0).toUpperCase()}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{connection.aspsp_name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+          {connection.aspsp_name}
+          {badge ? (
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: TONE_COLOR[badge.tone],
+                background: TONE_DIM[badge.tone],
+                border: `1px solid color-mix(in oklab, ${TONE_COLOR[badge.tone]} 30%, transparent)`,
+                borderRadius: 99,
+                padding: "1px 8px",
+              }}
+            >
+              {badge.text}
+            </span>
+          ) : null}
+        </div>
         <div style={{ fontSize: 12, color: statusColor, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: statusColor }} />
           {healthy ? "Healthy" : "Needs attention"} · synced {timeAgo(connection.last_synced_at)}
         </div>
       </div>
+      {showReconnect ? (
+        <button
+          type="button"
+          onClick={() => onReconnect(connection)}
+          style={{ border: "none", background: "var(--accent)", color: "#0a0d10", borderRadius: 8, padding: "6px 12px", font: "600 12px 'Hanken Grotesque', sans-serif", cursor: "pointer" }}
+        >
+          Reconnect
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={handleSync}
@@ -71,7 +108,7 @@ function ConnectionRow({ connection, onSync }: { connection: Connection; onSync:
   );
 }
 
-export function SettingsPage({ connections, accounts, onSyncConnection, onConnect, onUpdateAccount }: SettingsPageProps) {
+export function SettingsPage({ connections, accounts, onSyncConnection, onConnect, onReconnect, onUpdateAccount }: SettingsPageProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 760 }}>
       <div style={cardStyle}>
@@ -83,7 +120,7 @@ export function SettingsPage({ connections, accounts, onSyncConnection, onConnec
             </div>
           ) : (
             connections.map((connection) => (
-              <ConnectionRow key={connection.connection_id} connection={connection} onSync={onSyncConnection} />
+              <ConnectionRow key={connection.connection_id} connection={connection} onSync={onSyncConnection} onReconnect={onReconnect} />
             ))
           )}
         </div>
