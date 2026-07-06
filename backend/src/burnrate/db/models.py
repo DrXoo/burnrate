@@ -26,7 +26,6 @@ class Account(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     display_name: Mapped[str] = mapped_column(Text)
     currency: Mapped[str] = mapped_column(Text)
     included_in_calculations: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
-    included_in_runway: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     latest_balance_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     latest_balance_currency: Mapped[str | None] = mapped_column(Text)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

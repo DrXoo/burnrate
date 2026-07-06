@@ -3,7 +3,6 @@ export type MatchField = "description" | "merchant_name" | "counterparty_name";
 export type MatchOperator = "contains" | "equals" | "starts_with" | "ends_with" | "regex";
 export type BudgetStatus = "active" | "scheduled" | "inactive";
 export type BudgetUsageStatus = "on_track" | "watch" | "over";
-export type RunwayStatus = "stable" | "watch" | "critical" | "not_available";
 
 export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
 
@@ -60,7 +59,6 @@ export interface Account {
   latest_balance_amount: string | null;
   latest_balance_currency: string | null;
   included_in_calculations: boolean;
-  included_in_runway: boolean;
   last_synced_at: string | null;
   source_connection_id: string | null;
   source_aspsp_name: string | null;
@@ -135,25 +133,10 @@ export interface BudgetUsage {
   is_fixed: boolean;
 }
 
-export interface RunwayAccount {
-  account_id: string;
-  display_name: string;
-  balance_amount: string;
-  balance_currency: string | null;
-}
-
 export interface SummaryDashboard {
   month: string;
   current_balance_amount: string;
   current_balance_currency: string | null;
-  runway_balance_amount: string;
-  runway_balance_currency: string | null;
-  runway_account_count: number;
-  runway_accounts: RunwayAccount[];
-  runway_drain_amount: string;
-  runway_drain_currency: string | null;
-  runway_drain_label: string;
-  runway_message: string;
   monthly_spending_amount: string;
   monthly_income_amount: string;
   net_cash_flow_amount: string;
@@ -168,8 +151,6 @@ export interface SummaryDashboard {
   expected_daily_spend_amount: string;
   projected_month_end_spend_amount: string;
   projected_overspend_amount: string;
-  runway_months_left: string | null;
-  runway_status: RunwayStatus;
   budget_usage: BudgetUsage[];
 }
 

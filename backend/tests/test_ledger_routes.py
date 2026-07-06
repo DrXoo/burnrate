@@ -15,7 +15,6 @@ class FakeLedgerService:
                 "latest_balance_amount": "375.52",
                 "latest_balance_currency": "EUR",
                 "included_in_calculations": True,
-                "included_in_runway": False,
                 "last_synced_at": "2026-06-29T08:05:00+00:00",
                 "source_connection_id": "conn-1",
                 "source_aspsp_name": "ING",
@@ -55,12 +54,11 @@ class FakeLedgerService:
     def get_uncategorized_transaction_count(self, **_: object):
         return 1
 
-    def update_account(self, *, account_id: str, included_in_calculations: bool, included_in_runway: bool):
+    def update_account(self, *, account_id: str, included_in_calculations: bool):
         assert account_id == "acc-1"
         return {
             **self.list_accounts()[0],
             "included_in_calculations": included_in_calculations,
-            "included_in_runway": included_in_runway if included_in_calculations else False,
         }
 
 
@@ -87,7 +85,6 @@ def test_ledger_routes_use_service_dependency() -> None:
         account_id="acc-1",
         request=UpdateAccountRequest(
             included_in_calculations=False,
-            included_in_runway=True,
         ),
         service=service,
     )
@@ -96,7 +93,6 @@ def test_ledger_routes_use_service_dependency() -> None:
     assert transactions_response.transactions[0].description == "Coffee shop"
     assert uncategorized_response.count == 1
     assert updated_account.included_in_calculations is False
-    assert updated_account.included_in_runway is False
 
 
 def test_app_exposes_phase_3_ledger_paths() -> None:

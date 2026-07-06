@@ -123,7 +123,6 @@ export async function updateAccountControls(
   accountId: string,
   payload: {
     included_in_calculations: boolean;
-    included_in_runway: boolean;
   },
 ): Promise<Account> {
   return fetchJson<Account>(`${apiBase}/accounts/${accountId}`, {

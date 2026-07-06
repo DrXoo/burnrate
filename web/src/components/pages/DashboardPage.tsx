@@ -6,8 +6,6 @@ import {
   TONE_LABEL,
   eur,
   eurPlain,
-  prettyLabel,
-  runwayTone,
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
@@ -77,12 +75,6 @@ function useHeroModel(summary: SummaryDashboard) {
               body: `You're pacing under plan. On this trend you'll finish about ${eurPlain(Math.max(0, underBudget))} under budget.`,
             };
 
-    const runTone = runwayTone(summary.runway_status);
-    const runMonths =
-      summary.runway_months_left != null && Number.isFinite(Number(summary.runway_months_left))
-        ? String(Math.round(Number(summary.runway_months_left)))
-        : "—";
-
     return {
       tone,
       statusColor: TONE_COLOR[tone],
@@ -95,11 +87,6 @@ function useHeroModel(summary: SummaryDashboard) {
       spentPct: `${(spentFrac * 100).toFixed(1)}%`,
       projPct: `${(projFrac * 100).toFixed(1)}%`,
       dayPct: `${(dayFrac * 100).toFixed(1)}%`,
-      runTone,
-      runColor: TONE_COLOR[runTone],
-      runDim: TONE_DIM[runTone],
-      runMonths,
-      runStatus: prettyLabel(summary.runway_status),
     };
   }, [summary]);
 }
@@ -362,16 +349,6 @@ function DashboardContent({
                   proj. {eurPlain(summary.projected_month_end_spend_amount)} month-end
                 </div>
               </div>
-              <div style={{ borderLeft: "2px solid var(--line-2)", paddingLeft: 13 }}>
-                <div style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 600 }}>
-                  Runway
-                </div>
-                <div className="num" style={{ fontSize: 23, fontWeight: 600, marginTop: 1 }}>
-                  {hero.runMonths}
-                  <span style={{ fontSize: 13, color: "var(--text-3)", fontWeight: 500 }}> mo</span>
-                </div>
-                <div style={{ fontSize: 11.5, color: hero.runColor, fontWeight: 600 }}>{hero.runStatus}</div>
-              </div>
             </div>
           </div>
         </div>
@@ -409,8 +386,8 @@ function DashboardContent({
         />
       </div>
 
-      {/* BUDGET PULSE + RUNWAY */}
-      <div className="br-cols" style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 14, marginTop: 14 }}>
+      {/* BUDGET PULSE */}
+      <div style={{ marginTop: 14 }}>
         <div
           style={{
             background: "var(--bg-2)",
@@ -482,57 +459,6 @@ function DashboardContent({
               No active budgets this month. Add one under Rules &amp; Budgets.
             </div>
           )}
-        </div>
-
-        {/* runway context */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div
-            style={{
-              background: "var(--bg-2)",
-              border: "1px solid var(--line)",
-              borderRadius: 16,
-              padding: "20px 22px",
-              boxShadow: "var(--card-shadow)",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: `radial-gradient(80% 90% at 90% 0%, color-mix(in oklab, ${hero.runColor} 12%, transparent), transparent 60%)`,
-                pointerEvents: "none",
-              }}
-            />
-            <div style={{ position: "relative" }}>
-              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 3 }}>Runway</div>
-              <div style={{ fontSize: 12, color: "var(--text-3)", marginBottom: 16 }}>how long your reserve lasts at pace</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <div className="num" style={{ fontSize: 42, fontWeight: 600, lineHeight: 1 }}>
-                  {hero.runMonths}
-                </div>
-                <div>
-                  <div className="num" style={{ fontSize: 15, color: "var(--text-2)" }}>months</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: hero.runColor }}>{hero.runStatus}</div>
-                </div>
-              </div>
-              <div style={{ height: 1, background: "var(--line)", margin: "16px 0" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 9, fontSize: 12.5 }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--text-2)" }}>Reserve accounts</span>
-                  <span className="num" style={{ fontWeight: 600 }}>{eur(summary.runway_balance_amount)}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--text-2)" }}>{summary.runway_drain_label || "Modeled drain rate"}</span>
-                  <span className="num" style={{ fontWeight: 600 }}>{eur(summary.runway_drain_amount)}/mo</span>
-                </div>
-              </div>
-              <div style={{ marginTop: 15, padding: "11px 13px", background: hero.runDim, borderRadius: 10, fontSize: 12.5, lineHeight: 1.5, color: "var(--text)" }}>
-                {summary.runway_message}
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

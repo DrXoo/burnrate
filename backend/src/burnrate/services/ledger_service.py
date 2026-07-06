@@ -61,19 +61,12 @@ class LedgerService:
         *,
         account_id: str,
         included_in_calculations: bool,
-        included_in_runway: bool,
     ) -> dict[str, Any]:
         account = self.db.get(Account, self._parse_uuid(account_id, "Account id"))
         if account is None:
             raise ValueError(f"Account not found for id {account_id}")
 
-        if not included_in_calculations:
-            included_in_runway = False
-        elif included_in_runway:
-            included_in_calculations = True
-
         account.included_in_calculations = included_in_calculations
-        account.included_in_runway = included_in_runway
         self.db.flush()
 
         row = self.db.execute(
@@ -251,7 +244,6 @@ class LedgerService:
             "latest_balance_amount": self._serialize_decimal(account.latest_balance_amount),
             "latest_balance_currency": account.latest_balance_currency,
             "included_in_calculations": account.included_in_calculations,
-            "included_in_runway": account.included_in_runway,
             "last_synced_at": account.last_synced_at.isoformat() if account.last_synced_at else None,
             "source_connection_id": str(mapping.enable_banking_connection_id) if mapping else None,
             "source_aspsp_name": connection.aspsp_name if connection else None,

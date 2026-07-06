@@ -9,7 +9,7 @@ interface SettingsPageProps {
   onSyncConnection: (connectionId: string) => Promise<unknown>;
   onConnect: () => void;
   onReconnect: (connection: Connection) => void;
-  onUpdateAccount: (accountId: string, draft: Pick<Account, "included_in_calculations" | "included_in_runway">) => Promise<void>;
+  onUpdateAccount: (accountId: string, draft: Pick<Account, "included_in_calculations">) => Promise<void>;
 }
 
 const cardStyle: CSSProperties = {
@@ -136,7 +136,7 @@ export function SettingsPage({ connections, accounts, onSyncConnection, onConnec
       <div style={cardStyle}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Accounts</div>
         <div style={{ fontSize: 12.5, color: "var(--text-3)", marginBottom: 14 }}>
-          Toggle which accounts feed your balance and which are reserved for runway.
+          Toggle which accounts feed your balance and spending.
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {accounts.length === 0 ? (
@@ -159,24 +159,10 @@ export function SettingsPage({ connections, accounts, onSyncConnection, onConnec
                   onClick={() =>
                     void onUpdateAccount(account.account_id, {
                       included_in_calculations: !account.included_in_calculations,
-                      included_in_runway: account.included_in_runway,
                     })
                   }
                 >
                   Included
-                </button>
-                <button
-                  type="button"
-                  title="Count this account's balance toward runway reserve"
-                  style={chip(account.included_in_runway, "good")}
-                  onClick={() =>
-                    void onUpdateAccount(account.account_id, {
-                      included_in_calculations: account.included_in_calculations,
-                      included_in_runway: !account.included_in_runway,
-                    })
-                  }
-                >
-                  Reserve
                 </button>
               </div>
             ))

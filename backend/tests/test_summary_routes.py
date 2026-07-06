@@ -11,21 +11,6 @@ class FakeSummaryService:
             "month": "2026-06",
             "current_balance_amount": "2000.00",
             "current_balance_currency": "EUR",
-            "runway_balance_amount": "1500.00",
-            "runway_balance_currency": "EUR",
-            "runway_account_count": 1,
-            "runway_accounts": [
-                {
-                    "account_id": "acc-2",
-                    "display_name": "Savings",
-                    "balance_amount": "1500.00",
-                    "balance_currency": "EUR",
-                }
-            ],
-            "runway_drain_amount": "120.00",
-            "runway_drain_currency": "EUR",
-            "runway_drain_label": "Projected overspend",
-            "runway_message": "Runway is based on projected monthly overspend against the active category budgets.",
             "monthly_spending_amount": "260.00",
             "monthly_income_amount": "2000.00",
             "net_cash_flow_amount": "1740.00",
@@ -40,8 +25,6 @@ class FakeSummaryService:
             "expected_daily_spend_amount": "13.33",
             "projected_month_end_spend_amount": "519.90",
             "projected_overspend_amount": "119.90",
-            "runway_months_left": "12.51",
-            "runway_status": "stable",
             "budget_usage": [
                 {
                     "category_id": "cat-1",
@@ -62,7 +45,6 @@ def test_summary_route_uses_service_dependency() -> None:
 
     assert response.month == "2026-06"
     assert response.current_balance_amount == "2000.00"
-    assert response.runway_accounts[0].display_name == "Savings"
     assert response.budget_usage[0].status == "over"
 
 

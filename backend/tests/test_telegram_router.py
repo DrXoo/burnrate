@@ -30,7 +30,6 @@ def seed(session_factory: sessionmaker) -> None:
         display_name="Main",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=False,
         latest_balance_amount=Decimal("500.00"),
         latest_balance_currency="EUR",
     )

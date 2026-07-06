@@ -32,7 +32,6 @@ def update_account(
         payload = service.update_account(
             account_id=account_id,
             included_in_calculations=request.included_in_calculations,
-            included_in_runway=request.included_in_runway,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

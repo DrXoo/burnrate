@@ -42,7 +42,6 @@ def seed_ledger_data(db: Session) -> tuple[Account, Account]:
         display_name="Main account",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=True,
         latest_balance_amount=Decimal("375.52"),
         latest_balance_currency="EUR",
         last_synced_at=datetime(2026, 6, 29, 8, 5, tzinfo=timezone.utc),
@@ -51,7 +50,6 @@ def seed_ledger_data(db: Session) -> tuple[Account, Account]:
         display_name="Savings",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=False,
         latest_balance_amount=Decimal("1000.00"),
         latest_balance_currency="EUR",
         last_synced_at=datetime(2026, 6, 29, 8, 6, tzinfo=timezone.utc),
@@ -147,7 +145,7 @@ def test_ledger_service_lists_accounts_with_connection_metadata() -> None:
     assert accounts[1]["source_aspsp_name"] is None
 
 
-def test_ledger_service_updates_account_flags_and_disables_runway_when_excluded() -> None:
+def test_ledger_service_updates_account_calculation_flag() -> None:
     db = make_session()
     primary_account, _ = seed_ledger_data(db)
     service = LedgerService(db=db)
@@ -155,12 +153,10 @@ def test_ledger_service_updates_account_flags_and_disables_runway_when_excluded(
     updated = service.update_account(
         account_id=str(primary_account.id),
         included_in_calculations=False,
-        included_in_runway=True,
     )
     db.commit()
 
     assert updated["included_in_calculations"] is False
-    assert updated["included_in_runway"] is False
 
 
 def test_ledger_service_lists_transactions_with_filters_and_pagination() -> None:

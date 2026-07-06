@@ -7,7 +7,7 @@ HELP_TEXT = "\n".join(
     [
         "BurnRate bot — read-only spending visibility.",
         "",
-        "/summary [YYYY-MM] — money left, spending, burn rate, and runway",
+        "/summary [YYYY-MM] — money left, spending, and burn rate",
         "/budgets [YYYY-MM] — budget status per category",
         "/unknown [YYYY-MM] — transactions still waiting to be categorized (this month)",
         "/help — show this message",
@@ -63,8 +63,6 @@ def format_summary(payload: dict[str, Any]) -> str:
         avg_line += f" · plan {_money(expected_daily, currency)}/day"
     lines.append(avg_line)
     lines.append(f"🔮 Projected: {_money(payload['projected_month_end_spend_amount'], currency)}")
-    lines.append("")
-    lines.append(_runway_line(payload))
     return "\n".join(lines)
 
 
@@ -76,22 +74,6 @@ def _budget_bar(payload: dict[str, Any], *, segments: int = 10) -> str:
     filled = min(segments, int((ratio * segments).to_integral_value(rounding=ROUND_HALF_UP)))
     bar = "█" * filled + "░" * (segments - filled)
     return f"[{bar}] {used_pct:.0f}% used"
-
-
-def _runway_line(payload: dict[str, Any]) -> str:
-    status = payload["runway_status"]
-    if status == "not_available":
-        return "🛟 Runway: not tracked\n   (select reserve accounts in the web app)"
-
-    months_left = payload["runway_months_left"]
-    if months_left is None:
-        return "🛟 Runway: stable\n   (spending within budget)"
-
-    currency = payload["runway_balance_currency"]
-    return (
-        f"🛟 Runway: {months_left} months\n"
-        f"   {_money(payload['runway_balance_amount'], currency)} reserve · {status}"
-    )
 
 
 def format_budgets(payload: dict[str, Any]) -> str:

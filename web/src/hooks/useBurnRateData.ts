@@ -376,7 +376,7 @@ export function useBurnRateData() {
 
   async function updateAccountAction(
     accountId: string,
-    draft: Pick<Account, "included_in_calculations" | "included_in_runway">,
+    draft: Pick<Account, "included_in_calculations">,
   ) {
     if (!apiBase) {
       throw new Error("API base not loaded");
@@ -384,7 +384,6 @@ export function useBurnRateData() {
 
     await updateAccountControls(apiBase, accountId, {
       included_in_calculations: draft.included_in_calculations,
-      included_in_runway: draft.included_in_runway,
     });
 
     const nextAccounts = await getAccounts(apiBase);

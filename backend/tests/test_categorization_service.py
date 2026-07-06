@@ -28,7 +28,6 @@ def seed_review_data(db: Session) -> tuple[Transaction, Category]:
         display_name="Main account",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=False,
         latest_balance_amount=Decimal("375.52"),
         latest_balance_currency="EUR",
         last_synced_at=datetime(2026, 6, 30, 8, 0, tzinfo=timezone.utc),

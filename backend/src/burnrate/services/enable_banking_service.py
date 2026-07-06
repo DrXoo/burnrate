@@ -385,7 +385,6 @@ class EnableBankingService:
             display_name=display_name,
             currency=currency,
             included_in_calculations=True,
-            included_in_runway=False,
             last_synced_at=now,
         )
         self.db.add(account)
@@ -406,7 +405,7 @@ class EnableBankingService:
         """Import booked and pending transactions for one external account.
 
         Booked transactions are fetched for the current month (the amounts that drive
-        budgets/runway). Pending transactions are fetched separately with ``PDNG`` over a
+        the budgets). Pending transactions are fetched separately with ``PDNG`` over a
         trailing window, because Enable Banking returns a single status per call and a held
         transaction may have originated in the previous month. Banks that do not expose
         pending transactions over open banking simply return nothing for the pending call.

@@ -4,11 +4,10 @@ import type {
   Connection,
   MatchField,
   MatchOperator,
-  RunwayStatus,
   Transaction,
 } from "../types";
 
-/** Design status buckets used for category/budget/runway coloring. */
+/** Design status buckets used for category/budget coloring. */
 export type Tone = "good" | "watch" | "over" | "neutral";
 
 export const TONE_COLOR: Record<Tone, string> = {
@@ -41,20 +40,6 @@ export function usageTone(status: BudgetUsageStatus): Tone {
     return "watch";
   }
   return "good";
-}
-
-/** Map the backend runway status to a design tone. */
-export function runwayTone(status: RunwayStatus): Tone {
-  if (status === "critical") {
-    return "over";
-  }
-  if (status === "watch") {
-    return "watch";
-  }
-  if (status === "stable") {
-    return "good";
-  }
-  return "neutral";
 }
 
 /** Category swatch color: expenses take their budget tone, income is positive, transfers are muted. */
@@ -219,15 +204,6 @@ export function prettyMatchField(field: MatchField): string {
   return "Description";
 }
 
-/** Title-cases a raw enum value ("not_available" -> "Not Available", "booked" -> "Booked"). */
-export function prettyLabel(value: string): string {
-  return value
-    .split(/[_\s]+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(" ");
-}
-
 export const CURRENCY_OPTIONS = ["EUR", "USD", "GBP", "CHF", "SEK", "NOK", "DKK", "PLN"];
 
 export function prettyMatchOperator(operator: MatchOperator): string {
@@ -280,20 +256,3 @@ export function formatMonthLabel(value: string): string {
   });
 }
 
-export function formatRunwayMonths(value: string | null, status: RunwayStatus): string {
-  if (status === "not_available") {
-    return "Not configured";
-  }
-  if (status === "stable" && !value) {
-    return "On track";
-  }
-  if (!value) {
-    return "At risk";
-  }
-
-  const numericValue = Number(value);
-  if (!Number.isFinite(numericValue)) {
-    return `${value} mo`;
-  }
-  return `${numericValue.toFixed(1)} mo`;
-}

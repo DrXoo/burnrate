@@ -28,7 +28,6 @@ def seed_summary_data(db: Session) -> None:
         display_name="Main account",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=False,
         latest_balance_amount=Decimal("500.00"),
         latest_balance_currency="EUR",
         last_synced_at=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
@@ -37,7 +36,6 @@ def seed_summary_data(db: Session) -> None:
         display_name="Savings",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=True,
         latest_balance_amount=Decimal("1500.00"),
         latest_balance_currency="EUR",
         last_synced_at=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
@@ -46,7 +44,6 @@ def seed_summary_data(db: Session) -> None:
         display_name="Side account",
         currency="EUR",
         included_in_calculations=False,
-        included_in_runway=False,
         latest_balance_amount=Decimal("900.00"),
         latest_balance_currency="EUR",
         last_synced_at=datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc),
@@ -218,12 +215,6 @@ def test_summary_service_returns_phase_3_dashboard_metrics() -> None:
 
     assert summary["month"] == "2026-06"
     assert summary["current_balance_amount"] == "2000.00"
-    assert summary["runway_balance_amount"] == "1500.00"
-    assert summary["runway_account_count"] == 1
-    assert summary["runway_accounts"][0]["display_name"] == "Savings"
-    assert summary["runway_drain_amount"] == "90.00"
-    assert summary["runway_drain_label"] == "Projected overspend"
-    assert summary["runway_message"] == "Runway is based on projected monthly overspend against the active category budgets."
     assert summary["monthly_spending_amount"] == "260.00"
     assert summary["monthly_income_amount"] == "2000.00"
     assert summary["net_cash_flow_amount"] == "1740.00"
@@ -239,8 +230,6 @@ def test_summary_service_returns_phase_3_dashboard_metrics() -> None:
     # (0.5*17.333 actual + 0.5*13.333 budget) = 490.00, so overspend = 490 - 400.
     assert summary["projected_month_end_spend_amount"] == "490.00"
     assert summary["projected_overspend_amount"] == "90.00"
-    assert summary["runway_months_left"] == "16.67"
-    assert summary["runway_status"] == "stable"
     assert summary["budget_usage"][0]["category_name"] == "Utilities"
     assert summary["budget_usage"][0]["status"] == "over"
     assert summary["budget_usage"][0]["remaining_amount"] == "-20.00"
@@ -287,23 +276,7 @@ def test_summary_service_splits_budgeted_and_unbudgeted_spend() -> None:
     )
 
 
-def test_summary_service_marks_runway_not_available_without_runway_accounts() -> None:
-    db = make_session()
-    seed_summary_data(db)
-    db.query(Account).filter(Account.included_in_runway.is_(True)).update({"included_in_runway": False})
-    db.commit()
-    service = SummaryService(db=db)
-
-    summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
-
-    assert summary["runway_balance_amount"] == "0.00"
-    assert summary["runway_account_count"] == 0
-    assert summary["runway_months_left"] is None
-    assert summary["runway_status"] == "not_available"
-    assert summary["runway_message"] == "Select one or more reserve accounts to activate runway tracking."
-
-
-def test_summary_service_uses_projected_monthly_spend_when_no_budgets_exist() -> None:
+def test_summary_service_extrapolates_projection_when_no_budgets_exist() -> None:
     db = make_session()
     seed_summary_data(db)
     db.query(Budget).delete()
@@ -312,14 +285,12 @@ def test_summary_service_uses_projected_monthly_spend_when_no_budgets_exist() ->
 
     summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
 
-    assert summary["runway_drain_label"] == "Projected monthly spend"
-    assert summary["runway_drain_amount"] == "520.00"
-    assert summary["runway_months_left"] == "2.88"
-    assert summary["runway_status"] == "critical"
-    assert (
-        summary["runway_message"]
-        == "No active budgets are configured, so runway uses projected monthly spending as the drain."
-    )
+    # No budgets: variable spend is linearly extrapolated (260 over 15 days -> 520
+    # for the full 30). Overspend is measured against budgeted categories, of which
+    # there are none, so it stays at zero.
+    assert summary["monthly_budget_amount"] == "0.00"
+    assert summary["projected_month_end_spend_amount"] == "520.00"
+    assert summary["projected_overspend_amount"] == "0.00"
 
 
 def test_summary_service_rejects_invalid_month_format() -> None:

@@ -40,7 +40,6 @@ def make_session() -> Session:
         display_name="Main",
         currency="EUR",
         included_in_calculations=True,
-        included_in_runway=False,
     )
     session.add(account)
     session.flush()

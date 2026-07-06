@@ -16,8 +16,6 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "month": "2026-06",
         "current_balance_amount": "500.00",
         "current_balance_currency": "EUR",
-        "runway_balance_amount": "1500.00",
-        "runway_balance_currency": "EUR",
         "monthly_spending_amount": "120.00",
         "monthly_income_amount": "0.00",
         "net_cash_flow_amount": "-120.00",
@@ -28,8 +26,6 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "projected_month_end_spend_amount": "120.00",
         "days_elapsed": 30,
         "days_in_month": 30,
-        "runway_months_left": "12.50",
-        "runway_status": "stable",
         "budget_usage": [],
     }
     payload.update(overrides)
@@ -46,7 +42,6 @@ def test_format_summary_includes_core_metrics_and_budget() -> None:
     assert "Left: 80.00 EUR" in text
     assert "60% used" in text
     assert "Avg/day: 4.00 EUR (30/30 days)" in text
-    assert "Runway: 12.50 months" in text
 
 
 def test_format_summary_includes_income_net_and_unbudgeted_when_present() -> None:
@@ -76,20 +71,6 @@ def test_format_summary_hides_budget_lines_when_no_budget() -> None:
 
     assert "Budget:" not in text
     assert "Money left:" not in text
-
-
-def test_format_summary_reports_untracked_runway() -> None:
-    text = format_summary(
-        make_summary(runway_status="not_available", runway_months_left=None)
-    )
-
-    assert "Runway: not tracked" in text
-
-
-def test_format_summary_reports_stable_runway_without_months() -> None:
-    text = format_summary(make_summary(runway_status="stable", runway_months_left=None))
-
-    assert "Runway: stable" in text
 
 
 def test_format_budgets_lists_categories_with_status_icons() -> None:

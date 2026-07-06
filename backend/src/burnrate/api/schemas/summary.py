@@ -17,25 +17,10 @@ class BudgetUsageResponse(BaseModel):
     is_fixed: bool = False
 
 
-class RunwayAccountResponse(BaseModel):
-    account_id: str
-    display_name: str
-    balance_amount: str
-    balance_currency: str | None
-
-
 class SummaryResponse(BaseModel):
     month: str
     current_balance_amount: str
     current_balance_currency: str | None
-    runway_balance_amount: str
-    runway_balance_currency: str | None
-    runway_account_count: int
-    runway_accounts: list[RunwayAccountResponse]
-    runway_drain_amount: str
-    runway_drain_currency: str | None
-    runway_drain_label: str
-    runway_message: str
     monthly_spending_amount: str
     monthly_income_amount: str
     net_cash_flow_amount: str
@@ -50,6 +35,4 @@ class SummaryResponse(BaseModel):
     expected_daily_spend_amount: str
     projected_month_end_spend_amount: str
     projected_overspend_amount: str
-    runway_months_left: str | None
-    runway_status: Literal["stable", "watch", "critical", "not_available"]
     budget_usage: list[BudgetUsageResponse]

@@ -10,7 +10,6 @@ class AccountSummaryResponse(BaseModel):
     latest_balance_amount: str | None = None
     latest_balance_currency: str | None = None
     included_in_calculations: bool
-    included_in_runway: bool
     last_synced_at: str | None = None
     source_connection_id: str | None = None
     source_aspsp_name: str | None = None
@@ -24,7 +23,6 @@ class AccountListResponse(BaseModel):
 
 class UpdateAccountRequest(BaseModel):
     included_in_calculations: bool
-    included_in_runway: bool
 
 
 class TransactionSummaryResponse(BaseModel):
