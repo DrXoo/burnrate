@@ -44,6 +44,7 @@ function clampFraction(value: number): number {
   return Math.min(1, value);
 }
 
+/** Budget model: how the month is pacing against planned spend. */
 function useHeroModel(summary: SummaryDashboard) {
   return useMemo(() => {
     const budget = num(summary.monthly_budget_amount);
@@ -82,13 +83,221 @@ function useHeroModel(summary: SummaryDashboard) {
       statusLabel: TONE_LABEL[tone],
       coach,
       budget,
-      valueDash: `${(spentFrac * GAUGE_ARC).toFixed(1)} ${GAUGE_CIRCUMFERENCE.toFixed(2)}`,
-      projDeg: (projFrac * 270).toFixed(1),
+      spentFrac,
+      projFrac,
+      dayFrac,
       spentPct: `${(spentFrac * 100).toFixed(1)}%`,
       projPct: `${(projFrac * 100).toFixed(1)}%`,
       dayPct: `${(dayFrac * 100).toFixed(1)}%`,
     };
   }, [summary]);
+}
+
+/** Savings model: what share of this month's income is still unspent. */
+function useSavingsModel(summary: SummaryDashboard) {
+  return useMemo(() => {
+    const income = num(summary.monthly_income_amount);
+    const spending = num(summary.monthly_spending_amount);
+    const saved = income - spending;
+    const rate = income > 0 ? saved / income : 0;
+    const savedFrac = income > 0 ? clampFraction(saved / income) : 0;
+    // Spending outran income → nothing banked; between 0–10% saved is a thin margin.
+    const tone: Tone = saved < 0 ? "over" : rate < 0.1 ? "watch" : "good";
+
+    return {
+      income,
+      spending,
+      saved,
+      rate,
+      savedFrac,
+      tone,
+      statusColor: TONE_COLOR[tone],
+      ratePct: `${Math.round(rate * 100)}%`,
+    };
+  }, [summary]);
+}
+
+function StatusBadge({ tone, label }: { tone: Tone; label: string }) {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 7,
+        padding: "5px 11px",
+        borderRadius: 99,
+        background: TONE_DIM[tone],
+        color: TONE_COLOR[tone],
+        fontSize: 12.5,
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: TONE_COLOR[tone] }} />
+      {label}
+    </div>
+  );
+}
+
+interface GaugeProps {
+  fillFraction: number;
+  color: string;
+  label: string;
+  centerText: string;
+  subtitle: string;
+  footLeft: string;
+  footRight: string;
+  /** Optional projection tick, as a 0–1 fraction of the 270° sweep. */
+  needleFraction?: number;
+  size?: number;
+}
+
+function Gauge({ fillFraction, color, label, centerText, subtitle, footLeft, footRight, needleFraction, size = 210 }: GaugeProps) {
+  const height = size * 0.8;
+  const valueDash = `${(clampFraction(fillFraction) * GAUGE_ARC).toFixed(1)} ${GAUGE_CIRCUMFERENCE.toFixed(2)}`;
+  // Center number has to fit inside the ring's inner opening (~0.56 of the box).
+  const innerWidth = size * 0.56;
+  const centerFont = Math.max(19, Math.min(36, Math.floor(innerWidth / (centerText.length * 0.62))));
+  return (
+    <div style={{ position: "relative", width: size, height }}>
+      <svg width={size} height={height} viewBox="0 0 220 200" style={{ overflow: "visible" }}>
+        <g transform="rotate(135 110 110)">
+          <circle
+            cx="110"
+            cy="110"
+            r={GAUGE_RADIUS}
+            fill="none"
+            stroke="var(--bg-4)"
+            strokeWidth="16"
+            strokeLinecap="round"
+            strokeDasharray={`${GAUGE_ARC.toFixed(2)} ${GAUGE_CIRCUMFERENCE.toFixed(2)}`}
+          />
+          <circle
+            cx="110"
+            cy="110"
+            r={GAUGE_RADIUS}
+            fill="none"
+            stroke={color}
+            strokeWidth="16"
+            strokeLinecap="round"
+            strokeDasharray={valueDash}
+            style={{ filter: "blur(9px)", opacity: 0.55 }}
+          />
+          <circle
+            cx="110"
+            cy="110"
+            r={GAUGE_RADIUS}
+            fill="none"
+            stroke={color}
+            strokeWidth="16"
+            strokeLinecap="round"
+            strokeDasharray={valueDash}
+          />
+          {needleFraction != null ? (
+            <line
+              x1="176"
+              y1="110"
+              x2="196"
+              y2="110"
+              stroke="var(--text)"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              transform={`rotate(${(clampFraction(needleFraction) * 270).toFixed(1)} 110 110)`}
+            />
+          ) : null}
+        </g>
+      </svg>
+      <div style={{ position: "absolute", top: "35%", left: 0, right: 0, textAlign: "center" }}>
+        <div
+          style={{
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            color: "var(--text-3)",
+            fontWeight: 600,
+          }}
+        >
+          {label}
+        </div>
+        <div className="num" style={{ fontSize: centerFont, fontWeight: 600, lineHeight: 1.05, marginTop: 2, whiteSpace: "nowrap" }}>
+          {centerText}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>{subtitle}</div>
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          bottom: "2%",
+          left: 0,
+          right: 0,
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 11,
+          color: "var(--text-3)",
+          padding: "0 8px",
+        }}
+      >
+        <span>{footLeft}</span>
+        <span className="num">{footRight}</span>
+      </div>
+    </div>
+  );
+}
+
+interface MeterBarProps {
+  label: string;
+  value: string;
+  subtitle: ReactNode;
+  fillPct: string;
+  color: string;
+  markers?: { pct: string; color: string; title: string }[];
+  footLeft: ReactNode;
+  footRight: ReactNode;
+}
+
+function MeterBar({ label, value, subtitle, fillPct, color, markers = [], footLeft, footRight }: MeterBarProps) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 11.5,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          color: "var(--text-3)",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+      <div className="num" style={{ fontSize: 34, fontWeight: 600, lineHeight: 1, margin: "4px 0 2px" }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--text-2)", marginBottom: 14 }}>{subtitle}</div>
+      <div style={{ position: "relative", height: 14, background: "var(--bg-4)", borderRadius: 7, overflow: "visible" }}>
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: fillPct,
+            background: color,
+            borderRadius: 7,
+            boxShadow: `0 0 14px color-mix(in oklab, ${color} 55%, transparent)`,
+          }}
+        />
+        {markers.map((marker, index) => (
+          <div
+            key={index}
+            style={{ position: "absolute", top: -4, bottom: -4, left: marker.pct, width: 2, background: marker.color }}
+            title={marker.title}
+          />
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11.5, color: "var(--text-3)" }}>
+        <span>{footLeft}</span>
+        <span>{footRight}</span>
+      </div>
+    </div>
+  );
 }
 
 function MetricCard({ label, value, valueColor, sub }: { label: string; value: string; valueColor?: string; sub: ReactNode }) {
@@ -140,18 +349,12 @@ function DashboardContent({
   includedAccountCount: number;
 }) {
   const hero = useHeroModel(summary);
+  const savings = useSavingsModel(summary);
   const net = num(summary.net_cash_flow_amount);
-
-  // The dial's centered "money left" figure has to sit inside the ring's inner
-  // opening (~150px of safe width once the arc's blur glow is accounted for). Now
-  // that amounts carry cents they get wider, so size the type to fit that width:
-  // ~0.62em per glyph in Space Grotesk, clamped to a sensible 24–44px range.
-  const moneyLeftText = eur(summary.money_left_amount);
-  const moneyLeftFontSize = Math.max(24, Math.min(44, Math.floor(150 / (moneyLeftText.length * 0.62))));
 
   return (
     <div>
-      {/* HERO */}
+      {/* HERO — Current balance is the headline, twin gauges read the month. */}
       <div
         className="br-hero"
         style={{
@@ -172,183 +375,144 @@ function DashboardContent({
             pointerEvents: "none",
           }}
         />
-        <div className="br-hero-row" style={{ position: "relative", display: "flex", gap: 38, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ flex: "none" }}>
-            {heroMode === "dial" ? (
-              <div style={{ position: "relative", width: 260, height: 210 }}>
-                <svg width={260} height={210} viewBox="0 0 220 200" style={{ overflow: "visible" }}>
-                  <g transform="rotate(135 110 110)">
-                    <circle
-                      cx="110"
-                      cy="110"
-                      r={GAUGE_RADIUS}
-                      fill="none"
-                      stroke="var(--bg-4)"
-                      strokeWidth="16"
-                      strokeLinecap="round"
-                      strokeDasharray={`${GAUGE_ARC.toFixed(2)} ${GAUGE_CIRCUMFERENCE.toFixed(2)}`}
-                    />
-                    <circle
-                      cx="110"
-                      cy="110"
-                      r={GAUGE_RADIUS}
-                      fill="none"
-                      stroke={hero.statusColor}
-                      strokeWidth="16"
-                      strokeLinecap="round"
-                      strokeDasharray={hero.valueDash}
-                      style={{ filter: "blur(9px)", opacity: 0.55 }}
-                    />
-                    <circle
-                      cx="110"
-                      cy="110"
-                      r={GAUGE_RADIUS}
-                      fill="none"
-                      stroke={hero.statusColor}
-                      strokeWidth="16"
-                      strokeLinecap="round"
-                      strokeDasharray={hero.valueDash}
-                    />
-                    <line
-                      x1="176"
-                      y1="110"
-                      x2="196"
-                      y2="110"
-                      stroke="var(--text)"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      transform={`rotate(${hero.projDeg} 110 110)`}
-                    />
-                  </g>
-                </svg>
-                <div style={{ position: "absolute", top: 78, left: 0, right: 0, textAlign: "center" }}>
-                  <div
-                    style={{
-                      fontSize: 11.5,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      color: "var(--text-3)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Money left
-                  </div>
-                  <div className="num" style={{ fontSize: moneyLeftFontSize, fontWeight: 600, lineHeight: 1.05, marginTop: 2, whiteSpace: "nowrap" }}>
-                    {moneyLeftText}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-3)" }}>of {eurPlain(hero.budget)} budget</div>
-                </div>
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 6,
-                    left: 0,
-                    right: 0,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 11,
-                    color: "var(--text-3)",
-                    padding: "0 8px",
-                  }}
-                >
-                  <span>spent</span>
-                  <span className="num">
-                    day {summary.days_elapsed}/{summary.days_in_month}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div style={{ width: 300 }}>
-                <div
-                  style={{
-                    fontSize: 11.5,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    color: "var(--text-3)",
-                    fontWeight: 600,
-                  }}
-                >
-                  Money left this month
-                </div>
-                <div className="num" style={{ fontSize: 58, fontWeight: 600, lineHeight: 1, margin: "4px 0 2px" }}>
-                  {eur(summary.money_left_amount)}
-                </div>
-                <div style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 20 }}>
-                  of {eurPlain(hero.budget)} budgeted · <span className="num">{summary.days_elapsed}</span> of{" "}
-                  <span className="num">{summary.days_in_month}</span> days elapsed
-                </div>
-                <div style={{ position: "relative", height: 16, background: "var(--bg-4)", borderRadius: 8, overflow: "visible" }}>
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: hero.spentPct,
-                      background: hero.statusColor,
-                      borderRadius: 8,
-                      boxShadow: `0 0 14px color-mix(in oklab, ${hero.statusColor} 55%, transparent)`,
-                    }}
-                  />
-                  <div style={{ position: "absolute", top: -4, bottom: -4, left: hero.projPct, width: 2, background: "var(--text)" }} title="projected" />
-                  <div style={{ position: "absolute", top: -4, bottom: -4, left: hero.dayPct, width: 2, background: "var(--text-3)" }} title="today's pace" />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11.5, color: "var(--text-3)" }}>
-                  <span>
-                    <span style={{ color: hero.statusColor }}>●</span> spent {eurPlain(summary.budgeted_spending_amount)}
-                  </span>
-                  <span>| projected {eurPlain(summary.projected_month_end_spend_amount)}</span>
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* verdict + core numbers */}
-          <div style={{ flex: 1, minWidth: 270 }}>
+        {/* Headline: current balance + overall status */}
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
             <div
               style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "5px 11px",
-                borderRadius: 99,
-                background: hero.statusDim,
-                color: hero.statusColor,
-                fontSize: 12.5,
+                fontSize: 11.5,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--text-3)",
                 fontWeight: 600,
-                marginBottom: 12,
               }}
             >
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: hero.statusColor }} />
-              {hero.statusLabel}
+              Current balance
             </div>
-            <div className="num" style={{ fontSize: 25, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.2, marginBottom: 6 }}>
+            <div className="num" style={{ fontSize: 52, fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.02em", margin: "3px 0 2px" }}>
+              {eur(summary.current_balance_amount)}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-3)" }}>
+              across {includedAccountCount} included account{includedAccountCount === 1 ? "" : "s"}
+            </div>
+          </div>
+          <StatusBadge tone={hero.tone} label={hero.statusLabel} />
+        </div>
+
+        {/* Twin visualizations: budget pacing + savings rate */}
+        {heroMode === "dial" ? (
+          <div
+            className="br-hero-gauges"
+            style={{ position: "relative", display: "flex", gap: 30, flexWrap: "wrap", justifyContent: "center", marginTop: 20 }}
+          >
+            <Gauge
+              fillFraction={hero.spentFrac}
+              needleFraction={hero.projFrac}
+              color={hero.statusColor}
+              label="Budget left"
+              centerText={eur(summary.money_left_amount)}
+              subtitle={`of ${eurPlain(hero.budget)} budget`}
+              footLeft="spent"
+              footRight={`day ${summary.days_elapsed}/${summary.days_in_month}`}
+            />
+            <Gauge
+              fillFraction={savings.savedFrac}
+              color={savings.statusColor}
+              label="Saved this month"
+              centerText={eur(savings.saved)}
+              subtitle={`of ${eurPlain(savings.income)} income`}
+              footLeft="saved"
+              footRight={`${savings.ratePct} rate`}
+            />
+          </div>
+        ) : (
+          <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 22, marginTop: 22, maxWidth: 560 }}>
+            <MeterBar
+              label="Budget left this month"
+              value={eur(summary.money_left_amount)}
+              subtitle={
+                <>
+                  of {eurPlain(hero.budget)} budgeted · <span className="num">{summary.days_elapsed}</span> of{" "}
+                  <span className="num">{summary.days_in_month}</span> days elapsed
+                </>
+              }
+              fillPct={hero.spentPct}
+              color={hero.statusColor}
+              markers={[
+                { pct: hero.projPct, color: "var(--text)", title: "projected" },
+                { pct: hero.dayPct, color: "var(--text-3)", title: "today's pace" },
+              ]}
+              footLeft={
+                <>
+                  <span style={{ color: hero.statusColor }}>●</span> spent {eurPlain(summary.budgeted_spending_amount)}
+                </>
+              }
+              footRight={<>projected {eurPlain(summary.projected_month_end_spend_amount)}</>}
+            />
+            <MeterBar
+              label="Saved this month"
+              value={eur(savings.saved)}
+              subtitle={<>of {eurPlain(savings.income)} income this month</>}
+              fillPct={`${(savings.savedFrac * 100).toFixed(1)}%`}
+              color={savings.statusColor}
+              footLeft={
+                <>
+                  <span style={{ color: savings.statusColor }}>●</span> {savings.ratePct} of income kept
+                </>
+              }
+              footRight={<>spent {eurPlain(savings.spending)}</>}
+            />
+          </div>
+        )}
+
+        {/* Coach verdict + burn rate */}
+        <div
+          style={{
+            position: "relative",
+            display: "flex",
+            gap: 26,
+            flexWrap: "wrap",
+            marginTop: 26,
+            paddingTop: 22,
+            borderTop: "1px solid var(--line)",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div className="num" style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3, marginBottom: 5 }}>
               {hero.coach.title}
             </div>
-            <div style={{ fontSize: 14.5, lineHeight: 1.55, color: "var(--text-2)", maxWidth: 400, marginBottom: 22 }}>
-              {hero.coach.body}
-            </div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--text-2)", maxWidth: 440 }}>{hero.coach.body}</div>
+          </div>
 
-            <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
-              <div style={{ borderLeft: `2px solid ${hero.statusColor}`, paddingLeft: 13 }}>
-                <div
-                  title="Daily pace of variable spend — fixed payments (rent, utilities) are excluded."
-                  style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 600 }}
-                >
-                  Burn rate
-                </div>
-                <div className="num" style={{ fontSize: 23, fontWeight: 600, marginTop: 1 }}>
-                  {eur(summary.average_daily_spend_amount)}
-                  <span style={{ fontSize: 13, color: "var(--text-3)", fontWeight: 500 }}>/day</span>
-                </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>
-                  {num(summary.expected_daily_spend_amount) > 0 ? (
-                    <>
-                      vs {eurPlain(summary.expected_daily_spend_amount)}/day planned
-                      <br />
-                    </>
-                  ) : null}
-                  proj. {eurPlain(summary.projected_month_end_spend_amount)} month-end
-                </div>
-              </div>
+          <div style={{ borderLeft: `2px solid ${hero.statusColor}`, paddingLeft: 13 }}>
+            <div
+              title="Daily pace of variable spend — fixed payments (rent, utilities) are excluded."
+              style={{ fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-3)", fontWeight: 600 }}
+            >
+              Burn rate
+            </div>
+            <div className="num" style={{ fontSize: 23, fontWeight: 600, marginTop: 1 }}>
+              {eur(summary.average_daily_spend_amount)}
+              <span style={{ fontSize: 13, color: "var(--text-3)", fontWeight: 500 }}>/day</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+              {num(summary.expected_daily_spend_amount) > 0 ? (
+                <>
+                  vs {eurPlain(summary.expected_daily_spend_amount)}/day planned
+                  <br />
+                </>
+              ) : null}
+              proj. {eurPlain(summary.projected_month_end_spend_amount)} month-end
             </div>
           </div>
         </div>
@@ -364,9 +528,9 @@ function DashboardContent({
         }}
       >
         <MetricCard
-          label="Current balance"
-          value={eur(summary.current_balance_amount)}
-          sub={`across ${includedAccountCount} included account${includedAccountCount === 1 ? "" : "s"}`}
+          label="Monthly income"
+          value={eur(summary.monthly_income_amount)}
+          sub="booked income this month"
         />
         <MetricCard
           label="Monthly spending"

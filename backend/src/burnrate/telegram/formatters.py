@@ -7,7 +7,7 @@ HELP_TEXT = "\n".join(
     [
         "BurnRate bot — read-only spending visibility.",
         "",
-        "/summary [YYYY-MM] — money left, spending, and burn rate",
+        "/summary [YYYY-MM] — budget left, spending, and burn rate",
         "/budgets [YYYY-MM] — budget status per category",
         "/unknown [YYYY-MM] — transactions still waiting to be categorized (this month)",
         "/help — show this message",
@@ -48,7 +48,7 @@ def format_summary(payload: dict[str, Any]) -> str:
     if Decimal(payload["monthly_budget_amount"]) > 0:
         lines.append("")
         lines.append(f"🎯 Budget: {_money(payload['monthly_budget_amount'], currency)}")
-        lines.append(f"✅ Left: {_money(payload['money_left_amount'], currency)}")
+        lines.append(f"✅ Budget left: {_money(payload['money_left_amount'], currency)}")
         lines.append(f"   {_budget_bar(payload)}")
 
     lines.append("")

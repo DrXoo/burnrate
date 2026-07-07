@@ -39,7 +39,7 @@ def test_format_summary_includes_core_metrics_and_budget() -> None:
     assert "Balance: 500.00 EUR" in text
     assert "Spent: 120.00 EUR" in text
     assert "Budget: 200.00 EUR" in text
-    assert "Left: 80.00 EUR" in text
+    assert "Budget left: 80.00 EUR" in text
     assert "60% used" in text
     assert "Avg/day: 4.00 EUR (30/30 days)" in text
 
