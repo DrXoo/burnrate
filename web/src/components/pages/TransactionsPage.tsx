@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useMemo, useState, type CSSProperties } from "react";
 
 import { IconSearch, IconSliders } from "../icons";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -554,8 +554,8 @@ export function TransactionsPage({
                   const positive = amountTone(transaction.amount, transaction.direction) === "positive";
                   const isActive = ruleTxnId === transaction.transaction_id;
                   return (
+                    <Fragment key={transaction.transaction_id}>
                     <div
-                      key={transaction.transaction_id}
                       style={{
                         display: "grid",
                         gridTemplateColumns: GRID,
@@ -588,27 +588,27 @@ export function TransactionsPage({
                         {eur(transaction.amount)}
                       </div>
                     </div>
+                    {isActive && ruleForm ? (
+                      <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", background: "var(--bg-3)" }}>
+                        <div style={{ maxWidth: 560 }}>
+                          <RuleForm
+                            form={ruleForm}
+                            heading={heading}
+                            categories={categories}
+                            onChange={setRuleForm}
+                            onSubmit={() => void submitRule()}
+                            onDelete={() => void removeRule()}
+                            onCancel={closeForm}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    </Fragment>
                   );
                 })
               )}
             </div>
           </div>
-
-          {activeTransaction && ruleForm ? (
-            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line)", background: "var(--bg-3)" }}>
-              <div style={{ maxWidth: 560 }}>
-                <RuleForm
-                  form={ruleForm}
-                  heading={heading}
-                  categories={categories}
-                  onChange={setRuleForm}
-                  onSubmit={() => void submitRule()}
-                  onDelete={() => void removeRule()}
-                  onCancel={closeForm}
-                />
-              </div>
-            </div>
-          ) : null}
 
           <PagerFooter visible={visible.length} total={total} monthLabel={monthLabel} paging={paging} onMovePage={onMovePage} />
         </div>

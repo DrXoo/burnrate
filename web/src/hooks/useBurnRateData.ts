@@ -430,10 +430,28 @@ export function useBurnRateData() {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await createRuleFromTransaction(apiBase, transactionId, draft);
+    const createdRule = await createRuleFromTransaction(apiBase, transactionId, draft);
     const nextRules = await getRules(apiBase);
     setRules(nextRules);
     await refreshLedgerViews();
+    // The backend may not have applied the new rule to existing transactions by
+    // the time refreshLedgerViews() refetches, so optimistically attach the rule
+    // (and its category) to the transaction it was created from. Applied after
+    // the refetch so it wins over any stale row still lacking the match.
+    setTransactions((current) => ({
+      ...current,
+      items: current.items.map((txn) =>
+        txn.transaction_id === transactionId
+          ? {
+              ...txn,
+              matched_rule_id: createdRule.rule_id,
+              matched_rule_name: createdRule.name,
+              category_id: createdRule.category_id,
+              category_name: createdRule.category_name,
+            }
+          : txn,
+      ),
+    }));
   }
 
   async function updateRuleAction(ruleId: string, draft: RuleUpdateDraft) {
