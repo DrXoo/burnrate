@@ -292,3 +292,15 @@ export async function uncategorizeTransaction(apiBase: string, transactionId: st
     method: "POST",
   });
 }
+
+export async function excludeTransaction(apiBase: string, transactionId: string): Promise<void> {
+  await fetchJson(`${apiBase}/transactions/${transactionId}/exclude`, {
+    method: "POST",
+  });
+}
+
+export async function restoreTransaction(apiBase: string, transactionId: string): Promise<void> {
+  await fetchJson(`${apiBase}/transactions/${transactionId}/restore`, {
+    method: "POST",
+  });
+}

@@ -3,8 +3,10 @@ from __future__ import annotations
 from burnrate.api.routes.categorization import (
     categorize_transaction,
     create_category,
+    exclude_transaction,
     list_categories,
     list_uncategorized_transactions,
+    restore_transaction,
     uncategorize_transaction,
 )
 from burnrate.api.schemas.categorization import CategorizeTransactionRequest, CreateCategoryRequest
@@ -72,6 +74,22 @@ class FakeCategorizationService:
             "message": "Transaction returned to unknown queue",
         }
 
+    def exclude_transaction(self, *, transaction_id: str):
+        return {
+            "transaction_id": transaction_id,
+            "category_id": None,
+            "category_name": None,
+            "message": "Transaction excluded from the budget",
+        }
+
+    def restore_transaction(self, *, transaction_id: str):
+        return {
+            "transaction_id": transaction_id,
+            "category_id": None,
+            "category_name": None,
+            "message": "Transaction returned to unknown queue",
+        }
+
 
 def test_categorization_routes_use_service_dependency() -> None:
     service = FakeCategorizationService()
@@ -98,12 +116,22 @@ def test_categorization_routes_use_service_dependency() -> None:
         transaction_id="tx-1",
         service=service,
     )
+    exclude_response = exclude_transaction(
+        transaction_id="tx-1",
+        service=service,
+    )
+    restore_response = restore_transaction(
+        transaction_id="tx-1",
+        service=service,
+    )
 
     assert categories_response.categories[0].name == "Food"
     assert created_response.name == "Transport"
     assert unknown_response.transactions[0].description == "Coffee shop"
     assert categorize_response.category_name == "Food"
     assert uncategorize_response.category_id is None
+    assert exclude_response.message == "Transaction excluded from the budget"
+    assert restore_response.message == "Transaction returned to unknown queue"
 
 
 def test_app_exposes_phase_3_categorization_paths() -> None:
@@ -114,3 +142,5 @@ def test_app_exposes_phase_3_categorization_paths() -> None:
     assert "/api/v1/transactions/uncategorized" in paths
     assert "/api/v1/transactions/{transaction_id}/categorize" in paths
     assert "/api/v1/transactions/{transaction_id}/uncategorize" in paths
+    assert "/api/v1/transactions/{transaction_id}/exclude" in paths
+    assert "/api/v1/transactions/{transaction_id}/restore" in paths

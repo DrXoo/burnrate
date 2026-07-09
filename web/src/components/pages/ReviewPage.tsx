@@ -13,6 +13,7 @@ interface ReviewPageProps {
   categories: Category[];
   onMovePage: (direction: "prev" | "next") => void;
   onCategorize: (transactionId: string, categoryId: string) => Promise<void>;
+  onExclude: (transactionId: string) => Promise<void>;
 }
 
 const pagerButton: CSSProperties = {
@@ -25,7 +26,18 @@ const pagerButton: CSSProperties = {
   cursor: "pointer",
 };
 
-export function ReviewPage({ items, total, loading, error, paging, categories, onMovePage, onCategorize }: ReviewPageProps) {
+const ignoreButton: CSSProperties = {
+  border: "1px solid var(--line-2)",
+  background: "transparent",
+  color: "var(--text-2)",
+  borderRadius: 7,
+  padding: "6px 12px",
+  font: "500 12px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+export function ReviewPage({ items, total, loading, error, paging, categories, onMovePage, onCategorize, onExclude }: ReviewPageProps) {
   if (error && items.length === 0) {
     return <div style={{ padding: "24px 4px", color: "var(--over)", fontSize: 13.5 }}>{error}</div>;
   }
@@ -120,6 +132,15 @@ export function ReviewPage({ items, total, loading, error, paging, categories, o
                     </option>
                   ))}
                 </select>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>or</span>
+                <button
+                  type="button"
+                  style={ignoreButton}
+                  title="Not a budget item (reimbursement, transfer, duplicate) — clears it from the queue without counting toward spend or income"
+                  onClick={() => void onExclude(transaction.transaction_id)}
+                >
+                  Ignore
+                </button>
               </div>
             </div>
           );

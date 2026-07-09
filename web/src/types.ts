@@ -83,6 +83,7 @@ export interface Transaction {
   category_name: string | null;
   matched_rule_id: string | null;
   matched_rule_name: string | null;
+  excluded: boolean;
   imported_at: string;
 }
 

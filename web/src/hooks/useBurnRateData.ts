@@ -8,6 +8,7 @@ import {
   deactivateBudget,
   deleteRule,
   detectApiBase,
+  excludeTransaction,
   getAccounts,
   getBudgets,
   getCategories,
@@ -17,6 +18,7 @@ import {
   getTransactions,
   getUncategorizedCount,
   getUnknownQueue,
+  restoreTransaction,
   syncEnableBankingConnection,
   toggleRule,
   uncategorizeTransaction,
@@ -426,6 +428,22 @@ export function useBurnRateData() {
     await refreshLedgerViews();
   }
 
+  async function excludeTransactionAction(transactionId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await excludeTransaction(apiBase, transactionId);
+    await refreshLedgerViews();
+  }
+
+  async function restoreTransactionAction(transactionId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await restoreTransaction(apiBase, transactionId);
+    await refreshLedgerViews();
+  }
+
   async function createRuleAction(transactionId: string, draft: RuleDraft) {
     if (!apiBase) {
       throw new Error("API base not loaded");
@@ -540,6 +558,8 @@ export function useBurnRateData() {
     syncConnection: syncConnectionAction,
     categorizeTransaction: categorizeTransactionAction,
     uncategorizeTransaction: uncategorizeTransactionAction,
+    excludeTransaction: excludeTransactionAction,
+    restoreTransaction: restoreTransactionAction,
     createRule: createRuleAction,
     updateRule: updateRuleAction,
     toggleRule: toggleRuleAction,

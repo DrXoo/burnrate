@@ -119,6 +119,10 @@ class Transaction(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     status: Mapped[str] = mapped_column(Text, index=True)
     category_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("categories.id"), index=True)
     matched_rule_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("categorization_rules.id"))
+    # When set, the transaction has been deliberately excluded from the budget: it
+    # drops out of the review/unknown queue without a category and never counts as
+    # spend or income. Used for reimbursements, internal transfers and bank noise.
+    excluded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     raw_payload: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

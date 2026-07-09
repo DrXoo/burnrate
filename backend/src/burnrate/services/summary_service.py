@@ -234,6 +234,7 @@ class SummaryService:
                 Transaction.booking_date >= month_start,
                 Transaction.booking_date < month_end,
                 Transaction.category_id.is_(None),
+                Transaction.excluded_at.is_(None),
             )
         )
         return self.db.scalar(count_query) or 0

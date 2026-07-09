@@ -115,6 +115,14 @@ export default function App() {
     await data.uncategorizeTransaction(transactionId);
     showToast("Moved back to the queue");
   }
+  async function exclude(transactionId: string) {
+    await data.excludeTransaction(transactionId);
+    showToast("Ignored — excluded from the budget");
+  }
+  async function restore(transactionId: string) {
+    await data.restoreTransaction(transactionId);
+    showToast("Moved back to the queue");
+  }
   async function createRule(transactionId: string, draft: Parameters<typeof data.createRule>[1]) {
     await data.createRule(transactionId, draft);
     showToast("Rule created");
@@ -243,6 +251,8 @@ export default function App() {
                 onMovePage={data.moveTransactionsPage}
                 onCategorize={categorize}
                 onUncategorize={uncategorize}
+                onExclude={exclude}
+                onRestore={restore}
                 onCreateRule={createRule}
                 onUpdateRule={updateRule}
                 onDeleteRule={deleteRule}
@@ -259,6 +269,7 @@ export default function App() {
                 categories={data.categories}
                 onMovePage={data.moveUnknownPage}
                 onCategorize={categorize}
+                onExclude={exclude}
               />
             ) : null}
 

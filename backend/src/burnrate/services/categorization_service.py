@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -74,6 +75,9 @@ class CategorizationService:
 
         transaction.category_id = category.id
         transaction.matched_rule_id = None
+        # Assigning a real category resolves the row as categorized, so it can no
+        # longer also be marked excluded -- keep the two dispositions mutually exclusive.
+        transaction.excluded_at = None
 
         return {
             "transaction_id": str(transaction.id),
@@ -89,6 +93,42 @@ class CategorizationService:
 
         transaction.category_id = None
         transaction.matched_rule_id = None
+
+        return {
+            "transaction_id": str(transaction.id),
+            "category_id": None,
+            "category_name": None,
+            "message": "Transaction returned to unknown queue",
+        }
+
+    def exclude_transaction(self, *, transaction_id: str) -> dict[str, Any]:
+        """Resolve a transaction out of the review queue without a category.
+
+        Clears any category so it stops counting toward spend/income, and stamps
+        ``excluded_at`` so it drops out of the unknown queue instead of nagging.
+        """
+        transaction = self.db.get(Transaction, self._parse_uuid(transaction_id, "Transaction id"))
+        if transaction is None:
+            raise ValueError(f"Transaction not found for id {transaction_id}")
+
+        transaction.category_id = None
+        transaction.matched_rule_id = None
+        transaction.excluded_at = datetime.now(UTC)
+
+        return {
+            "transaction_id": str(transaction.id),
+            "category_id": None,
+            "category_name": None,
+            "message": "Transaction excluded from the budget",
+        }
+
+    def restore_transaction(self, *, transaction_id: str) -> dict[str, Any]:
+        """Undo an exclusion, returning the transaction to the unknown queue."""
+        transaction = self.db.get(Transaction, self._parse_uuid(transaction_id, "Transaction id"))
+        if transaction is None:
+            raise ValueError(f"Transaction not found for id {transaction_id}")
+
+        transaction.excluded_at = None
 
         return {
             "transaction_id": str(transaction.id),

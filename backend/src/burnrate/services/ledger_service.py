@@ -140,6 +140,7 @@ class LedgerService:
                     "category_name": category_name,
                     "matched_rule_id": str(transaction.matched_rule_id) if transaction.matched_rule_id else None,
                     "matched_rule_name": matched_rule_name,
+                    "excluded": transaction.excluded_at is not None,
                     "imported_at": transaction.imported_at.isoformat(),
                 }
                 for transaction, account_display_name, category_name, matched_rule_name in rows
@@ -215,7 +216,10 @@ class LedgerService:
         if filters.categorized is True:
             query = query.where(Transaction.category_id.is_not(None))
         if filters.categorized is False:
-            query = query.where(Transaction.category_id.is_(None))
+            # The review/unknown queue is "needs attention": uncategorized AND not
+            # already resolved by exclusion. Excluded rows still show in the full
+            # ledger (categorized is None) so they can be restored.
+            query = query.where(Transaction.category_id.is_(None), Transaction.excluded_at.is_(None))
 
         return query
 

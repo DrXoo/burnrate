@@ -39,6 +39,8 @@ interface TransactionsPageProps {
   onMovePage: (direction: "prev" | "next") => void;
   onCategorize: (transactionId: string, categoryId: string) => Promise<void>;
   onUncategorize: (transactionId: string) => Promise<void>;
+  onExclude: (transactionId: string) => Promise<void>;
+  onRestore: (transactionId: string) => Promise<void>;
   onCreateRule: (transactionId: string, draft: RuleDraft) => Promise<void>;
   onUpdateRule: (ruleId: string, draft: RuleUpdateDraft) => Promise<void>;
   onDeleteRule: (ruleId: string) => Promise<void>;
@@ -243,6 +245,8 @@ export function TransactionsPage({
   onMovePage,
   onCategorize,
   onUncategorize,
+  onExclude,
+  onRestore,
   onCreateRule,
   onUpdateRule,
   onDeleteRule,
@@ -383,6 +387,35 @@ export function TransactionsPage({
   }
 
   function categorySelect(transaction: Transaction, fullWidth: boolean) {
+    if (transaction.excluded) {
+      return (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, width: fullWidth ? "100%" : undefined, flexWrap: "wrap" }}>
+          <span
+            title="Excluded from the budget — doesn't count toward spend or income"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              border: "1px solid var(--line-2)",
+              background: "var(--bg-3)",
+              color: "var(--text-3)",
+              borderRadius: 7,
+              padding: "4px 9px",
+              font: "500 11px 'Hanken Grotesque', sans-serif",
+            }}
+          >
+            Ignored
+          </span>
+          <button
+            type="button"
+            title="Move back to the review queue"
+            onClick={() => void onRestore(transaction.transaction_id)}
+            style={{ border: "none", background: "transparent", color: "var(--accent)", font: "500 12px 'Hanken Grotesque', sans-serif", cursor: "pointer", padding: 0 }}
+          >
+            Restore
+          </button>
+        </div>
+      );
+    }
     return (
       <select
         className="br-sel"
@@ -392,6 +425,8 @@ export function TransactionsPage({
           const value = event.target.value;
           if (value === "uncat") {
             void onUncategorize(transaction.transaction_id);
+          } else if (value === "ignore") {
+            void onExclude(transaction.transaction_id);
           } else {
             void onCategorize(transaction.transaction_id, value);
           }
@@ -403,6 +438,7 @@ export function TransactionsPage({
             {category.name}
           </option>
         ))}
+        <option value="ignore">Ignore (not a budget item)</option>
       </select>
     );
   }

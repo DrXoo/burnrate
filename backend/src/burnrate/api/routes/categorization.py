@@ -93,3 +93,35 @@ def uncategorize_transaction(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
     return TransactionCategoryStateResponse.model_validate(payload)
+
+
+@router.post("/transactions/{transaction_id}/exclude", response_model=TransactionCategoryStateResponse)
+def exclude_transaction(
+    transaction_id: str,
+    service: CategorizationService = Depends(get_categorization_service),
+) -> TransactionCategoryStateResponse:
+    try:
+        payload = service.exclude_transaction(transaction_id=transaction_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+
+    return TransactionCategoryStateResponse.model_validate(payload)
+
+
+@router.post("/transactions/{transaction_id}/restore", response_model=TransactionCategoryStateResponse)
+def restore_transaction(
+    transaction_id: str,
+    service: CategorizationService = Depends(get_categorization_service),
+) -> TransactionCategoryStateResponse:
+    try:
+        payload = service.restore_transaction(transaction_id=transaction_id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+
+    return TransactionCategoryStateResponse.model_validate(payload)

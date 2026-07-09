@@ -42,6 +42,7 @@ class TransactionSummaryResponse(BaseModel):
     category_name: str | None = None
     matched_rule_id: str | None = None
     matched_rule_name: str | None = None
+    excluded: bool = False
     imported_at: str
 
 

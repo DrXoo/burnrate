@@ -121,6 +121,66 @@ def test_categorization_service_can_return_transaction_to_unknown_queue() -> Non
     assert stored.category_id is None
 
 
+def test_categorization_service_excludes_transaction_from_queue() -> None:
+    db = make_session()
+    transaction, _ = seed_review_data(db)
+    service = CategorizationService(db=db)
+
+    response = service.exclude_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+    stored = db.scalar(select(Transaction).where(Transaction.id == transaction.id))
+    queue = service.list_uncategorized_transactions(month="2026-06", limit=50, offset=0)
+
+    assert response["message"] == "Transaction excluded from the budget"
+    assert stored is not None
+    assert stored.excluded_at is not None
+    assert stored.category_id is None
+    # Excluded rows drop out of the review/unknown queue.
+    assert queue["total_count"] == 0
+
+
+def test_categorization_service_restores_excluded_transaction() -> None:
+    db = make_session()
+    transaction, _ = seed_review_data(db)
+    service = CategorizationService(db=db)
+    service.exclude_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+    response = service.restore_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+    stored = db.scalar(select(Transaction).where(Transaction.id == transaction.id))
+    queue = service.list_uncategorized_transactions(month="2026-06", limit=50, offset=0)
+
+    assert response["message"] == "Transaction returned to unknown queue"
+    assert stored is not None
+    assert stored.excluded_at is None
+    # Back in the queue, ready to categorize.
+    assert queue["total_count"] == 1
+
+
+def test_categorization_service_categorizing_clears_exclusion() -> None:
+    db = make_session()
+    transaction, category = seed_review_data(db)
+    service = CategorizationService(db=db)
+    service.exclude_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+    service.categorize_transaction(
+        transaction_id=str(transaction.id),
+        category_id=str(category.id),
+    )
+    db.commit()
+
+    stored = db.scalar(select(Transaction).where(Transaction.id == transaction.id))
+
+    assert stored is not None
+    assert stored.category_id == category.id
+    # Assigning a real category is mutually exclusive with being excluded.
+    assert stored.excluded_at is None
+
+
 def test_categorization_service_rejects_duplicate_category_name() -> None:
     db = make_session()
     _, category = seed_review_data(db)
