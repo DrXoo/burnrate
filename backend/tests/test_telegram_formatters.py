@@ -5,6 +5,7 @@ from typing import Any
 from burnrate.telegram.formatters import (
     format_budgets,
     format_expiry_alert,
+    format_reconnect_alert,
     format_summary,
     format_sync_notification,
     format_unknown,
@@ -222,6 +223,22 @@ def test_format_expiry_alert_singular_day() -> None:
     text = format_expiry_alert([{"aspsp_name": "ING", "expired": False, "days": 1}])
 
     assert "expires in 1 day" in text
+
+
+def test_format_reconnect_alert_single_bank_names_it() -> None:
+    text = format_reconnect_alert(["ING"])
+
+    assert "🔒 ING disconnected — action needed:" in text
+    assert "ING — your bank ended the session, syncing has stopped" in text
+    assert "reconnect the account to resume syncing" in text
+
+
+def test_format_reconnect_alert_multiple_banks_generic_headline() -> None:
+    text = format_reconnect_alert(["ING", "BBVA"])
+
+    assert "🔒 Bank connections disconnected — action needed:" in text
+    assert "ING — your bank ended the session" in text
+    assert "BBVA — your bank ended the session" in text
 
 
 def test_format_unknown_handles_empty_queue() -> None:

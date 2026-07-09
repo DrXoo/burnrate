@@ -56,6 +56,9 @@ class EnableBankingConnection(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Last time an expiry warning was pushed, so proactive alerts don't repeat every run.
     expiry_alerted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last time a "reconnect needed" alert was pushed (session closed / auth rejected),
+    # so we notify once instead of on every sync tick while access stays broken.
+    reauth_alerted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

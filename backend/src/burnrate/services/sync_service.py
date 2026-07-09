@@ -7,9 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from burnrate.db.models import EnableBankingConnection
+from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.services.enable_banking_service import EnableBankingService
 
 logger = logging.getLogger(__name__)
+
+# HTTP statuses from Enable Banking that mean the bank consent is gone and only a
+# fresh authorization (reconnect) can restore access — retrying won't help.
+_REAUTH_STATUS_CODES = frozenset({401, 403})
 
 
 @dataclass
@@ -20,6 +25,9 @@ class ConnectionSyncResult:
     accounts_synced: int = 0
     transactions_imported: int = 0
     error: str | None = None
+    # True when the connection can only be fixed by re-authorizing in the web app
+    # (session closed/expired, or the bank rejected account access with a 401/403).
+    needs_reauth: bool = False
 
 
 @dataclass
@@ -69,6 +77,7 @@ class SyncService:
                 aspsp_name=connection.aspsp_name,
                 status="failed",
                 error=str(exc),
+                needs_reauth=_is_reauth_error(exc),
             )
 
         status = str(outcome.get("status", "success"))
@@ -88,4 +97,11 @@ class SyncService:
             accounts_synced=int(outcome.get("accounts_synced", 0)),
             transactions_imported=int(outcome.get("transactions_imported", 0)),
             error=outcome.get("message") if status == "skipped" else None,
+            # A skipped sync means the session was no longer authorized and the
+            # connection was deactivated: only a reconnect brings it back.
+            needs_reauth=status == "skipped",
         )
+
+
+def _is_reauth_error(exc: BaseException) -> bool:
+    return isinstance(exc, EnableBankingAPIError) and exc.status_code in _REAUTH_STATUS_CODES

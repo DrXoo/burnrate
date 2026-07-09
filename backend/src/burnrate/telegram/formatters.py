@@ -128,6 +128,25 @@ def format_expiry_alert(items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def format_reconnect_alert(names: list[str]) -> str:
+    """Tell the user a bank connection stopped and must be re-authorized in the app.
+
+    ``names`` are the affected banks' display names. Sent as soon as a sync detects
+    a closed session or a rejected (401) account request, so the user can reconnect
+    without waiting to notice missing transactions.
+    """
+    if len(names) == 1:
+        headline = f"🔒 {names[0]} disconnected — action needed:"
+    else:
+        headline = "🔒 Bank connections disconnected — action needed:"
+    lines = [headline, ""]
+    for name in names:
+        lines.append(f"• {name} — your bank ended the session, syncing has stopped")
+    lines.append("")
+    lines.append("Open BurnRate settings and reconnect the account to resume syncing.")
+    return "\n".join(lines)
+
+
 def format_unknown(result: dict[str, Any]) -> str:
     total = result["total_count"]
     if total == 0:

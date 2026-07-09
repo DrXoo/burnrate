@@ -13,7 +13,11 @@ from burnrate.integrations.telegram.client import TelegramClient
 from burnrate.logging_config import configure_logging
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.sync_service import SyncRunResult, SyncService
-from burnrate.telegram.notifier import send_expiry_alerts, send_sync_notification
+from burnrate.telegram.notifier import (
+    send_expiry_alerts,
+    send_reconnect_alerts,
+    send_sync_notification,
+)
 
 logger = logging.getLogger("burnrate.sync_worker")
 
@@ -42,6 +46,7 @@ def run_scheduled_sync(settings: Settings | None = None) -> None:
             result.failed,
         )
         _notify_new_transactions(session=session, result=result, settings=settings)
+        _alert_reconnect_needed(session=session, result=result, settings=settings)
         _alert_expiring_connections(session=session, settings=settings)
     except Exception:
         session.rollback()
@@ -63,6 +68,25 @@ def _notify_new_transactions(*, session: Session, result: SyncRunResult, setting
         send_sync_notification(run_result=result, session=session, client=client, settings=settings)
     except Exception:
         logger.exception("Failed to send new-transaction notification")
+
+
+def _alert_reconnect_needed(*, session: Session, result: SyncRunResult, settings: Settings) -> None:
+    """Best-effort Telegram alert when a sync found a connection needing reconnection.
+
+    Fires as soon as a bank session closes or rejects access with a 401, so the
+    user can re-authorize promptly. Guarded like the other notifiers and commits
+    its own debounce bookkeeping so the alert isn't repeated every tick.
+    """
+    if not settings.telegram_bot_token or not settings.telegram_notify_on_sync:
+        return
+    try:
+        client = TelegramClient(settings=settings)
+        sent = send_reconnect_alerts(run_result=result, session=session, client=client, settings=settings)
+        if sent:
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to send connection-reconnect alert")
 
 
 def _alert_expiring_connections(*, session: Session, settings: Settings) -> None:

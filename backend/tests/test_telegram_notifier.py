@@ -12,7 +12,11 @@ from burnrate.config import Settings
 from burnrate.db.base import Base
 from burnrate.db.models import Account, Category, EnableBankingConnection, Transaction
 from burnrate.services.sync_service import ConnectionSyncResult, SyncRunResult
-from burnrate.telegram.notifier import send_expiry_alerts, send_sync_notification
+from burnrate.telegram.notifier import (
+    send_expiry_alerts,
+    send_reconnect_alerts,
+    send_sync_notification,
+)
 
 NOW = datetime(2026, 7, 4, tzinfo=UTC)
 
@@ -232,6 +236,115 @@ def test_expiry_alert_skips_inactive_and_unknown_expiry() -> None:
     client = FakeClient()
 
     sent = send_expiry_alerts(session=session, client=client, settings=make_settings(), now=NOW)
+
+    assert sent == 0
+    assert client.sent == []
+
+
+def reauth_run_result(*connection_ids: str) -> SyncRunResult:
+    return SyncRunResult(
+        total_connections=len(connection_ids),
+        results=[
+            ConnectionSyncResult(
+                connection_id=cid,
+                aspsp_name="Bank",
+                status="skipped",
+                needs_reauth=True,
+            )
+            for cid in connection_ids
+        ],
+    )
+
+
+def test_reconnect_alert_notifies_and_debounces() -> None:
+    session = empty_session()
+    connection = add_connection(session, name="ING", expires_at=None)
+    client = FakeClient()
+
+    sent = send_reconnect_alerts(
+        run_result=reauth_run_result(str(connection.id)),
+        session=session,
+        client=client,
+        settings=make_settings(),
+        now=NOW,
+    )
+
+    assert sent == 2  # both chats notified once
+    assert {chat_id for chat_id, _ in client.sent} == {111, 222}
+    text = client.sent[0][1]
+    assert "ING disconnected" in text
+    assert "reconnect the account" in text
+    # Debounce: reauth_alerted_at is stamped so a second run stays quiet.
+    assert connection.reauth_alerted_at == NOW
+    client.sent.clear()
+    again = send_reconnect_alerts(
+        run_result=reauth_run_result(str(connection.id)),
+        session=session,
+        client=client,
+        settings=make_settings(),
+        now=NOW,
+    )
+    assert again == 0
+    assert client.sent == []
+
+
+def test_reconnect_alert_rewarns_after_cooldown() -> None:
+    session = empty_session()
+    connection = add_connection(session, name="ING", expires_at=None)
+    connection.reauth_alerted_at = NOW - timedelta(days=2)  # last warned two days ago
+    session.commit()
+    client = FakeClient()
+
+    sent = send_reconnect_alerts(
+        run_result=reauth_run_result(str(connection.id)),
+        session=session,
+        client=client,
+        settings=make_settings(),
+        now=NOW,
+    )
+
+    assert sent == 2
+    assert "ING" in client.sent[0][1]
+
+
+def test_reconnect_alert_ignores_healthy_results() -> None:
+    session = empty_session()
+    connection = add_connection(session, name="ING", expires_at=None)
+    client = FakeClient()
+    run = SyncRunResult(
+        total_connections=1,
+        succeeded=1,
+        results=[
+            ConnectionSyncResult(
+                connection_id=str(connection.id),
+                aspsp_name="ING",
+                status="success",
+                transactions_imported=3,
+            )
+        ],
+    )
+
+    sent = send_reconnect_alerts(
+        run_result=run, session=session, client=client, settings=make_settings(), now=NOW
+    )
+
+    assert sent == 0
+    assert client.sent == []
+    assert connection.reauth_alerted_at is None
+
+
+def test_reconnect_alert_skips_when_notifications_disabled() -> None:
+    session = empty_session()
+    connection = add_connection(session, name="ING", expires_at=None)
+    client = FakeClient()
+
+    sent = send_reconnect_alerts(
+        run_result=reauth_run_result(str(connection.id)),
+        session=session,
+        client=client,
+        settings=make_settings(TELEGRAM_NOTIFY_ON_SYNC=False),
+        now=NOW,
+    )
 
     assert sent == 0
     assert client.sent == []

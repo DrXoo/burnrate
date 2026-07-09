@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,7 +18,11 @@ from burnrate.services.connection_expiry import (
 )
 from burnrate.services.ledger_service import LedgerService
 from burnrate.services.sync_service import SyncRunResult
-from burnrate.telegram.formatters import format_expiry_alert, format_sync_notification
+from burnrate.telegram.formatters import (
+    format_expiry_alert,
+    format_reconnect_alert,
+    format_sync_notification,
+)
 
 logger = logging.getLogger("burnrate.telegram_notifier")
 
@@ -114,6 +119,62 @@ def send_expiry_alerts(
     if sent:
         for connection in due:
             connection.expiry_alerted_at = now
+    return sent
+
+
+def send_reconnect_alerts(
+    *,
+    run_result: SyncRunResult,
+    session: Session,
+    client: TelegramClient,
+    settings: Settings,
+    now: datetime | None = None,
+) -> int:
+    """Alert on Telegram when a sync pass found a connection needing re-authorization.
+
+    Fired for the connections a sync just flagged as ``needs_reauth`` — a closed/
+    expired session or a 401 rejection from the bank — so the user learns to
+    reconnect immediately instead of noticing missing transactions days later.
+
+    Debounced per connection via ``reauth_alerted_at`` so a bank that keeps
+    rejecting on every tick is only reported once. A reconnect creates a fresh
+    connection row, so the debounce resets naturally once access is restored.
+    Marks alerted connections and expects the caller to commit. Never raises.
+    Returns how many chats were notified.
+    """
+    if not settings.telegram_notify_on_sync:
+        return 0
+
+    chat_ids = settings.telegram_allowed_chat_id_set
+    if not settings.telegram_bot_token or not chat_ids:
+        return 0
+
+    now = now or datetime.now(UTC)
+
+    due: list[EnableBankingConnection] = []
+    names: list[str] = []
+    seen: set[str] = set()
+    for result in run_result.results:
+        if not result.needs_reauth or result.connection_id in seen:
+            continue
+        seen.add(result.connection_id)
+        connection = session.get(EnableBankingConnection, UUID(result.connection_id))
+        if connection is None:
+            continue
+        last_alerted = as_utc(connection.reauth_alerted_at)
+        if last_alerted is not None and last_alerted > now - _ALERT_COOLDOWN:
+            continue
+        due.append(connection)
+        names.append(connection.aspsp_name)
+
+    if not due:
+        return 0
+
+    text = format_reconnect_alert(names)
+    sent = _broadcast(client=client, chat_ids=chat_ids, text=text, kind="reconnect alert")
+    if sent:
+        for connection in due:
+            connection.reauth_alerted_at = now
     return sent
 
 

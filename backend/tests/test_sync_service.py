@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from burnrate.db.base import Base
 from burnrate.db.models import EnableBankingConnection, SyncSession
+from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.services.sync_service import SyncService
 
 
@@ -20,10 +21,12 @@ class FakeEnableBankingService:
         db: Session,
         failing_connection_ids: set[str] | None = None,
         expired_connection_ids: set[str] | None = None,
+        unauthorized_connection_ids: set[str] | None = None,
     ) -> None:
         self.db = db
         self.failing_connection_ids = failing_connection_ids or set()
         self.expired_connection_ids = expired_connection_ids or set()
+        self.unauthorized_connection_ids = unauthorized_connection_ids or set()
         self.synced_connection_ids: list[str] = []
 
     def sync_connection(self, *, connection_id: str) -> dict[str, object]:
@@ -45,6 +48,12 @@ class FakeEnableBankingService:
             sync_session.error_summary = "expired"
             sync_session.finished_at = datetime.now(UTC)
             return {"accounts_synced": 0, "transactions_imported": 0, "status": "skipped", "message": "expired"}
+
+        if connection_id in self.unauthorized_connection_ids:
+            sync_session.status = "failed"
+            sync_session.error_summary = "Enable Banking API error (401)"
+            sync_session.finished_at = datetime.now(UTC)
+            raise EnableBankingAPIError(status_code=401, detail="unauthorized")
 
         if connection_id in self.failing_connection_ids:
             sync_session.status = "failed"
@@ -137,6 +146,7 @@ def test_sync_all_active_connections_reports_skipped_expired_session() -> None:
     skipped_result = next(item for item in result.results if item.connection_id == str(expired.id))
     assert skipped_result.status == "skipped"
     assert skipped_result.error == "expired"
+    assert skipped_result.needs_reauth is True
     assert healthy is not None
 
 
@@ -158,9 +168,26 @@ def test_sync_all_active_connections_isolates_a_failing_connection() -> None:
     failed_result = next(item for item in result.results if item.connection_id == str(failing.id))
     assert failed_result.status == "failed"
     assert failed_result.error == "boom"
+    # A generic failure (network blip, bug) is not a reconnect signal.
+    assert failed_result.needs_reauth is False
 
     # Both sync sessions (failed and successful) should be persisted for diagnosability.
     db.commit()
     sessions = db.scalars(select(SyncSession)).all()
     statuses = sorted(session.status for session in sessions)
     assert statuses == ["failed", "success"]
+
+
+def test_sync_flags_reauth_when_bank_rejects_with_401() -> None:
+    db = make_session()
+    unauthorized = add_connection(db, name="ING")
+    enable_banking = FakeEnableBankingService(db=db, unauthorized_connection_ids={str(unauthorized.id)})
+    service = SyncService(db=db, enable_banking_service=enable_banking)
+
+    result = service.sync_all_active_connections()
+
+    assert result.failed == 1
+    failed_result = result.results[0]
+    assert failed_result.status == "failed"
+    # A 401 from the bank means the consent is gone — surface it as a reconnect signal.
+    assert failed_result.needs_reauth is True
