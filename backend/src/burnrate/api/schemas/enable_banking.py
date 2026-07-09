@@ -9,7 +9,7 @@ class StartAuthorizationRequest(BaseModel):
     aspsp_name: str = Field(min_length=1)
     aspsp_country: str = Field(min_length=2, max_length=2)
     psu_type: Literal["personal", "business"] = "personal"
-    access_valid_for_days: int = Field(default=10, ge=1, le=90)
+    access_valid_for_days: int = Field(default=180, ge=1, le=180)
 
 
 class StartAuthorizationResponse(BaseModel):

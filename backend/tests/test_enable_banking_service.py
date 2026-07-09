@@ -311,6 +311,30 @@ def test_enable_banking_service_starts_authorization_and_persists_state() -> Non
     assert response["url"] == "https://auth.example.test/redirect"
 
 
+def test_enable_banking_service_clamps_valid_until_to_bank_maximum() -> None:
+    class MaxValidityClient(FakeEnableBankingClient):
+        def list_aspsps(self, *, country: str):
+            # 30-day maximum consent validity, expressed in seconds like the real API.
+            return [{"name": "Nordea", "country": country, "maximum_consent_validity": 30 * 24 * 3600}]
+
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=MaxValidityClient())
+
+    response = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=180,
+        )
+    )
+
+    valid_until = datetime.fromisoformat(response["valid_until"])
+    window = valid_until - datetime.now(timezone.utc)
+    # Clamped to the 30-day bank maximum (minus a small safety margin), not the requested 180.
+    assert timedelta(days=29) < window <= timedelta(days=30)
+
+
 def test_enable_banking_service_handles_callback_and_imports_initial_data() -> None:
     db = make_session()
     client = FakeEnableBankingClient()
