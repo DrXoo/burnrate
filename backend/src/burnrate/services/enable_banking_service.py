@@ -24,10 +24,15 @@ from burnrate.db.models import (
     SyncSession,
     Transaction,
 )
-from burnrate.integrations.enable_banking.client import EnableBankingClient
+from burnrate.integrations.enable_banking.client import EnableBankingAPIError, EnableBankingClient
 from burnrate.services.rules_service import RulesService
 
 logger = logging.getLogger(__name__)
+
+# Safety buffer subtracted from an ASPSP's maximum_consent_validity so the
+# requested valid_until does not exceed "now + maximum_consent_validity" by the
+# time Enable Banking evaluates it (they reject anything over the cap).
+_CONSENT_VALIDITY_MARGIN = timedelta(minutes=5)
 
 
 @dataclass
@@ -56,7 +61,7 @@ class EnableBankingService:
         self._upsert_app_config()
 
         state = str(uuid4())
-        valid_until = datetime.now(UTC) + timedelta(days=request.access_valid_for_days)
+        valid_until = self._resolve_valid_until(request)
         response = self.client.start_authorization(
             aspsp_name=request.aspsp_name,
             aspsp_country=request.aspsp_country,
@@ -84,6 +89,49 @@ class EnableBankingService:
             "url": response["url"],
             "valid_until": valid_until.isoformat(),
         }
+
+    def _resolve_valid_until(self, request: StartAuthorizationRequest) -> datetime:
+        now = datetime.now(UTC)
+        requested = timedelta(days=request.access_valid_for_days)
+
+        max_validity = self._max_consent_validity(request.aspsp_name, request.aspsp_country)
+        if max_validity is not None:
+            capped = max(max_validity - _CONSENT_VALIDITY_MARGIN, timedelta(0))
+            if capped < requested:
+                logger.info(
+                    "Clamping consent validity for %s (%s) from %s to %s (bank maximum)",
+                    request.aspsp_name,
+                    request.aspsp_country.upper(),
+                    requested,
+                    capped,
+                )
+                requested = capped
+
+        return now + requested
+
+    def _max_consent_validity(self, aspsp_name: str, aspsp_country: str) -> timedelta | None:
+        """Return the ASPSP's maximum_consent_validity as a timedelta, or None if unknown."""
+        try:
+            aspsps = self.client.list_aspsps(country=aspsp_country)
+        except EnableBankingAPIError as exc:
+            logger.warning(
+                "Could not fetch ASPSP list to determine max consent validity for %s: %s",
+                aspsp_name,
+                exc,
+            )
+            return None
+
+        country = aspsp_country.upper()
+        for aspsp in aspsps:
+            if aspsp.get("name") != aspsp_name:
+                continue
+            if (aspsp.get("country") or "").upper() != country:
+                continue
+            seconds = aspsp.get("maximum_consent_validity")
+            if isinstance(seconds, (int, float)) and seconds > 0:
+                return timedelta(seconds=seconds)
+            return None
+        return None
 
     def handle_callback(
         self,
