@@ -201,6 +201,67 @@ class ExpiringSessionClient(FakeEnableBankingClient):
         }
 
 
+class RotatingUidClient(FakeEnableBankingClient):
+    """A reconnect issues a fresh per-session uid for the same real account.
+
+    The identification hash stays stable across authorizations, which is how the
+    same account must be recognized so it isn't duplicated on reconnect.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._session_count = 0
+        self.uid = "account-uid-1"
+
+    def create_session(self, *, code: str):
+        assert code == "auth-code"
+        self._session_count += 1
+        self.uid = f"account-uid-{self._session_count}"
+        return {
+            "session_id": "session-123",
+            "accounts": [
+                {
+                    "uid": self.uid,
+                    "name": "Main account",
+                    "details": "Daily banking",
+                    "currency": "EUR",
+                    "identification_hash": "hash-1",
+                }
+            ],
+            "aspsp": {"name": "Nordea", "country": "FI"},
+            "psu_type": "personal",
+            "access": {"valid_until": "2026-01-11T12:00:00+00:00"},
+        }
+
+    def get_session(self, *, session_id: str):
+        return {
+            "status": "AUTHORIZED",
+            "authorized": "2026-01-01T12:00:00+00:00",
+            "accounts": [self.uid],
+            "accounts_data": [{"uid": self.uid, "identification_hash": "hash-1"}],
+        }
+
+    def get_account_balances(self, *, account_id: str):
+        assert account_id == self.uid
+        return {
+            "balances": [
+                {"balance_type": "CLAV", "balance_amount": {"amount": "123.45", "currency": "EUR"}}
+            ]
+        }
+
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        transaction_status: str | None = None,
+        continuation_key: str | None = None,
+    ):
+        assert account_id == self.uid
+        return {"transactions": {"booked": [], "pending": []}}
+
+
 def make_settings() -> Settings:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     private_key_pem = private_key.private_bytes(
@@ -322,6 +383,41 @@ def test_reconnect_supersedes_previous_connection_for_same_bank() -> None:
     assert connections[1].active is True  # the reconnect is live
     # Exactly one active connection remains for the bank.
     assert sum(1 for c in connections if c.active) == 1
+
+
+def test_reconnect_reuses_account_when_uid_changes_but_hash_matches() -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=RotatingUidClient())
+
+    def connect() -> None:
+        start = service.start_authorization(
+            StartAuthorizationRequest(
+                aspsp_name="Nordea",
+                aspsp_country="FI",
+                psu_type="personal",
+                access_valid_for_days=10,
+            )
+        )
+        db.commit()
+        service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+        db.commit()
+
+    connect()
+    connect()  # reconnect: same real account, new per-session uid, same identification hash
+
+    # The account must not be duplicated — the stable hash re-identifies it.
+    accounts = db.scalars(select(Account)).all()
+    assert len(accounts) == 1
+
+    # Its single mapping is moved onto the live connection and the new uid so later
+    # syncs of the reconnected connection resolve to this same account.
+    mappings = db.scalars(select(EnableBankingAccountMapping)).all()
+    assert len(mappings) == 1
+    active = db.scalar(select(EnableBankingConnection).where(EnableBankingConnection.active.is_(True)))
+    assert active is not None
+    assert mappings[0].enable_banking_connection_id == active.id
+    assert mappings[0].external_account_id == "account-uid-2"
+    assert mappings[0].account_id == accounts[0].id
 
 
 def test_enable_banking_service_logs_empty_transaction_pages(caplog) -> None:

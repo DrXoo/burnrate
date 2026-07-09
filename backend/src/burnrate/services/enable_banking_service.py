@@ -361,15 +361,30 @@ class EnableBankingService:
         connection: EnableBankingConnection,
         account_payload: dict[str, Any],
     ) -> Account:
+        uid = account_payload["uid"]
+        identification_hash = account_payload.get("identification_hash")
+        display_name = account_payload.get("name") or account_payload.get("details") or uid
+        currency = account_payload.get("currency") or "EUR"
+        now = datetime.now(UTC)
+
+        # Fast path: this exact external account id is already mapped (a re-sync of
+        # the same authorized session).
         mapping = self.db.scalar(
             select(EnableBankingAccountMapping).where(
-                EnableBankingAccountMapping.external_account_id == account_payload["uid"]
+                EnableBankingAccountMapping.external_account_id == uid
             )
         )
 
-        display_name = account_payload.get("name") or account_payload.get("details") or account_payload["uid"]
-        currency = account_payload.get("currency") or "EUR"
-        now = datetime.now(UTC)
+        # Reconnect path: Enable Banking issues a NEW per-session uid for the same
+        # real account on each fresh authorization, so the uid lookup misses. Fall
+        # back to the stable identification hash to recognize the account and reuse
+        # its local row (and the user's inclusion setting) instead of duplicating it.
+        if mapping is None and identification_hash:
+            mapping = self.db.scalar(
+                select(EnableBankingAccountMapping).where(
+                    EnableBankingAccountMapping.external_account_hash == identification_hash
+                )
+            )
 
         if mapping:
             account = self.db.get(Account, mapping.account_id)
@@ -377,8 +392,12 @@ class EnableBankingService:
             account.display_name = display_name
             account.currency = currency
             account.last_synced_at = now
+            # Move the mapping onto the current connection and uid so later syncs of
+            # the freshly authorized connection resolve to this same account.
+            mapping.enable_banking_connection_id = connection.id
+            mapping.external_account_id = uid
+            mapping.external_account_hash = identification_hash
             mapping.last_seen_at = now
-            mapping.external_account_hash = account_payload.get("identification_hash")
             return account
 
         account = Account(
@@ -392,8 +411,8 @@ class EnableBankingService:
 
         mapping = EnableBankingAccountMapping(
             enable_banking_connection_id=connection.id,
-            external_account_id=account_payload["uid"],
-            external_account_hash=account_payload.get("identification_hash"),
+            external_account_id=uid,
+            external_account_hash=identification_hash,
             account_id=account.id,
             last_seen_at=now,
         )
