@@ -99,6 +99,29 @@ Notes:
 * The interactive API docs (`/docs`, `/openapi.json`) are only served when
   `APP_ENV=development`.
 
+## Data at Rest
+
+The database holds your full financial history, so it is treated as sensitive:
+
+* **Postgres is not published to the host.** It is reachable only by the app over
+  the Docker network. To inspect it, go through the container:
+  `docker compose exec postgres psql -U burnrate -d burnrate`.
+* **Use a strong `POSTGRES_PASSWORD`.** Note it only applies when the volume is
+  first created; to rotate on an existing database, run
+  `ALTER USER burnrate WITH PASSWORD '<new>';` then update both
+  `POSTGRES_PASSWORD` and the password inside `DATABASE_URL`.
+* **Bank session tokens are encrypted at rest** with `BANK_TOKEN_ENCRYPTION_KEY`
+  (Fernet), so a stolen dump or backup yields no usable bank access. The key is
+  produced by `python -m burnrate.generate_auth_secrets`.
+
+  > ⚠️ **Back up `BANK_TOKEN_ENCRYPTION_KEY`.** Lose it and the stored tokens
+  > cannot be decrypted — you would have to reconnect the bank. Rows written
+  > before this was introduced are read as plaintext until
+  > `alembic upgrade head` rewrites them.
+
+Avoid `$` in `POSTGRES_PASSWORD` (docker compose interpolates it) and in the
+password inside `DATABASE_URL` (URL-reserved characters need escaping).
+
 ## Telegram Bot
 
 BurnRate ships a read-only Telegram bot as a secondary interface. It runs as its

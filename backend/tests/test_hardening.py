@@ -9,6 +9,7 @@ from burnrate.api.dependencies import (
     get_enable_banking_service,
 )
 from burnrate.config import Settings, get_settings
+from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.main import create_app
 from burnrate.security import hash_password
 
@@ -93,3 +94,25 @@ def test_rate_limited_endpoint_still_requires_auth_first() -> None:
     client = build_client(make_settings(BANK_RATE_LIMIT_MAX_REQUESTS=1))
     for _ in range(3):
         assert client.get(ASPSPS_URL).status_code == 401
+
+
+class ExplodingEnableBankingService:
+    def list_aspsps(self, *, country: str) -> list[dict[str, object]]:
+        raise EnableBankingAPIError(status_code=401, detail={"upstream": "consent-revoked-detail"})
+
+
+def test_upstream_bank_error_becomes_502_and_leaks_nothing() -> None:
+    # A bank 401 must NOT surface as our own 401: the Web UI treats 401 as
+    # "your session expired" and would log the user out. The upstream body must
+    # not be echoed to the client either.
+    settings = make_settings()
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_enable_banking_service] = lambda: ExplodingEnableBankingService()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.get(ASPSPS_URL)
+
+    assert response.status_code == 502
+    assert "consent-revoked-detail" not in response.text

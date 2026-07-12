@@ -6,8 +6,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # Deliberately NOT published to the host: the database holds the full
+    # financial history and is reachable by the app over the compose network as
+    # "postgres:5432". Publishing it would expose it to the LAN. To inspect it,
+    # use `docker compose exec postgres psql -U $POSTGRES_USER $POSTGRES_DB`.
+    expose:
+      - "5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

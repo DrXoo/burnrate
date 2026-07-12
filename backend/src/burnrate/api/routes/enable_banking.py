@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +17,24 @@ from burnrate.api.schemas.enable_banking import (
 from burnrate.config import Settings, get_settings
 from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.services.enable_banking_service import EnableBankingService
+
+
+logger = logging.getLogger("burnrate.api")
+
+
+def _bank_error(exc: EnableBankingAPIError) -> HTTPException:
+    """Translate an upstream bank failure into a safe client-facing error.
+
+    The upstream status and body are deliberately not passed through. The body
+    can carry provider detail we should not echo back, and reusing the upstream
+    status would let a bank 401 (lapsed consent) masquerade as "your session
+    expired" and log the user out of BurnRate. The detail is logged instead.
+    """
+    logger.warning("Enable Banking API error (%s): %s", exc.status_code, exc.detail)
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail=f"The bank service returned an error (upstream status {exc.status_code}).",
+    )
 
 
 def _connect_redirect(*, web_base_url: str, params: dict[str, object]) -> RedirectResponse:
@@ -46,7 +65,7 @@ def list_aspsps(
     try:
         return AspspListResponse(aspsps=service.list_aspsps(country=country))
     except EnableBankingAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        raise _bank_error(exc) from exc
 
 
 @router.post(
@@ -62,7 +81,7 @@ def start_authorization(
     try:
         return StartAuthorizationResponse.model_validate(service.start_authorization(request))
     except EnableBankingAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        raise _bank_error(exc) from exc
 
 
 @public_router.get("/api/v1/integrations/enable-banking/callback")
@@ -135,4 +154,4 @@ def sync_connection(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
     except EnableBankingAPIError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        raise _bank_error(exc) from exc

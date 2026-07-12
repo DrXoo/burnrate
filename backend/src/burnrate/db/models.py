@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from burnrate.db.base import Base, TimestampedMixin, UUIDPrimaryKeyMixin
+from burnrate.db.types import EncryptedText
 
 
 class EnableBankingAppConfig(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
@@ -47,7 +48,9 @@ class EnableBankingConnection(UUIDPrimaryKeyMixin, TimestampedMixin, Base):
     aspsp_name: Mapped[str] = mapped_column(Text)
     aspsp_country: Mapped[str] = mapped_column(Text)
     psu_type: Mapped[str] = mapped_column(Text)
-    session_id: Mapped[str | None] = mapped_column(Text, index=True)
+    # Encrypted at rest: a leaked dump/backup must not yield a usable bank token.
+    # Randomized ciphertext, so this column cannot be indexed or filtered on.
+    session_id: Mapped[str | None] = mapped_column(EncryptedText)
     session_status: Mapped[str | None] = mapped_column(Text)
     authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

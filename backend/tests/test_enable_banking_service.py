@@ -352,8 +352,11 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     callback = service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
     db.commit()
 
-    connection = db.scalar(select(EnableBankingConnection).where(EnableBankingConnection.session_id == "session-123"))
+    # session_id is encrypted at rest, so it can't be filtered on; the ORM
+    # decrypts it on read.
+    connection = db.scalar(select(EnableBankingConnection))
     assert connection is not None
+    assert connection.session_id == "session-123"
     account = db.scalar(select(Account).where(Account.display_name == "Main account"))
     assert account is not None
     assert account.latest_balance_amount == Decimal("123.45")
@@ -632,10 +635,11 @@ def test_enable_banking_service_skips_and_deactivates_expired_session() -> None:
     assert result["transactions_imported"] == 0
     assert "expired" in result["message"].lower()
 
-    connection = db.scalar(
-        select(EnableBankingConnection).where(EnableBankingConnection.session_id == "session-123")
-    )
+    # session_id is encrypted at rest, so it can't be filtered on; the ORM
+    # decrypts it on read.
+    connection = db.scalar(select(EnableBankingConnection))
     assert connection is not None
+    assert connection.session_id == "session-123"
     assert connection.active is False
     assert connection.session_status == "EXPIRED"
 

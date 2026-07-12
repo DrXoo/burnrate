@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     auth_login_lockout_seconds: int = Field(default=300, ge=0, alias="AUTH_LOGIN_LOCKOUT_SECONDS")
     bank_rate_limit_max_requests: int = Field(default=20, ge=1, alias="BANK_RATE_LIMIT_MAX_REQUESTS")
     bank_rate_limit_window_seconds: int = Field(default=60, ge=1, alias="BANK_RATE_LIMIT_WINDOW_SECONDS")
+    bank_token_encryption_key: str = Field(default="", alias="BANK_TOKEN_ENCRYPTION_KEY")
     sync_cron: str = Field(default="*/30 * * * *", alias="SYNC_CRON")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")

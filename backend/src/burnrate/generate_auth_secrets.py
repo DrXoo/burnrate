@@ -15,6 +15,7 @@ import getpass
 import secrets
 import sys
 
+from burnrate.crypto import generate_key
 from burnrate.security import hash_password
 
 _MIN_PASSWORD_LENGTH = 10
@@ -38,6 +39,10 @@ def main() -> int:
     print("# Paste these into your .env (keep them secret):")
     print(f"AUTH_PASSWORD_HASH={password_hash}")
     print(f"AUTH_SECRET_KEY={secret_key}")
+    print(f"BANK_TOKEN_ENCRYPTION_KEY={generate_key()}")
+    print()
+    print("# Keep BANK_TOKEN_ENCRYPTION_KEY safe: lose it and the stored bank")
+    print("# tokens cannot be decrypted, and you must reconnect the bank.")
     print()
     print("# IMPORTANT: docker compose interpolates '$' in .env files, which")
     print("# corrupts the Argon2 hash. When this .env is loaded by docker compose,")
