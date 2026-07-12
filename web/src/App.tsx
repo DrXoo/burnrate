@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { ConnectBankModal, type ReconnectPrefill } from "./components/ConnectBankModal";
 import { FirstRun } from "./components/FirstRun";
 import { HealthStrip } from "./components/HealthStrip";
+import { Login } from "./components/Login";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { TopBar } from "./components/TopBar";
@@ -184,6 +185,10 @@ export default function App() {
     );
   }
 
+  if (data.authStatus === "unauthenticated") {
+    return <Login onSubmit={data.login} />;
+  }
+
   const isFirstRun = data.connections.length === 0 && data.accounts.length === 0;
   if (isFirstRun) {
     return (
@@ -220,6 +225,7 @@ export default function App() {
             onToggleTheme={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}
             onSetHeroMode={setHeroMode}
             onToggleMenu={() => setMenuOpen((value) => !value)}
+            onLogout={() => void data.logout()}
           />
 
           {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} onReconnect={openReconnect} /> : null}

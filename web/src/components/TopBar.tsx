@@ -1,4 +1,4 @@
-import { IconMenu, IconMoon } from "./icons";
+import { IconLogout, IconMenu, IconMoon } from "./icons";
 import type { HeroMode, Section, Theme } from "../lib/viewTypes";
 import { SECTION_TITLES } from "../lib/viewTypes";
 
@@ -10,9 +10,10 @@ interface TopBarProps {
   onToggleTheme: () => void;
   onSetHeroMode: (mode: HeroMode) => void;
   onToggleMenu: () => void;
+  onLogout: () => void;
 }
 
-export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, onSetHeroMode, onToggleMenu }: TopBarProps) {
+export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, onSetHeroMode, onToggleMenu, onLogout }: TopBarProps) {
   return (
     <div
       className="br-topbar"
@@ -109,6 +110,28 @@ export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, on
         }}
       >
         <IconMoon color={theme === "light" ? "var(--accent)" : "currentColor"} />
+      </button>
+
+      <button
+        type="button"
+        title="Sign out"
+        aria-label="Sign out"
+        onClick={onLogout}
+        style={{
+          flex: "none",
+          width: 34,
+          height: 34,
+          borderRadius: 9,
+          border: "1px solid var(--line)",
+          background: "var(--bg-3)",
+          color: "var(--text-2)",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <IconLogout />
       </button>
     </div>
   );

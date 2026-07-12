@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 
-from burnrate.api.dependencies import get_enable_banking_service
+from burnrate.api.dependencies import enforce_rate_limit, get_enable_banking_service
 from burnrate.api.schemas.enable_banking import (
     AspspListResponse,
     EnableBankingConnectionListResponse,
@@ -34,7 +34,11 @@ def list_connections(
     return EnableBankingConnectionListResponse(connections=service.list_connections())
 
 
-@router.get("/aspsps", response_model=AspspListResponse)
+@router.get(
+    "/aspsps",
+    response_model=AspspListResponse,
+    dependencies=[Depends(enforce_rate_limit("enable_banking_aspsps"))],
+)
 def list_aspsps(
     country: str = Query(..., min_length=2, max_length=2),
     service: EnableBankingService = Depends(get_enable_banking_service),
@@ -45,7 +49,12 @@ def list_aspsps(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.post("/auth/start", response_model=StartAuthorizationResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/auth/start",
+    response_model=StartAuthorizationResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_rate_limit("enable_banking_auth_start"))],
+)
 def start_authorization(
     request: StartAuthorizationRequest,
     service: EnableBankingService = Depends(get_enable_banking_service),
@@ -56,7 +65,7 @@ def start_authorization(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-@router.get("/callback")
+@public_router.get("/api/v1/integrations/enable-banking/callback")
 @public_router.get("/enable_banking_items/callback")
 def enable_banking_callback(
     code: str | None = Query(default=None),
@@ -108,7 +117,11 @@ def enable_banking_callback(
     )
 
 
-@router.post("/connections/{connection_id}/sync", response_model=ManualSyncResponse)
+@router.post(
+    "/connections/{connection_id}/sync",
+    response_model=ManualSyncResponse,
+    dependencies=[Depends(enforce_rate_limit("enable_banking_sync"))],
+)
 def sync_connection(
     connection_id: str,
     service: EnableBankingService = Depends(get_enable_banking_service),

@@ -17,8 +17,27 @@ import type {
   Transaction,
 } from "../types";
 
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+// Registered by the app so any 401 (expired/absent session) can drop the user
+// back to the login screen, no matter which call surfaced it.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  onUnauthorized = handler;
+}
+
 async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(url, {
+    // Send the session cookie, including on the cross-origin dev setup
+    // (web :3000 -> api :8000). The server must allow credentials in CORS.
+    credentials: "include",
     headers: {
       Accept: "application/json",
       ...(options.headers || {}),
@@ -27,8 +46,11 @@ async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> 
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      onUnauthorized?.();
+    }
     const body = await response.text();
-    throw new Error(`Request failed (${response.status}): ${body}`);
+    throw new ApiError(response.status, `Request failed (${response.status}): ${body}`);
   }
 
   return response.json() as Promise<T>;
@@ -82,6 +104,52 @@ export async function detectApiBase(): Promise<string> {
   }
 
   throw new Error(`Could not detect backend API base. Tried: ${errors.join(" | ")}`);
+}
+
+export async function getAuthStatus(apiBase: string): Promise<boolean> {
+  const response = await fetch(`${apiBase}/auth/me`, {
+    credentials: "include",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    return false;
+  }
+  const body = (await response.json()) as { authenticated?: boolean };
+  return Boolean(body.authenticated);
+}
+
+export async function login(apiBase: string, password: string): Promise<void> {
+  // Deliberately bypasses fetchJson so a wrong-password 401 surfaces as a form
+  // error here instead of tripping the global "session expired" handler.
+  const response = await fetch(`${apiBase}/auth/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (response.ok) {
+    return;
+  }
+  let detail = "";
+  try {
+    detail = ((await response.json()) as { detail?: string }).detail ?? "";
+  } catch {
+    // Non-JSON error body; fall back to a generic message below.
+  }
+  if (response.status === 401) {
+    throw new ApiError(401, detail || "Incorrect password.");
+  }
+  if (response.status === 429) {
+    throw new ApiError(429, detail || "Too many attempts. Please wait and try again.");
+  }
+  if (response.status === 503) {
+    throw new ApiError(503, detail || "Login is not configured on the server yet.");
+  }
+  throw new ApiError(response.status, detail || `Login failed (${response.status}).`);
+}
+
+export async function logout(apiBase: string): Promise<void> {
+  await fetch(`${apiBase}/auth/logout`, { method: "POST", credentials: "include" });
 }
 
 export async function getAspsps(apiBase: string, country: string): Promise<Aspsp[]> {

@@ -174,6 +174,16 @@ export function IconTrash(props: IconProps) {
   );
 }
 
+export function IconLogout(props: IconProps) {
+  return (
+    <Svg width={17} {...props}>
+      <path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3" />
+      <path d="M15 12H9" />
+      <path d="M13 8l4 4-4 4" />
+    </Svg>
+  );
+}
+
 export function IconMenu(props: IconProps) {
   return (
     <Svg width={18} strokeWidth={1.9} {...props}>

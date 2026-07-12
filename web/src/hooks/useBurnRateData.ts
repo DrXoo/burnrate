@@ -10,6 +10,7 @@ import {
   detectApiBase,
   excludeTransaction,
   getAccounts,
+  getAuthStatus,
   getBudgets,
   getCategories,
   getConnections,
@@ -18,7 +19,10 @@ import {
   getTransactions,
   getUncategorizedCount,
   getUnknownQueue,
+  login as loginRequest,
+  logout as logoutRequest,
   restoreTransaction,
+  setUnauthorizedHandler,
   syncEnableBankingConnection,
   toggleRule,
   uncategorizeTransaction,
@@ -50,10 +54,13 @@ interface TransactionBucket {
   error: string | null;
 }
 
+type AuthStatus = "checking" | "authenticated" | "unauthenticated";
+
 export function useBurnRateData() {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const [bootLoading, setBootLoading] = useState(true);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>("checking");
 
   const [connections, setConnections] = useState<Connection[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -107,6 +114,20 @@ export function useBurnRateData() {
         }
         setApiBase(base);
 
+        const authenticated = await getAuthStatus(base);
+        if (cancelled) {
+          return;
+        }
+        if (!authenticated) {
+          // Stop before touching any protected endpoint; App renders the login gate.
+          startTransition(() => {
+            setAuthStatus("unauthenticated");
+            setBootError(null);
+            setBootLoading(false);
+          });
+          return;
+        }
+
         const [initialConnections, initialAccounts, initialCategories, initialRules, initialBudgets] =
           await Promise.all([
             getConnections(base),
@@ -126,6 +147,7 @@ export function useBurnRateData() {
           setCategories(initialCategories);
           setRules(initialRules);
           setBudgets(initialBudgets);
+          setAuthStatus("authenticated");
           setBootError(null);
           setBootLoading(false);
         });
@@ -144,8 +166,14 @@ export function useBurnRateData() {
     };
   }, []);
 
+  // Any 401 from any call (expired or missing session) drops back to the login gate.
   useEffect(() => {
-    if (!apiBase) {
+    setUnauthorizedHandler(() => setAuthStatus("unauthenticated"));
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  useEffect(() => {
+    if (!apiBase || authStatus !== "authenticated") {
       return;
     }
     const base = apiBase;
@@ -230,6 +258,7 @@ export function useBurnRateData() {
     };
   }, [
     apiBase,
+    authStatus,
     filters.accountId,
     filters.categoryId,
     filters.categorized,
@@ -258,6 +287,28 @@ export function useBurnRateData() {
       setCategories(nextCategories);
       setRules(nextRules);
       setBudgets(nextBudgets);
+    });
+  }
+
+  async function loginAction(password: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await loginRequest(apiBase, password);
+    // Load reference data before flipping to authenticated so the app never
+    // renders the empty "first run" state during the transition.
+    await refreshReferenceData();
+    setAuthStatus("authenticated");
+  }
+
+  async function logoutAction() {
+    if (apiBase) {
+      await logoutRequest(apiBase);
+    }
+    startTransition(() => {
+      setAuthStatus("unauthenticated");
+      setConnections([]);
+      setAccounts([]);
     });
   }
 
@@ -534,6 +585,9 @@ export function useBurnRateData() {
     apiBase,
     bootLoading,
     bootError,
+    authStatus,
+    login: loginAction,
+    logout: logoutAction,
     connections,
     accounts,
     categories,

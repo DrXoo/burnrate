@@ -59,6 +59,46 @@ The initial implementation scaffold uses:
 
 The `web` service is currently a lightweight placeholder so the deployment shape stays aligned with the architecture while the backend and integration work are built first.
 
+## Access & Login
+
+BurnRate is single-user and gated by a password. Every API endpoint except the
+health probe, the login endpoints, and the bank OAuth callback requires a valid
+session, and the backend **fails closed**: until you configure a password it
+refuses all protected requests with `503`.
+
+Set it up once:
+
+1. Generate the credentials (a hashed password and a cookie-signing key):
+
+   ```
+   docker compose run --rm backend python -m burnrate.generate_auth_secrets
+   ```
+
+   It prompts for a password and prints `AUTH_PASSWORD_HASH=…` and
+   `AUTH_SECRET_KEY=…`.
+
+2. Paste both lines into your `.env`, then restart: `docker compose up -d`.
+
+   > ⚠️ Docker Compose interpolates `$` in `.env` values, and the Argon2 hash is
+   > full of `$`. In the `.env` loaded by Compose, **double every `$`** in
+   > `AUTH_PASSWORD_HASH` (e.g. `$$argon2id$$v=19$$m=65536,...`). The generator
+   > prints a ready-to-paste compose-escaped line. If login always says the
+   > password is wrong, this is almost certainly why — check
+   > `docker compose exec backend printenv AUTH_PASSWORD_HASH` against your `.env`.
+
+3. Open the Web UI and sign in with the password you chose.
+
+Notes:
+
+* The password is never stored — only its Argon2 hash lives in `.env`.
+* Sessions are HttpOnly, `SameSite=Strict` cookies that expire after
+  `AUTH_SESSION_MAX_AGE` (default 7 days) and slide forward while you use the app.
+* Keep `AUTH_COOKIE_SECURE=true` in production (HTTPS). Set it to `false` only for
+  local `http://localhost` development, otherwise the browser drops the cookie.
+* Repeated wrong passwords lock a client for `AUTH_LOGIN_LOCKOUT_SECONDS`.
+* The interactive API docs (`/docs`, `/openapi.json`) are only served when
+  `APP_ENV=development`.
+
 ## Telegram Bot
 
 BurnRate ships a read-only Telegram bot as a secondary interface. It runs as its

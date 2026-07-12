@@ -47,6 +47,15 @@ class Settings(BaseSettings):
         ge=0.0,
         alias="ENABLE_BANKING_RETRY_BACKOFF_SECONDS",
     )
+    auth_password_hash: str = Field(default="", alias="AUTH_PASSWORD_HASH")
+    auth_secret_key: str = Field(default="", alias="AUTH_SECRET_KEY")
+    auth_cookie_name: str = Field(default="burnrate_session", alias="AUTH_COOKIE_NAME")
+    auth_session_max_age_seconds: int = Field(default=7 * 24 * 3600, ge=60, alias="AUTH_SESSION_MAX_AGE")
+    auth_cookie_secure: bool = Field(default=True, alias="AUTH_COOKIE_SECURE")
+    auth_login_max_attempts: int = Field(default=5, ge=1, alias="AUTH_LOGIN_MAX_ATTEMPTS")
+    auth_login_lockout_seconds: int = Field(default=300, ge=0, alias="AUTH_LOGIN_LOCKOUT_SECONDS")
+    bank_rate_limit_max_requests: int = Field(default=20, ge=1, alias="BANK_RATE_LIMIT_MAX_REQUESTS")
+    bank_rate_limit_window_seconds: int = Field(default=60, ge=1, alias="BANK_RATE_LIMIT_WINDOW_SECONDS")
     sync_cron: str = Field(default="*/30 * * * *", alias="SYNC_CRON")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
@@ -61,6 +70,14 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @property
+    def auth_configured(self) -> bool:
+        return bool(self.auth_password_hash) and bool(self.auth_secret_key)
+
+    @property
+    def is_development(self) -> bool:
+        return self.app_env.strip().lower() == "development"
 
     @property
     def cors_origins(self) -> list[str]:
