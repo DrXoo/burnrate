@@ -188,9 +188,10 @@ class EnableBankingService:
         self.db.flush()
 
         try:
+            # Log the local connection id, never the bank session token.
             logger.info(
-                "Starting Enable Banking import for session %s (%s/%s)",
-                session_id,
+                "Starting Enable Banking import for connection %s (%s/%s)",
+                connection.id,
                 auth_request.aspsp_name,
                 auth_request.aspsp_country,
             )
@@ -204,8 +205,8 @@ class EnableBankingService:
             sync_session.finished_at = datetime.now(UTC)
             connection.last_synced_at = datetime.now(UTC)
             logger.info(
-                "Completed Enable Banking import for session %s: accounts=%s transactions=%s",
-                session_id,
+                "Completed Enable Banking import for connection %s: accounts=%s transactions=%s",
+                connection.id,
                 summary.accounts_imported,
                 summary.transactions_imported,
             )
@@ -213,7 +214,7 @@ class EnableBankingService:
             sync_session.status = "failed"
             sync_session.error_summary = str(exc)
             sync_session.finished_at = datetime.now(UTC)
-            logger.exception("Enable Banking import failed for session %s", session_id)
+            logger.exception("Enable Banking import failed for connection %s", connection.id)
             raise
 
         accounts_returned = len(session_payload.get("accounts", []))
@@ -227,7 +228,6 @@ class EnableBankingService:
 
         return {
             "connection_id": str(connection.id),
-            "session_id": session_id,
             "session_status": connection.session_status or "AUTHORIZED",
             "accounts_returned": accounts_returned,
             "accounts_imported": summary.accounts_imported,
@@ -284,7 +284,6 @@ class EnableBankingService:
         return {
             "connection_id": str(connection.id),
             "sync_session_id": str(sync_session.id),
-            "session_id": connection.session_id,
             "session_status": connection.session_status or "AUTHORIZED",
             "accounts_synced": summary.accounts_imported,
             "transactions_imported": summary.transactions_imported,
@@ -332,7 +331,6 @@ class EnableBankingService:
         return {
             "connection_id": str(connection.id),
             "sync_session_id": str(sync_session.id),
-            "session_id": connection.session_id,
             "session_status": session_status,
             "accounts_synced": 0,
             "transactions_imported": 0,
@@ -602,7 +600,6 @@ class EnableBankingService:
             "aspsp_name": connection.aspsp_name,
             "aspsp_country": connection.aspsp_country,
             "psu_type": connection.psu_type,
-            "session_id": connection.session_id,
             "session_status": connection.session_status,
             "active": connection.active,
             "authorized_at": connection.authorized_at.isoformat() if connection.authorized_at else None,

@@ -11,7 +11,6 @@ export interface Connection {
   aspsp_name: string;
   aspsp_country: string;
   psu_type: string;
-  session_id: string | null;
   session_status: string | null;
   active: boolean;
   authorized_at: string | null;
@@ -45,7 +44,6 @@ export interface StartAuthorizationResult {
 export interface ManualSyncResult {
   connection_id: string;
   sync_session_id: string;
-  session_id: string | null;
   session_status: string;
   accounts_synced: number;
   transactions_imported: number;

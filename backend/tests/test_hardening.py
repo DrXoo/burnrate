@@ -96,6 +96,44 @@ def test_rate_limited_endpoint_still_requires_auth_first() -> None:
         assert client.get(ASPSPS_URL).status_code == 401
 
 
+class ConnectionListingService:
+    """Returns the service payload verbatim, bank token included."""
+
+    def list_connections(self) -> list[dict[str, object]]:
+        return [
+            {
+                "connection_id": "conn-1",
+                "aspsp_name": "ING",
+                "aspsp_country": "ES",
+                "psu_type": "personal",
+                "session_id": "super-secret-bank-token",
+                "session_status": "AUTHORIZED",
+                "active": True,
+                "linked_account_count": 1,
+            }
+        ]
+
+
+def test_bank_token_is_never_sent_to_the_client() -> None:
+    # The session_id is a live credential for the bank API and the UI has no use
+    # for it. Shipping it to the browser would undo encrypting it at rest, so the
+    # response schema must drop it even when the service still supplies it.
+    settings = make_settings()
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_enable_banking_service] = lambda: ConnectionListingService()
+    client = TestClient(app)
+    _login(client)
+
+    response = client.get("/api/v1/integrations/enable-banking/connections")
+
+    assert response.status_code == 200
+    assert "super-secret-bank-token" not in response.text
+    assert "session_id" not in response.json()["connections"][0]
+    # The non-secret status is still exposed, so the UI keeps working.
+    assert response.json()["connections"][0]["session_status"] == "AUTHORIZED"
+
+
 class ExplodingEnableBankingService:
     def list_aspsps(self, *, country: str) -> list[dict[str, object]]:
         raise EnableBankingAPIError(status_code=401, detail={"upstream": "consent-revoked-detail"})
