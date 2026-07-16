@@ -48,11 +48,27 @@ class EnableBankingService:
         self.client = client
 
     def list_connections(self) -> list[dict[str, Any]]:
+        """List the current connection for each bank link, newest first.
+
+        A re-authorization creates a new connection row and retires the previous one
+        (see ``_supersede_previous_connections``), but the retired rows stay for their
+        sync history. Surfacing them would show one row per past reconnect, which
+        reads as a duplicated bank/account even though the accounts themselves are
+        deduplicated. Keep only the newest row per link, which is the one that is
+        live — or, if it lapsed and was never replaced, the one to reconnect.
+        """
         connections = self.db.scalars(
             select(EnableBankingConnection).order_by(EnableBankingConnection.created_at.desc())
         ).all()
 
-        return [self._serialize_connection_summary(connection) for connection in connections]
+        current: dict[tuple[str, str, str], EnableBankingConnection] = {}
+        for connection in connections:
+            # Same key as _supersede_previous_connections, so what is hidden here is
+            # exactly what a reconnect retired.
+            key = (connection.aspsp_name, connection.aspsp_country, connection.psu_type)
+            current.setdefault(key, connection)
+
+        return [self._serialize_connection_summary(connection) for connection in current.values()]
 
     def list_aspsps(self, *, country: str) -> list[dict[str, Any]]:
         return self.client.list_aspsps(country=country)

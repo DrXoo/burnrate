@@ -412,6 +412,92 @@ def test_reconnect_supersedes_previous_connection_for_same_bank() -> None:
     assert sum(1 for c in connections if c.active) == 1
 
 
+def test_list_connections_hides_superseded_reconnects() -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=FakeEnableBankingClient())
+
+    def connect() -> None:
+        start = service.start_authorization(
+            StartAuthorizationRequest(
+                aspsp_name="Nordea",
+                aspsp_country="FI",
+                psu_type="personal",
+                access_valid_for_days=10,
+            )
+        )
+        db.commit()
+        service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+        db.commit()
+
+    connect()
+    connect()
+    connect()  # two reconnects of the same bank link
+
+    # The retired rows are kept for their sync history...
+    assert len(db.scalars(select(EnableBankingConnection)).all()) == 3
+
+    # ...but only the live one is surfaced, so reconnecting never looks like a
+    # duplicated bank.
+    connections = service.list_connections()
+    assert len(connections) == 1
+    live = db.scalar(select(EnableBankingConnection).where(EnableBankingConnection.active.is_(True)))
+    assert live is not None
+    assert connections[0]["connection_id"] == str(live.id)
+
+
+def test_list_connections_keeps_distinct_bank_links() -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=FakeEnableBankingClient())
+
+    def connect(*, aspsp_name: str, psu_type: str) -> None:
+        start = service.start_authorization(
+            StartAuthorizationRequest(
+                aspsp_name=aspsp_name,
+                aspsp_country="FI",
+                psu_type=psu_type,
+                access_valid_for_days=10,
+            )
+        )
+        db.commit()
+        service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+        db.commit()
+
+    connect(aspsp_name="Nordea", psu_type="personal")
+    connect(aspsp_name="Nordea", psu_type="business")  # same bank, separate link
+    connect(aspsp_name="OP", psu_type="personal")  # different bank
+
+    # None of these supersede each other, so all three stay visible.
+    assert len(service.list_connections()) == 3
+
+
+def test_list_connections_shows_lapsed_connection_with_no_replacement() -> None:
+    db = make_session()
+    client = ExpiringSessionClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+    callback = service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+    db.commit()
+
+    # The bank session has since lapsed, which deactivates the connection.
+    client.session_status = "EXPIRED"
+    service.sync_connection(connection_id=callback["connection_id"])
+    db.commit()
+
+    # A lapsed connection that was never replaced is still the current row for its
+    # link, so it must stay visible for the owner to reconnect it.
+    connections = service.list_connections()
+    assert len(connections) == 1
+    assert connections[0]["active"] is False
+
+
 def test_reconnect_reuses_account_when_uid_changes_but_hash_matches() -> None:
     db = make_session()
     service = EnableBankingService(db=db, settings=make_settings(), client=RotatingUidClient())
