@@ -248,3 +248,19 @@ A good BurnRate implementation change should feel:
 * Well-tested
 * Aligned with the documented architecture
 * Easy for the next person or agent to extend
+
+---
+
+## Agent skills
+
+### Development pipeline
+
+Features move from a roadmap phase through `/grill-with-docs` → `/to-spec` → `/to-tickets`, then `tdd` + `/code-review` per ticket, then a Definition-of-Done check, then `/distill-decisions`. See `docs/agents/pipeline.md`.
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature-slug>/`, versioned with the repo. They are scaffolding: once a feature ships, its durable decisions are promoted to `docs/adr/` and the directory is deleted. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` at the root plus `docs/adr/`, both created lazily by `/domain-modeling`. See `docs/agents/domain.md`.

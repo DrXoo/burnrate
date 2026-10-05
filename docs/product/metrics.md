@@ -39,14 +39,59 @@ This should usually be expressed as:
 
 ---
 
+## Safe to Spend Today
+
+"Safe to spend today" means the amount the user can spend today without putting
+the month's variable budgets out of reach.
+
+It is the remaining variable budget divided by the days remaining in the month.
+Fixed budgets (rent, utilities) are excluded, because they are scheduled
+commitments rather than discretionary daily spend.
+
+This is BurnRate's headline metric: it is the one figure that changes a decision
+in the moment.
+
+It is never negative. A month that is already overspent shows zero, not a
+negative allowance.
+
+---
+
 ## Runway
 
-"Runway" means how long the user can continue sustaining their current deficit before their designated savings are exhausted.
+Runway has two forms, because a single definition does not serve both a saver and
+someone drawing down savings.
 
-This metric should only use savings accounts or balances the user explicitly marks as available for runway calculations.
+Both forms use only savings accounts or balances the user has explicitly marked
+as available for runway calculations.
+
+### Cushion (primary)
+
+"Cushion" means how many months of the user's normal expenses their designated
+savings would cover.
+
+It is savings divided by trailing average monthly expenses.
+
+This form is always defined, whether or not the user is in deficit.
+
+Example:
+
+* Savings available for runway: 10,000EUR
+* Trailing average monthly expenses: 2,000EUR
+* Cushion: 5 months
+
+### Deficit Runway (conditional)
+
+"Deficit runway" means how long the user can sustain their current deficit before
+their designated savings are exhausted.
+
+It is savings divided by average monthly deficit.
+
+This form is only shown when trailing net cash flow is actually negative. For a
+user who saves, there is no deficit and the figure is meaningless, so the UI must
+omit it rather than display an infinite or placeholder value.
 
 Example:
 
 * Savings available for runway: 10,000EUR
 * Average monthly deficit: 500EUR
-* Estimated runway: 20 months
+* Deficit runway: 20 months

@@ -108,13 +108,9 @@ Calculate:
 * Savings consumption rate
 * Estimated financial runway
 
-Example:
-
-Savings: 10,000EUR
-
-Average monthly deficit: 500EUR
-
-Runway: 20 months
+For the authoritative definitions, including the two forms of runway and why the
+deficit-based form does not apply to every user, see
+`docs/product/metrics.md`.
 
 ---
 
@@ -173,10 +169,19 @@ This flow should be faster than maintaining a spreadsheet and simpler than confi
 
 A user should be able to answer the following questions in under 10 seconds:
 
+* How much can I spend today without putting the month at risk?
 * How much money do I have left this month?
 * What category is consuming the most budget?
 * How many uncategorized transactions exist?
-* How much runway do my savings provide?
+* How many months of expenses do my savings cover?
 * Am I spending above or below my target?
 
 If BurnRate can answer these reliably, the project is successful.
+
+---
+
+## Status
+
+MVP v1 as scoped above is delivered, with one exception: financial runway was
+never implemented. See `docs/technical/roadmap.md` for the current plan, the
+record of that gap, and the redefinition of the metric.

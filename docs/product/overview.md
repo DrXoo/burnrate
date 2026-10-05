@@ -90,12 +90,36 @@ The Web UI, Telegram Bot, and future clients should consume the same backend API
 
 ## Target Users
 
+### Primary
+
+**A salaried person who does not want to overspend.**
+
+Income is regular and roughly predictable. The problem is not knowing whether
+they can afford their life; it is drifting past what they intended to spend
+without noticing until the month is over.
+
+For this user the valuable information is the daily allowance and the deviation
+from their own normal — not the absolute levels, which are stable and therefore
+carry little information.
+
+This narrowing is deliberate. It decides which metric leads the product and in
+what order features are built; see `docs/technical/roadmap.md`.
+
+### Also served
+
+These users are served by the same feature set without changing its priorities:
+
 * Individuals tracking monthly spending
 * Families managing household budgets
-* Users receiving salary in a single bank account
 * People trying to reduce expenses
-* People living from savings while unemployed
 * Users who want financial awareness without financial complexity
+
+### Not currently optimized for
+
+* People living from savings while unemployed — the deficit runway metric exists
+  for this case, but the product does not lead with it
+* Freelancers with irregular income — the monthly budgeting model assumes
+  predictable income and would need rework to serve them well
 
 ---
 
