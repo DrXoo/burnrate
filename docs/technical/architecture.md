@@ -225,3 +225,4 @@ The architecture should preserve the following constraints:
 * Domain concepts must be defined independently of provider payloads
 * Self-hosted operation should remain easy on modest hardware
 * Monetary values must not use floating-point storage
+* Timestamps must be stored in UTC, while civil dates ("today", "the current month") must be derived in the owner's own timezone, named by `APP_TIMEZONE` (an IANA name, default `UTC`) and resolved through the single `burnrate.clock.civil_date` helper

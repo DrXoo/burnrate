@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -8,12 +8,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
 from burnrate.db.models import Budget, Category
 
 
 class BudgetService:
-    def __init__(self, *, db: Session) -> None:
+    def __init__(self, *, db: Session, timezone_name: str = "UTC") -> None:
         self.db = db
+        self._timezone_name = timezone_name
 
     def list_budgets(self) -> list[dict[str, Any]]:
         rows = self.db.execute(
@@ -105,7 +107,7 @@ class BudgetService:
         category = self.db.get(Category, budget.category_id)
         assert category is not None
 
-        today = datetime.now(UTC).date()
+        today = civil_date(timezone_name=self._timezone_name)
         if budget.active_from >= today:
             # A budget that has not actually started yet (starts today or later)
             # becomes inactive immediately rather than staying active for today.
@@ -176,7 +178,7 @@ class BudgetService:
                 raise ValueError("Budget periods must not overlap for the same category")
 
     def _budget_status(self, budget: Budget) -> str:
-        today = datetime.now(UTC).date()
+        today = civil_date(timezone_name=self._timezone_name)
         if budget.active_to is not None and budget.active_to < budget.active_from:
             return "inactive"
         if today < budget.active_from:

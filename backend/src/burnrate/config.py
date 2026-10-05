@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
     app_cors_origins: str = Field(default="http://localhost:3000", alias="APP_CORS_ORIGINS")
+    app_timezone: str = Field(default="UTC", alias="APP_TIMEZONE")
     app_web_base_url: str = Field(default="http://localhost:3000", alias="WEB_BASE_URL")
     database_url: str = Field(
         default="postgresql+psycopg://burnrate:burnrate@postgres:5432/burnrate",
@@ -71,6 +73,21 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @field_validator("app_timezone")
+    @classmethod
+    def _validate_app_timezone(cls, value: str) -> str:
+        """Reject an unknown zone at startup rather than reporting the wrong day.
+
+        A typo here would silently move every civil date the product derives, so
+        it fails the boot instead of the dashboard.
+        """
+        name = value.strip()
+        try:
+            ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"APP_TIMEZONE must be an IANA timezone name, got {value!r}") from exc
+        return name
 
     @property
     def auth_configured(self) -> bool:

@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
 from burnrate.config import Settings
 from burnrate.db.models import EnableBankingConnection
 from burnrate.integrations.telegram.client import TelegramClient
@@ -56,7 +57,7 @@ def send_sync_notification(
     if new_count <= 0:
         return 0
 
-    month = (now or datetime.now(UTC)).strftime("%Y-%m")
+    month = civil_date(timezone_name=settings.app_timezone, instant=now).strftime("%Y-%m")
     uncategorized_count = LedgerService(db=session).get_uncategorized_transaction_count(month=month)
     text = format_sync_notification(new_count=new_count, uncategorized_count=uncategorized_count)
 

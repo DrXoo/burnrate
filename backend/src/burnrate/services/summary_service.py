@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -9,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
 from burnrate.db.models import Account, Budget, Category, Transaction
 
 
@@ -22,8 +24,16 @@ class ActiveBudgetWindow:
 
 
 class SummaryService:
-    def __init__(self, *, db: Session) -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        timezone_name: str = "UTC",
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.db = db
+        self._timezone_name = timezone_name
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def get_summary(
         self,
@@ -31,7 +41,10 @@ class SummaryService:
         month: str | None = None,
         today: date | None = None,
     ) -> dict[str, Any]:
-        reference_day = today or datetime.now(UTC).date()
+        reference_day = today or civil_date(
+            timezone_name=self._timezone_name,
+            instant=self._clock(),
+        )
         month_start, month_end, month_value = self._resolve_month(month=month, reference_day=reference_day)
         days_in_month = (month_end - month_start).days
         days_elapsed = self._days_elapsed_in_month(

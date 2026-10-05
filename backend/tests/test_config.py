@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from burnrate.config import Settings
 
 
@@ -14,3 +17,8 @@ def test_enable_banking_private_key_path_takes_precedence(tmp_path: Path) -> Non
     )
 
     assert settings.enable_banking_private_key_value == "file-based-key"
+
+
+def test_rejects_an_unknown_app_timezone() -> None:
+    with pytest.raises(ValidationError):
+        Settings(APP_TIMEZONE="Europe/Madridd", DATABASE_URL="sqlite:///ignored.db")

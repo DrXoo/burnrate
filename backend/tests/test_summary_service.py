@@ -358,3 +358,17 @@ def test_summary_service_fixed_budget_uses_estimate_until_paid() -> None:
     usage = {item["category_name"]: item for item in summary["budget_usage"]}
     assert usage["Rent"]["is_fixed"] is True
     assert usage["Rent"]["spent_amount"] == "0.00"
+
+
+def test_summary_service_resolves_today_in_the_configured_timezone() -> None:
+    # 00:30 on 1 July in Auckland (UTC+12), while UTC still reads 30 June.
+    service = SummaryService(
+        db=make_session(),
+        timezone_name="Pacific/Auckland",
+        clock=lambda: datetime(2026, 6, 30, 12, 30, tzinfo=timezone.utc),
+    )
+
+    summary = service.get_summary()
+
+    assert summary["month"] == "2026-07"
+    assert summary["days_elapsed"] == 1
