@@ -17,17 +17,22 @@ class BudgetService:
         self.db = db
         self._timezone_name = timezone_name
 
+    def _civil_today(self) -> date:
+        return civil_date(timezone_name=self._timezone_name)
+
     def list_budgets(self) -> list[dict[str, Any]]:
         rows = self.db.execute(
             select(Budget, Category.name, Category.type)
             .join(Category, Category.id == Budget.category_id)
             .order_by(Category.name.asc(), Budget.active_from.desc(), Budget.created_at.desc())
         ).all()
+        today = self._civil_today()
         return [
             self._serialize_budget(
                 budget=budget,
                 category_name=category_name,
                 category_type=category_type,
+                today=today,
             )
             for budget, category_name, category_type in rows
         ]
@@ -71,6 +76,7 @@ class BudgetService:
             budget=budget,
             category_name=category.name,
             category_type=category.type,
+            today=self._civil_today(),
         )
 
     def update_budget(
@@ -97,6 +103,7 @@ class BudgetService:
             budget=budget,
             category_name=category.name,
             category_type=category.type,
+            today=self._civil_today(),
         )
 
     def deactivate_budget(self, *, budget_id: str) -> dict[str, Any]:
@@ -107,7 +114,7 @@ class BudgetService:
         category = self.db.get(Category, budget.category_id)
         assert category is not None
 
-        today = civil_date(timezone_name=self._timezone_name)
+        today = self._civil_today()
         if budget.active_from >= today:
             # A budget that has not actually started yet (starts today or later)
             # becomes inactive immediately rather than staying active for today.
@@ -119,6 +126,7 @@ class BudgetService:
             budget=budget,
             category_name=category.name,
             category_type=category.type,
+            today=today,
         )
 
     def _serialize_budget(
@@ -127,8 +135,9 @@ class BudgetService:
         budget: Budget,
         category_name: str,
         category_type: str,
+        today: date,
     ) -> dict[str, Any]:
-        status = self._budget_status(budget)
+        status = self._budget_status(budget, today=today)
         return {
             "budget_id": str(budget.id),
             "category_id": str(budget.category_id),
@@ -177,8 +186,7 @@ class BudgetService:
             if budget.active_from <= new_end and active_from <= budget_end:
                 raise ValueError("Budget periods must not overlap for the same category")
 
-    def _budget_status(self, budget: Budget) -> str:
-        today = civil_date(timezone_name=self._timezone_name)
+    def _budget_status(self, budget: Budget, *, today: date) -> str:
         if budget.active_to is not None and budget.active_to < budget.active_from:
             return "inactive"
         if today < budget.active_from:

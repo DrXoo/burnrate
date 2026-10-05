@@ -13,4 +13,9 @@ def civil_date(*, timezone_name: str, instant: datetime | None = None) -> date:
     answer is the same wherever it is asked.
     """
     moment = instant or datetime.now(UTC)
+    if moment.tzinfo is None:
+        # astimezone() would read a naive value as the host's local time, so the
+        # same reading would resolve to a different day on a differently
+        # configured container. Fail instead of guessing.
+        raise ValueError("civil_date needs an aware instant, got a naive datetime")
     return moment.astimezone(ZoneInfo(timezone_name)).date()

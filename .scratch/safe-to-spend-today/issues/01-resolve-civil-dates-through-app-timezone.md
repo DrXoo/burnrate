@@ -37,12 +37,17 @@ derives `%Y-%m` from a UTC instant for the same reason and had the same bug.
 Fixed in the same pass, since the router had to be touched anyway to hand the
 timezone to `SummaryService`.
 
-**Two sites deliberately left alone.**
+**Two more sites, deferred and then not.** The first pass left
 `EnableBankingService._current_month_transaction_window` and
-`_pending_transaction_window` also derive dates from UTC, but they are provider
-*fetch* windows rather than figures shown to the owner, and the pending window
-is a self-healing 30-day trailing one. Issue 04 owns that window; flagged there
-rather than widened into here.
+`_pending_transaction_window` on UTC, on the grounds that they are provider
+*fetch* windows rather than figures shown to the owner. `/code-review` rejected
+that and was right: the window decides which rows exist in the database, so it
+does move the shown figures. In `Pacific/Auckland` at local 1 July 00:30 the
+dashboard resolves July while the fetch asks the bank for 1-30 June, so July
+reads 0.00 until UTC catches up some hours later. Both windows now resolve
+through the helper, which also makes the architecture doc's "single helper"
+claim true rather than aspirational. Issue 04 still owns the pending window's
+sweep semantics.
 
 **Defaults chosen so no existing figure moves.** `timezone_name` defaults to
 `"UTC"` on `SummaryService`, `BudgetService` and the router, matching the
@@ -55,3 +60,23 @@ IANA name rather than `Settings`, so it stays pure and depends on one string
 instead of the whole config object. It sits at the package root beside
 `crypto.py` and `security.py` rather than in `domain/`, which ADR-0001 reserves
 for metric policy.
+
+**Review fixes (`/code-review`, after the first commit).**
+
+* `civil_date` raises on a naive instant instead of letting `astimezone` read it
+  as the host's local time. Verified it mattered: the same naive reading
+  resolved to 1 July on a UTC host and 30 June under `TZ=Europe/Madrid`. Pinned
+  by a test at seam 2 rather than against the helper, which is not an agreed
+  seam.
+* `BudgetService` resolves the day once per call. `deactivate_budget` was
+  reading the clock twice -- writing `active_to` from one day and reporting a
+  status judged against another if the call straddled local midnight -- and
+  `list_budgets` re-read it per row. Pre-existing, cheap to fix while here.
+* The config validator's accept-and-normalize path is now pinned. It was
+  already correct, so this closes a coverage gap rather than a defect.
+
+Three review findings were downgraded after checking them: `ZoneInfo` is
+name-cached, so the per-row lookups cost nothing; a required `timezone_name`
+would *not* have caught the Enable Banking windows, which construct neither
+service; and the `%Y-%m` duplication is two sites, not three, since
+`summary_service` formats an already-resolved date.

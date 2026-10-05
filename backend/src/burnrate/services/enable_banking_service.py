@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from burnrate.api.schemas.enable_banking import StartAuthorizationRequest
+from burnrate.clock import civil_date
 from burnrate.config import Settings
 from burnrate.services.connection_expiry import as_utc, expiry_status
 from burnrate.db.models import (
@@ -559,11 +560,11 @@ class EnableBankingService:
         return imported
 
     def _current_month_transaction_window(self) -> tuple[date, date]:
-        today = datetime.now(UTC).date()
+        today = civil_date(timezone_name=self.settings.app_timezone)
         return date(today.year, today.month, 1), today
 
     def _pending_transaction_window(self) -> tuple[date, date]:
-        today = datetime.now(UTC).date()
+        today = civil_date(timezone_name=self.settings.app_timezone)
         return today - timedelta(days=30), today
 
     def _supersede_previous_connections(self, connection: EnableBankingConnection) -> None:

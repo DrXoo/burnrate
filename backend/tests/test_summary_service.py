@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -372,3 +373,16 @@ def test_summary_service_resolves_today_in_the_configured_timezone() -> None:
 
     assert summary["month"] == "2026-07"
     assert summary["days_elapsed"] == 1
+
+
+def test_summary_service_rejects_a_clock_without_a_timezone() -> None:
+    # A naive instant would be read as the host's local time, so the same reading
+    # would resolve to a different day on a differently configured container.
+    service = SummaryService(
+        db=make_session(),
+        timezone_name="Pacific/Auckland",
+        clock=lambda: datetime(2026, 6, 30, 12, 30),
+    )
+
+    with pytest.raises(ValueError):
+        service.get_summary()

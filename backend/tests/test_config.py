@@ -22,3 +22,9 @@ def test_enable_banking_private_key_path_takes_precedence(tmp_path: Path) -> Non
 def test_rejects_an_unknown_app_timezone() -> None:
     with pytest.raises(ValidationError):
         Settings(APP_TIMEZONE="Europe/Madridd", DATABASE_URL="sqlite:///ignored.db")
+
+
+def test_accepts_and_normalizes_a_valid_app_timezone() -> None:
+    settings = Settings(APP_TIMEZONE="  Europe/Madrid  ", DATABASE_URL="sqlite:///ignored.db")
+
+    assert settings.app_timezone == "Europe/Madrid"
