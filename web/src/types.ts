@@ -139,6 +139,8 @@ export interface SummaryDashboard {
   monthly_spending_amount: string;
   monthly_income_amount: string;
   net_cash_flow_amount: string;
+  savings_rate_percent: number;
+  savings_status: BudgetUsageStatus;
   monthly_budget_amount: string;
   budgeted_spending_amount: string;
   unbudgeted_spending_amount: string;

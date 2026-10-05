@@ -101,7 +101,10 @@ the same figure as money saved in the month; the product names it once.
 _Avoid_: Saved, savings, surplus, net income, net
 
 **Savings Rate**:
-Net cash flow as a share of the month's income.
+Net cash flow as a share of the month's income, carrying the same on-track /
+watch / over verdict the budgets use. Decided in the backend, so any interface
+that shows it shows the same verdict. A month with no income yet reads on-track,
+not watch.
 _Avoid_: Savings percentage, keep rate
 
 **Cushion**:

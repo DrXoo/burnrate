@@ -386,3 +386,62 @@ def test_summary_service_rejects_a_clock_without_a_timezone() -> None:
 
     with pytest.raises(ValueError):
         service.get_summary()
+
+
+def test_summary_service_reports_the_savings_rate_and_its_verdict() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    service = SummaryService(db=db)
+
+    summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # The seeded month books 2000.00 of salary against 260.00 of spending, so the
+    # owner kept 1740.00 -- 87% of what came in, comfortably clear of the band.
+    assert summary["savings_rate_percent"] == 87.0
+    assert summary["savings_status"] == "on_track"
+
+
+def test_summary_service_leads_the_budget_rows_with_the_worst_off() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    # The seeded month leaves Utilities over (120.00 of 100.00) and Food on track
+    # (140.00 of 300.00). Transport lands between them: 90.00 of 100.00 is a watch.
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    transport = Category(name="Transport", type="expense", active=True)
+    db.add(transport)
+    db.flush()
+    db.add(
+        Budget(
+            category_id=transport.id,
+            amount=Decimal("100.00"),
+            currency="EUR",
+            period_type="monthly",
+            active_from=date(2026, 6, 1),
+            active_to=None,
+        )
+    )
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-transport",
+            booking_date=date(2026, 6, 7),
+            value_date=date(2026, 6, 7),
+            amount=Decimal("-90.00"),
+            currency="EUR",
+            description="Season ticket",
+            merchant_name="Rail",
+            counterparty_name=None,
+            direction="debit",
+            status="booked",
+            category_id=transport.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 7, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    rows = [(row["category_name"], row["status"]) for row in summary["budget_usage"]]
+    assert rows == [("Utilities", "over"), ("Transport", "watch"), ("Food", "on_track")]

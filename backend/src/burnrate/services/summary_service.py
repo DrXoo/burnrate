@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
 from burnrate.db.models import Account, Budget, Category, Transaction
+from burnrate.domain.metrics import MetricStatus, budget_usage_status, savings_verdict
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class SummaryService:
         # in expense categories. Transfers are excluded on both sides. Pure reporting
         # of booked transactions -- it does not feed the projections.
         net_cash_flow = (monthly_income - monthly_spending).quantize(Decimal("0.01"))
+        savings = savings_verdict(net_cash_flow=net_cash_flow, income=monthly_income)
         spent_by_budget_category = self._get_budget_category_spend(
             month_start=month_start,
             month_end=month_end,
@@ -150,22 +152,19 @@ class SummaryService:
 
         projected_overspend = max(projected_budgeted_spend - monthly_budget, Decimal("0.00"))
 
-        budget_usage = [
-            self._serialize_budget_usage(
-                budget=budget,
-                spent_amount=spent_by_budget_category.get(budget.category_id, Decimal("0.00")),
-            )
-            for budget in sorted(
-                active_budgets,
-                key=lambda item: (
-                    self._budget_usage_sort_key(
-                        budget_amount=item.amount,
-                        spent_amount=spent_by_budget_category.get(item.category_id, Decimal("0.00")),
-                    ),
-                    item.category_name.lower(),
-                ),
-            )
-        ]
+        # Worst first, so the rows the owner must act on lead the list. Sorting the
+        # serialized rows rather than the budgets means the order is read off the
+        # same status and utilization the badges show, instead of deriving them twice.
+        budget_usage = sorted(
+            (
+                self._serialize_budget_usage(
+                    budget=budget,
+                    spent_amount=spent_by_budget_category.get(budget.category_id, Decimal("0.00")),
+                )
+                for budget in active_budgets
+            ),
+            key=self._budget_usage_sort_key,
+        )
 
         return {
             "month": month_value,
@@ -174,6 +173,8 @@ class SummaryService:
             "monthly_spending_amount": self._format_decimal(monthly_spending),
             "monthly_income_amount": self._format_decimal(monthly_income),
             "net_cash_flow_amount": self._format_decimal(net_cash_flow),
+            "savings_rate_percent": float(savings.rate_percent),
+            "savings_status": savings.status,
             "monthly_budget_amount": self._format_decimal(monthly_budget),
             "budgeted_spending_amount": self._format_decimal(budgeted_spending),
             "unbudgeted_spending_amount": self._format_decimal(unbudgeted_spending),
@@ -348,7 +349,7 @@ class SummaryService:
     ) -> dict[str, Any]:
         remaining_amount = (budget.amount - spent_amount).quantize(Decimal("0.01"))
         utilization = (spent_amount / budget.amount * Decimal("100.0")).quantize(Decimal("0.1"))
-        status = self._budget_usage_status(remaining_amount=remaining_amount, utilization=utilization)
+        status = budget_usage_status(remaining_amount=remaining_amount, utilization_percent=utilization)
 
         return {
             "category_id": str(budget.category_id),
@@ -362,19 +363,9 @@ class SummaryService:
             "is_fixed": budget.is_fixed,
         }
 
-    def _budget_usage_sort_key(self, *, budget_amount: Decimal, spent_amount: Decimal) -> tuple[int, Decimal]:
-        remaining_amount = budget_amount - spent_amount
-        utilization = (spent_amount / budget_amount * Decimal("100.0")).quantize(Decimal("0.1"))
-        status = self._budget_usage_status(remaining_amount=remaining_amount, utilization=utilization)
-        priority = {"over": 0, "watch": 1, "on_track": 2}[status]
-        return priority, -utilization
-
-    def _budget_usage_status(self, *, remaining_amount: Decimal, utilization: Decimal) -> str:
-        if remaining_amount < 0:
-            return "over"
-        if utilization >= Decimal("85.0"):
-            return "watch"
-        return "on_track"
+    def _budget_usage_sort_key(self, row: dict[str, Any]) -> tuple[int, float, str]:
+        priority: dict[MetricStatus, int] = {"over": 0, "watch": 1, "on_track": 2}
+        return priority[row["status"]], -row["utilization_percent"], row["category_name"].lower()
 
     def _project_fixed(self, *, budget: ActiveBudgetWindow, spent: Decimal) -> Decimal:
         """Step projection for a fixed/lump budget (rent, utilities).

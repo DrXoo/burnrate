@@ -103,6 +103,13 @@ Responsibilities:
 
 This layer should remain independent from UI, HTTP, Telegram, and bank-provider payloads.
 
+Metric *policy* -- the thresholds and bands a metric is judged by -- lives in
+`burnrate/domain/metrics.py`: pure functions over primitives with no database
+session and no ORM import. Services query and delegate to it, so a financial rule
+is never read out of a React component or a SQL method. The queries, the
+confidence-weighted projection blend and the fixed step projection stay in
+`SummaryService`. See `docs/adr/0001-domain-module-for-metric-policy.md`.
+
 ---
 
 ### Infrastructure Layer

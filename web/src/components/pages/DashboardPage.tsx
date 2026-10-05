@@ -93,26 +93,26 @@ function useHeroModel(summary: SummaryDashboard) {
   }, [summary]);
 }
 
-/** Savings model: what share of this month's income is still unspent. */
+/** Savings model: the backend's share-of-income verdict, dressed for the gauge. */
 function useSavingsModel(summary: SummaryDashboard) {
   return useMemo(() => {
-    const income = num(summary.monthly_income_amount);
-    const spending = num(summary.monthly_spending_amount);
-    const saved = income - spending;
-    const rate = income > 0 ? saved / income : 0;
-    const savedFrac = income > 0 ? clampFraction(saved / income) : 0;
-    // Spending outran income → nothing banked; between 0–10% saved is a thin margin.
-    const tone: Tone = saved < 0 ? "over" : rate < 0.1 ? "watch" : "good";
+    // Net cash flow is what the owner kept, and the rate and its band are the
+    // backend's call -- the page neither recomputes them nor sets a threshold of
+    // its own, so the dashboard and the bot cannot disagree.
+    const saved = num(summary.net_cash_flow_amount);
+    const tone = usageTone(summary.savings_status);
 
     return {
-      income,
-      spending,
+      income: num(summary.monthly_income_amount),
+      spending: num(summary.monthly_spending_amount),
       saved,
-      rate,
-      savedFrac,
+      // Percent to arc length: presentation, not policy.
+      savedFrac: clampFraction(summary.savings_rate_percent / 100),
       tone,
       statusColor: TONE_COLOR[tone],
-      ratePct: `${Math.round(rate * 100)}%`,
+      // One decimal, because the backend bands on exactly this rounded figure: print
+      // fewer and a 9.8% month would read "10%" while still coloured as a warning.
+      ratePct: `${summary.savings_rate_percent.toFixed(1)}%`,
     };
   }, [summary]);
 }
@@ -300,11 +300,11 @@ function MeterBar({ label, value, subtitle, fillPct, color, markers = [], footLe
   );
 }
 
-function MetricCard({ label, value, valueColor, sub }: { label: string; value: string; valueColor?: string; sub: ReactNode }) {
+function MetricCard({ label, value, sub }: { label: string; value: string; sub: ReactNode }) {
   return (
     <div style={cardBase}>
       <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 600, marginBottom: 7 }}>{label}</div>
-      <div className="num" style={{ fontSize: 26, fontWeight: 600, color: valueColor }}>
+      <div className="num" style={{ fontSize: 26, fontWeight: 600 }}>
         {value}
       </div>
       <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3 }}>{sub}</div>
@@ -350,7 +350,6 @@ function DashboardContent({
 }) {
   const hero = useHeroModel(summary);
   const savings = useSavingsModel(summary);
-  const net = num(summary.net_cash_flow_amount);
 
   return (
     <div>
@@ -536,12 +535,6 @@ function DashboardContent({
           label="Monthly spending"
           value={eur(summary.monthly_spending_amount)}
           sub={`${eurPlain(summary.budgeted_spending_amount)} budgeted · ${eurPlain(summary.unbudgeted_spending_amount)} unbudgeted`}
-        />
-        <MetricCard
-          label="Net this month"
-          value={net >= 0 ? `+${eurPlain(net)}` : eur(net)}
-          valueColor={net >= 0 ? "var(--good)" : "var(--over)"}
-          sub="income minus spending"
         />
         <MetricCard
           label="Projected spend"

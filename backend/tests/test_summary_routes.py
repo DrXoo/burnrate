@@ -14,6 +14,8 @@ class FakeSummaryService:
             "monthly_spending_amount": "260.00",
             "monthly_income_amount": "2000.00",
             "net_cash_flow_amount": "1740.00",
+            "savings_rate_percent": 87.0,
+            "savings_status": "on_track",
             "monthly_budget_amount": "400.00",
             "budgeted_spending_amount": "260.00",
             "unbudgeted_spending_amount": "0.00",
@@ -45,6 +47,8 @@ def test_summary_route_uses_service_dependency() -> None:
 
     assert response.month == "2026-06"
     assert response.current_balance_amount == "2000.00"
+    assert response.savings_rate_percent == 87.0
+    assert response.savings_status == "on_track"
     assert response.budget_usage[0].status == "over"
 
 

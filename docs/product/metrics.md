@@ -39,6 +39,33 @@ This should usually be expressed as:
 
 ---
 
+## Net Cash Flow and the Savings Rate
+
+"Net cash flow" means the month's income minus its spending, with transfers
+excluded on both sides. It is the same figure as money saved in the month, and
+the product names it once: there is no second "saved" figure computed anywhere
+else.
+
+The "savings rate" is net cash flow as a percentage of the month's income. A
+month with no income reports zero rather than dividing by nothing.
+
+Its verdict reuses the budget-usage vocabulary, so the product has one status
+language:
+
+* `over` -- spending outran income, so nothing was banked
+* `watch` -- under a tenth of income kept, a thin margin
+* `on_track` -- a tenth of income or more kept, **or** no income yet
+
+The last clause matters for a salaried user: before the month's salary books
+there is no share of income to be thin, so the figure must not read as a warning.
+Overspending with no income booked is still `over`.
+
+The band is read off the rate rounded to one decimal, and interfaces display that
+same rounded figure, so the number and the colour it is shown in cannot
+disagree.
+
+---
+
 ## Safe to Spend Today
 
 "Safe to spend today" means the amount the user can spend today without putting
