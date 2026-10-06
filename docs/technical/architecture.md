@@ -202,7 +202,7 @@ The backend API service should host the API layer and most application logic.
 
 The sync worker should execute synchronization use cases and scheduled jobs, while reusing the same application and domain code as the API service.
 
-The Web UI should remain a presentation client over the backend APIs.
+The Web UI should remain a presentation client over the backend APIs, with no financial logic of its own. The line, so it stays checkable: if a result is compared against a constant, or displayed to the owner as a figure with a unit, it belongs in the domain; if it only ever becomes a pixel width or an arc length, it is presentation. So the gauges' 270° sweep and the amount-to-fraction conversions live in the UI, while every threshold, band and verdict is read from a backend status field. The dashboard's headline tone comes from `safe_to_spend_status`, its per-category verdicts from each budget row's `status`, and its savings verdict from `savings_status`, so the dashboard and the bot cannot disagree.
 
 The Telegram bot runs as its own long-polling worker (`burnrate.telegram_bot`). It is a read-only presentation client: it dispatches chat commands to the same application services the API uses and formats their output, without implementing any financial logic of its own. Access is restricted to an allow-list of chat ids (`TELEGRAM_ALLOWED_CHAT_IDS`), matching the single-owner model.
 
