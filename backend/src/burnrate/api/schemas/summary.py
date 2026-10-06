@@ -22,6 +22,7 @@ class SummaryResponse(BaseModel):
     current_balance_amount: str
     current_balance_currency: str | None
     monthly_spending_amount: str
+    pending_spend_amount: str
     monthly_income_amount: str
     net_cash_flow_amount: str
     savings_rate_percent: float

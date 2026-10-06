@@ -216,21 +216,21 @@ def test_summary_service_returns_phase_3_dashboard_metrics() -> None:
 
     assert summary["month"] == "2026-06"
     assert summary["current_balance_amount"] == "2000.00"
-    assert summary["monthly_spending_amount"] == "260.00"
+    assert summary["monthly_spending_amount"] == "285.00"
     assert summary["monthly_income_amount"] == "2000.00"
-    assert summary["net_cash_flow_amount"] == "1740.00"
+    assert summary["net_cash_flow_amount"] == "1715.00"
     assert summary["monthly_budget_amount"] == "400.00"
-    assert summary["budgeted_spending_amount"] == "260.00"
+    assert summary["budgeted_spending_amount"] == "285.00"
     assert summary["unbudgeted_spending_amount"] == "0.00"
-    assert summary["money_left_amount"] == "140.00"
+    assert summary["money_left_amount"] == "115.00"
     assert summary["uncategorized_count"] == 1
     assert summary["days_elapsed"] == 15
     assert summary["days_in_month"] == 30
-    assert summary["average_daily_spend_amount"] == "17.33"
-    # Budget-anchored projection: 260 spent + 15 remaining days x blended daily
-    # (0.5*17.333 actual + 0.5*13.333 budget) = 490.00, so overspend = 490 - 400.
-    assert summary["projected_month_end_spend_amount"] == "490.00"
-    assert summary["projected_overspend_amount"] == "90.00"
+    assert summary["average_daily_spend_amount"] == "19.00"
+    # Budget-anchored projection: 285 spent + 15 remaining days x blended daily
+    # (0.5*19.00 actual + 0.5*13.333 budget) = 527.50, so overspend = 527.50 - 400.
+    assert summary["projected_month_end_spend_amount"] == "527.50"
+    assert summary["projected_overspend_amount"] == "127.50"
     assert summary["budget_usage"][0]["category_name"] == "Utilities"
     assert summary["budget_usage"][0]["status"] == "over"
     assert summary["budget_usage"][0]["remaining_amount"] == "-20.00"
@@ -268,8 +268,8 @@ def test_summary_service_splits_budgeted_and_unbudgeted_spend() -> None:
     summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
 
     # monthly_spending reconciles as budgeted + unbudgeted.
-    assert summary["monthly_spending_amount"] == "290.00"
-    assert summary["budgeted_spending_amount"] == "260.00"
+    assert summary["monthly_spending_amount"] == "315.00"
+    assert summary["budgeted_spending_amount"] == "285.00"
     assert summary["unbudgeted_spending_amount"] == "30.00"
     assert (
         Decimal(summary["budgeted_spending_amount"]) + Decimal(summary["unbudgeted_spending_amount"])
@@ -286,11 +286,11 @@ def test_summary_service_extrapolates_projection_when_no_budgets_exist() -> None
 
     summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
 
-    # No budgets: variable spend is linearly extrapolated (260 over 15 days -> 520
+    # No budgets: variable spend is linearly extrapolated (285 over 15 days -> 570
     # for the full 30). Overspend is measured against budgeted categories, of which
     # there are none, so it stays at zero.
     assert summary["monthly_budget_amount"] == "0.00"
-    assert summary["projected_month_end_spend_amount"] == "520.00"
+    assert summary["projected_month_end_spend_amount"] == "570.00"
     assert summary["projected_overspend_amount"] == "0.00"
 
 
@@ -318,13 +318,15 @@ def test_summary_service_excludes_fixed_budget_from_pace() -> None:
 
     summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
 
-    # Burn rate now reflects only variable spend (Food 140 / 15 days), not the lump.
-    assert summary["average_daily_spend_amount"] == "9.33"
+    # Burn rate now reflects only variable spend (Food 140 booked + 25 pending, over
+    # 15 days), not the lump.
+    assert summary["average_daily_spend_amount"] == "11.00"
     # Planned variable pace: Food budget 300 / 30 days.
     assert summary["expected_daily_spend_amount"] == "10.00"
-    # Variable slice projects 285 (140 + 15 x blended 9.667); fixed adds its actual 120.
-    assert summary["projected_month_end_spend_amount"] == "405.00"
-    assert summary["projected_overspend_amount"] == "5.00"
+    # Variable slice projects 322.50 (165 + 15 x blended 10.50); fixed adds its
+    # actual 120.
+    assert summary["projected_month_end_spend_amount"] == "442.50"
+    assert summary["projected_overspend_amount"] == "42.50"
 
     usage = {item["category_name"]: item for item in summary["budget_usage"]}
     assert usage["Utilities"]["is_fixed"] is True
@@ -354,8 +356,8 @@ def test_summary_service_fixed_budget_uses_estimate_until_paid() -> None:
 
     summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
 
-    # Variable slice unchanged at 490; fixed Rent adds its 900 budgeted estimate.
-    assert summary["projected_month_end_spend_amount"] == "1390.00"
+    # Variable slice unchanged at 527.50; fixed Rent adds its 900 budgeted estimate.
+    assert summary["projected_month_end_spend_amount"] == "1427.50"
     usage = {item["category_name"]: item for item in summary["budget_usage"]}
     assert usage["Rent"]["is_fixed"] is True
     assert usage["Rent"]["spent_amount"] == "0.00"
@@ -395,9 +397,10 @@ def test_summary_service_reports_the_savings_rate_and_its_verdict() -> None:
 
     summary = service.get_summary(month="2026-06", today=date(2026, 6, 15))
 
-    # The seeded month books 2000.00 of salary against 260.00 of spending, so the
-    # owner kept 1740.00 -- 87% of what came in, comfortably clear of the band.
-    assert summary["savings_rate_percent"] == 87.0
+    # The seeded month books 2000.00 of salary against 285.00 of spending (the
+    # 25.00 pending snack included, because it is money already committed), so the
+    # owner kept 1715.00 -- 85.8% of what came in, comfortably clear of the band.
+    assert summary["savings_rate_percent"] == 85.8
     assert summary["savings_status"] == "on_track"
 
 
@@ -447,11 +450,17 @@ def test_summary_service_leads_the_budget_rows_with_the_worst_off() -> None:
     assert rows == [("Utilities", "over"), ("Transport", "watch"), ("Food", "on_track")]
 
 
-def test_summary_service_reports_every_booked_figure_of_the_seeded_month_to_the_cent() -> None:
-    # A pin on the figures the owner already relies on: no change to this module may
-    # restate one of them. Every amount below is worked from the seed by hand --
-    # 140 food + 120 utilities booked against 300 + 100 budgeted, 2000 salary in,
-    # the 100 transfer and the 25 pending charge counting as neither.
+def test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent() -> None:
+    # A pin on every amount the summary reports, so a change here cannot restate one
+    # of them unnoticed. Each is worked from the seed by hand -- 140 food + 120
+    # utilities booked and a 25 pending snack, against 300 + 100 budgeted, with 2000
+    # salary in, and the 100 transfer and the 20 uncategorized charge counting as
+    # neither.
+    #
+    # The pending snack counts from this phase on: it is the one figure set this
+    # ticket deliberately restates, because committed money the bank has not settled
+    # yet is still gone. Income stays booked-only -- a credit the bank has not
+    # settled is not money kept.
     #
     # Every seeded row carries a booking date, so this guards the figures and not
     # the Effective Date fallbacks: the chain always resolves on its first link
@@ -462,24 +471,25 @@ def test_summary_service_reports_every_booked_figure_of_the_seeded_month_to_the_
     summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
 
     assert {key: summary[key] for key in sorted(summary) if key.endswith("_amount")} == {
-        "average_daily_spend_amount": "17.33",
-        "budgeted_spending_amount": "260.00",
+        "average_daily_spend_amount": "19.00",
+        "budgeted_spending_amount": "285.00",
         "current_balance_amount": "2000.00",
         "expected_daily_spend_amount": "13.33",
-        "money_left_amount": "140.00",
+        "money_left_amount": "115.00",
         "monthly_budget_amount": "400.00",
         "monthly_income_amount": "2000.00",
-        "monthly_spending_amount": "260.00",
-        "net_cash_flow_amount": "1740.00",
-        "projected_month_end_spend_amount": "490.00",
-        "projected_overspend_amount": "90.00",
+        "monthly_spending_amount": "285.00",
+        "net_cash_flow_amount": "1715.00",
+        "pending_spend_amount": "25.00",
+        "projected_month_end_spend_amount": "527.50",
+        "projected_overspend_amount": "127.50",
         "unbudgeted_spending_amount": "0.00",
     }
     assert summary["uncategorized_count"] == 1
-    assert summary["savings_rate_percent"] == 87.0
+    assert summary["savings_rate_percent"] == 85.8
     assert [(row["category_name"], row["spent_amount"]) for row in summary["budget_usage"]] == [
         ("Utilities", "120.00"),
-        ("Food", "140.00"),
+        ("Food", "165.00"),
     ]
 
 
@@ -513,10 +523,10 @@ def test_summary_service_counts_a_transaction_with_no_booking_date_by_its_value_
 
     summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 20))
 
-    assert summary["monthly_spending_amount"] == "290.00"
-    assert summary["budgeted_spending_amount"] == "290.00"
+    assert summary["monthly_spending_amount"] == "315.00"
+    assert summary["budgeted_spending_amount"] == "315.00"
     food_row = next(row for row in summary["budget_usage"] if row["category_name"] == "Food")
-    assert food_row["spent_amount"] == "170.00"
+    assert food_row["spent_amount"] == "195.00"
 
 
 def test_summary_service_counts_an_undated_pending_charge_in_the_month_it_was_imported() -> None:
@@ -591,3 +601,166 @@ def test_summary_service_closes_december_on_the_first_of_january() -> None:
     assert summary["days_in_month"] == 31
     # New Year's Eve counts, New Year's Day does not: the window ends at 2027-01-01.
     assert summary["monthly_spending_amount"] == "40.00"
+
+
+def test_summary_service_counts_a_pending_charge_as_spend_this_month() -> None:
+    # Last night's card payment is committed money the bank has not settled yet.
+    # Counting it only once it books leaves every day's figure optimistic by exactly
+    # the amount most likely to matter.
+    db = make_session()
+    seed_summary_data(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # 140.00 booked groceries + 120.00 booked power bill + the 25.00 pending snack.
+    assert summary["monthly_spending_amount"] == "285.00"
+    assert summary["budgeted_spending_amount"] == "285.00"
+    # Nothing fixed in the seeded month, so all 285.00 is variable: 285 / 15 days.
+    assert summary["average_daily_spend_amount"] == "19.00"
+    food_row = next(row for row in summary["budget_usage"] if row["category_name"] == "Food")
+    assert food_row["spent_amount"] == "165.00"
+
+
+def seed_fixed_rent_with_a_pending_hold(db: Session) -> None:
+    """A fixed Rent budget of 900.00 whose only charge is a 1.00 pre-authorization."""
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    rent = Category(name="Rent", type="expense", active=True)
+    db.add(rent)
+    db.flush()
+    db.add(
+        Budget(
+            category_id=rent.id,
+            amount=Decimal("900.00"),
+            currency="EUR",
+            period_type="monthly",
+            active_from=date(2026, 6, 1),
+            active_to=None,
+            is_fixed=True,
+        )
+    )
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-rent-hold",
+            booking_date=None,
+            value_date=date(2026, 6, 13),
+            amount=Decimal("-1.00"),
+            currency="EUR",
+            description="Rent pre-authorization",
+            merchant_name="Landlord",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=rent.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 13, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+
+def test_summary_service_keeps_a_fixed_budget_row_on_its_booked_spend() -> None:
+    # A fixed commitment is judged by its estimate until it settles. A 1.00 hold on
+    # the rent is not the rent being paid, so the row must still read as not yet
+    # paid rather than as 1.00 of 900.00 spent.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_with_a_pending_hold(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    rent_row = next(row for row in summary["budget_usage"] if row["category_name"] == "Rent")
+    assert rent_row["spent_amount"] == "0.00"
+    assert rent_row["remaining_amount"] == "900.00"
+    assert rent_row["status"] == "on_track"
+
+
+def test_summary_service_projects_a_fixed_budget_at_its_estimate_when_only_a_hold_exists() -> None:
+    # The step projection trusts actual spend over the estimate as soon as any spend
+    # exists, so a 1.00 pre-authorization would otherwise convince the product that
+    # 900.00 of rent will cost 1.00 this month.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_with_a_pending_hold(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # Variable slice 527.50 as in the seeded month, plus Rent's 900.00 estimate.
+    assert summary["projected_month_end_spend_amount"] == "1427.50"
+
+
+def test_summary_service_keeps_a_hold_on_a_fixed_bill_out_of_the_variable_slice() -> None:
+    # The trap this ticket exists to avoid: a total that counted the 1.00 rent hold
+    # would hand it straight to the variable slice, which removes only booked fixed
+    # spend -- and the variable slice is the one place a hold on a bill must never
+    # land, because it would quietly shrink what the owner may spend today on
+    # something else.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_with_a_pending_hold(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # Variable spend is the 140.00 groceries and the 25.00 snack, over 15 days. The
+    # rent hold is absent from it, while the pending snack is present.
+    assert summary["average_daily_spend_amount"] == "19.00"
+    # Nor does the hold reach the month's budget: the 900.00 estimate already stands
+    # for the commitment, so counting a hold on top would charge the rent twice.
+    assert summary["money_left_amount"] == "1015.00"
+
+
+def test_summary_service_discloses_the_months_pending_spend() -> None:
+    # The figures move without a transaction the owner can point at, because the bank
+    # settles a card payment one to three days after they made it. The disclosed total
+    # is the unsettled share of monthly spending, so 285.00 spent less 25.00 pending
+    # leaves the 260.00 the bank has actually settled.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_with_a_pending_hold(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # The 25.00 snack alone. The 1.00 rent hold is left out, because the total
+    # discloses the pending spend the figures actually counted, and a hold on a fixed
+    # bill counts towards none of them.
+    assert summary["pending_spend_amount"] == "25.00"
+    assert summary["monthly_spending_amount"] == "285.00"
+    assert Decimal(summary["monthly_spending_amount"]) - Decimal(summary["pending_spend_amount"]) == Decimal(
+        "260.00"
+    )
+
+
+def test_summary_service_reconciles_budgeted_spending_with_the_rows_it_prints() -> None:
+    # The dashboard shows budgeted spending beside the per-category rows, so the two
+    # have to be the same money. A fixed row reports booked spend only, which means
+    # the total cannot count a hold the row is leaving out.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_with_a_pending_hold(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # 140.00 groceries + 25.00 snack booked and pending in Food, 120.00 in Utilities,
+    # and nothing yet in Rent.
+    assert summary["budgeted_spending_amount"] == "285.00"
+    assert Decimal(summary["budgeted_spending_amount"]) == sum(
+        Decimal(row["spent_amount"]) for row in summary["budget_usage"]
+    )
+
+
+def test_summary_service_does_not_report_a_hold_on_a_fixed_bill_as_unbudgeted() -> None:
+    # Rent has a budget, so a hold on it is not unbudgeted spend by any reading. The
+    # disclosure is a figure the owner acts on -- Telegram prints "incl. X
+    # unbudgeted" whenever it is non-zero -- so a hold must not appear there, and
+    # monthly spending must not count what no budget-basis figure counts.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_with_a_pending_hold(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["unbudgeted_spending_amount"] == "0.00"
+    # 140.00 + 25.00 in Food and 120.00 in Utilities. The rent hold counts nowhere
+    # until it books: a fixed commitment is judged by its estimate until it settles.
+    assert summary["monthly_spending_amount"] == "285.00"

@@ -26,6 +26,41 @@ If balances are not available from the provider, BurnRate may estimate them from
 
 Refunds, transfers, and income should not be counted as spending.
 
+Both booked and pending expense transactions count. A pending card payment is
+money already committed, and a figure that waits the one to three days the bank
+takes to settle it is optimistic in exactly the direction that causes
+overspending. The unsettled share is disclosed separately as pending spend, so
+monthly spending less pending spend is what the bank has actually settled.
+
+---
+
+## Pending Spend
+
+"Pending spend" means the share of the month's spending the bank has authorized
+but not yet settled. It discloses the pending spend the figures actually counted,
+so monthly spending less pending spend is what the bank has settled.
+
+It counts in the variable slice only. The fixed slice -- the step projection for
+a scheduled lump payment, and the fixed overrun -- is judged by the budgeted
+estimate until a charge actually books, because the projection trusts actual
+spend over its estimate as soon as any spend exists: a 1EUR pre-authorization on
+a utility bill would otherwise project that bill at 1EUR.
+
+A pending charge in a fixed budget's category therefore counts towards nothing
+until it books -- not the fixed figures, which are booked-only, not the variable
+slice a daily allowance draws on, and not monthly spending or the month's budget
+either. The budgeted estimate already stands for the whole commitment, so
+counting a partial authorization on top of it would charge the same bill twice,
+and leaving it in the month total while every budget-basis figure excluded it
+would make it resurface as unbudgeted spend, which it plainly is not.
+
+One figure therefore counts the same money as the rows printed beside it:
+budgeted spend is the sum of the per-category rows, each of which counts pending
+in a variable category and booked only in a fixed one.
+
+The asymmetry is deliberate and should not be tidied into consistency. See
+`docs/adr/0003-pending-spend-is-load-bearing.md`.
+
 ---
 
 ## Burn Rate
@@ -37,6 +72,9 @@ This should usually be expressed as:
 * Daily average spending
 * Projected month-end spending
 
+It measures the variable slice only, pending spend included, so it tracks
+controllable spend as the owner commits it rather than as the bank settles it.
+
 ---
 
 ## Net Cash Flow and the Savings Rate
@@ -45,6 +83,10 @@ This should usually be expressed as:
 excluded on both sides. It is the same figure as money saved in the month, and
 the product names it once: there is no second "saved" figure computed anywhere
 else.
+
+Its spending side counts pending spend; its income side counts booked income
+only. A credit the bank has not settled is not yet money kept, so both halves of
+that asymmetry read in the cautious direction.
 
 The "savings rate" is net cash flow as a percentage of the month's income. A
 month with no income reports zero rather than dividing by nothing.
@@ -77,6 +119,9 @@ commitments rather than discretionary daily spend.
 
 This is BurnRate's headline metric: it is the one figure that changes a decision
 in the moment.
+
+It counts pending spend, so last night's card payment reduces today's allowance
+rather than the allowance of whichever day the bank gets round to settling it.
 
 It is never negative. A month that is already overspent shows zero, not a
 negative allowance.

@@ -12,6 +12,7 @@ class FakeSummaryService:
             "current_balance_amount": "2000.00",
             "current_balance_currency": "EUR",
             "monthly_spending_amount": "260.00",
+            "pending_spend_amount": "25.00",
             "monthly_income_amount": "2000.00",
             "net_cash_flow_amount": "1740.00",
             "savings_rate_percent": 87.0,
@@ -49,6 +50,7 @@ def test_summary_route_uses_service_dependency() -> None:
     assert response.current_balance_amount == "2000.00"
     assert response.savings_rate_percent == 87.0
     assert response.savings_status == "on_track"
+    assert response.pending_spend_amount == "25.00"
     assert response.budget_usage[0].status == "over"
 
 

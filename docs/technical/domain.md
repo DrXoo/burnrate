@@ -192,6 +192,35 @@ The sum of expense transactions within the current calendar month.
 
 Income transactions should not be mixed into this metric.
 
+Both booked and pending transactions count, because a pending charge is money
+already committed. The pending share is reported alongside as its own figure, so
+a movement in the metrics has a cause the owner can point at even before the
+charge appears as a settled transaction.
+
+---
+
+### Pending Spend
+
+The share of the month's spending the provider has authorized but not settled.
+
+It counts in the variable slice only: the daily pace, the variable projection,
+and the allowance that draws on them. A fixed category is judged by its budgeted
+estimate until a charge books, so a partial hold on a scheduled bill counts
+towards no figure at all -- not the step projection, not the fixed overrun, not
+monthly spending, and not the month's budget -- and the category's row keeps
+reading as not yet paid.
+
+The derivation order is what makes that hold stay out, and the obvious order gets
+it wrong: a hold on a fixed bill has to leave the month total *before* the
+variable slice is taken out of it, because the variable slice removes only booked
+fixed spend. Subtracting booked fixed spend from a total that still counted the
+hold would route it straight into the variable slice -- the one place it must
+never land. Each budget-basis figure then counts what the per-category rows
+count, so the total and the rows beside it cannot disagree.
+
+The asymmetry is deliberate and should not be reconciled into consistency. See
+`docs/adr/0003-pending-spend-is-load-bearing.md`.
+
 ---
 
 ### Money Left
@@ -223,6 +252,7 @@ BurnRate should preserve the following invariants:
 * Unknown transactions are uncategorized transactions that require review
 * Every transaction belongs to exactly one month, resolved by its effective date
 * Transfer categories should not inflate spending metrics
+* Pending transactions count as spend in the variable slice only, while the fixed slice is judged by its budgeted estimate until a charge books
 * Income should remain a minimal classification concern and should not drive budget reporting in the first version
 * Runway should only use balances from accounts explicitly included for runway calculations
 * Imported provider identifiers should support idempotent re-sync behavior
