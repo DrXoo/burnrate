@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
+from burnrate.db.effective_date import effective_date, within_month
 from burnrate.db.models import (
     Account,
     CategorizationRule,
@@ -113,10 +114,9 @@ class LedgerService:
         base_query = self._transactions_query(filters=filters)
         total_count = self.db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
 
-        effective_date = func.coalesce(Transaction.booking_date, Transaction.value_date)
         rows = self.db.execute(
             base_query
-            .order_by(effective_date.is_(None), effective_date.desc(), Transaction.created_at.desc())
+            .order_by(effective_date().desc(), Transaction.created_at.desc())
             .limit(limit)
             .offset(offset)
         ).all()
@@ -206,11 +206,10 @@ class LedgerService:
             query = query.where(Transaction.account_id == filters.account_id)
         if filters.category_id is not None:
             query = query.where(Transaction.category_id == filters.category_id)
-        effective_date = func.coalesce(Transaction.booking_date, Transaction.value_date)
-        if filters.month_start is not None:
-            query = query.where(effective_date >= filters.month_start)
-        if filters.month_end is not None:
-            query = query.where(effective_date < filters.month_end)
+        if filters.month_start is not None and filters.month_end is not None:
+            query = query.where(
+                within_month(month_start=filters.month_start, month_end=filters.month_end)
+            )
         if filters.status is not None:
             query = query.where(func.lower(Transaction.status) == filters.status)
         if filters.categorized is True:

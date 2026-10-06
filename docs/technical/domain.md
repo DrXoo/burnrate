@@ -54,6 +54,22 @@ Suggested attributes:
 
 `Booking date` and `value date` should remain distinct when the provider supplies both.
 
+`Effective date` is the date that places a transaction in a month: its booking
+date, or its value date, or the day it was imported, in that order. It is
+resolved in query rather than stored, so every month-windowed figure asks one
+shared expression (`burnrate/db/effective_date.py`) instead of reading a date
+column directly.
+
+Booking date stays first in that chain so no figure already reported to the
+owner is restated; the fallbacks only reach rows a window on booking date could
+not see at all. Pending transactions are the reason the chain exists: the
+provider has no booking date for them yet, and a null booking date satisfies no
+month comparison in SQL, so such a row belonged to no month and reached no
+review queue. The import date is a last resort for a row the provider dated not
+at all, and it resolves on the UTC calendar day -- SQL has no portable timezone
+conversion, so a charge imported within hours of a month boundary can land in
+the adjacent month until it books.
+
 `Provider transaction id` should be unique per provider when reliably available.
 
 Suggested statuses:
@@ -201,6 +217,7 @@ BurnRate should preserve the following invariants:
 * A transaction must belong to exactly one account
 * A transaction may have zero or one assigned category
 * Unknown transactions are uncategorized transactions that require review
+* Every transaction belongs to exactly one month, resolved by its effective date
 * Transfer categories should not inflate spending metrics
 * Income should remain a minimal classification concern and should not drive budget reporting in the first version
 * Runway should only use balances from accounts explicitly included for runway calculations

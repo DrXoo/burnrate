@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
+from burnrate.db.effective_date import within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.domain.metrics import MetricStatus, budget_usage_status, savings_verdict
 
@@ -245,8 +246,7 @@ class SummaryService:
             .join(Account, Account.id == Transaction.account_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
+                within_month(month_start=month_start, month_end=month_end),
                 Transaction.category_id.is_(None),
                 Transaction.excluded_at.is_(None),
             )
@@ -261,8 +261,7 @@ class SummaryService:
             .join(Category, Category.id == Transaction.category_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
+                within_month(month_start=month_start, month_end=month_end),
                 func.lower(Transaction.status) == "booked",
                 Category.type == "expense",
             )
@@ -277,8 +276,7 @@ class SummaryService:
             .join(Category, Category.id == Transaction.category_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
+                within_month(month_start=month_start, month_end=month_end),
                 func.lower(Transaction.status) == "booked",
                 Category.type == "income",
             )
@@ -327,8 +325,7 @@ class SummaryService:
             .join(Account, Account.id == Transaction.account_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
+                within_month(month_start=month_start, month_end=month_end),
                 func.lower(Transaction.status) == "booked",
                 Transaction.category_id.in_(category_ids),
             )

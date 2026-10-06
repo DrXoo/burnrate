@@ -445,3 +445,109 @@ def test_summary_service_leads_the_budget_rows_with_the_worst_off() -> None:
 
     rows = [(row["category_name"], row["status"]) for row in summary["budget_usage"]]
     assert rows == [("Utilities", "over"), ("Transport", "watch"), ("Food", "on_track")]
+
+
+def test_summary_service_reports_every_booked_figure_of_the_seeded_month_to_the_cent() -> None:
+    # A pin on the figures the owner already relies on: no change to this module may
+    # restate one of them. Every amount below is worked from the seed by hand --
+    # 140 food + 120 utilities booked against 300 + 100 budgeted, 2000 salary in,
+    # the 100 transfer and the 25 pending charge counting as neither.
+    #
+    # Every seeded row carries a booking date, so this guards the figures and not
+    # the Effective Date fallbacks: the chain always resolves on its first link
+    # here. The value-date and import-date links have their own tests below.
+    db = make_session()
+    seed_summary_data(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert {key: summary[key] for key in sorted(summary) if key.endswith("_amount")} == {
+        "average_daily_spend_amount": "17.33",
+        "budgeted_spending_amount": "260.00",
+        "current_balance_amount": "2000.00",
+        "expected_daily_spend_amount": "13.33",
+        "money_left_amount": "140.00",
+        "monthly_budget_amount": "400.00",
+        "monthly_income_amount": "2000.00",
+        "monthly_spending_amount": "260.00",
+        "net_cash_flow_amount": "1740.00",
+        "projected_month_end_spend_amount": "490.00",
+        "projected_overspend_amount": "90.00",
+        "unbudgeted_spending_amount": "0.00",
+    }
+    assert summary["uncategorized_count"] == 1
+    assert summary["savings_rate_percent"] == 87.0
+    assert [(row["category_name"], row["spent_amount"]) for row in summary["budget_usage"]] == [
+        ("Utilities", "120.00"),
+        ("Food", "140.00"),
+    ]
+
+
+def test_summary_service_counts_a_transaction_with_no_booking_date_by_its_value_date() -> None:
+    # The bank settled this charge but supplied only a value date. A month window on
+    # booking_date alone never matches NULL, so the 30 was invisible to every figure.
+    db = make_session()
+    seed_summary_data(db)
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    food = db.query(Category).filter(Category.name == "Food").one()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-no-booking-date",
+            booking_date=None,
+            value_date=date(2026, 6, 18),
+            amount=Decimal("-30.00"),
+            currency="EUR",
+            description="Lunch",
+            merchant_name="Canteen",
+            counterparty_name=None,
+            direction="debit",
+            status="booked",
+            category_id=food.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 18, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 20))
+
+    assert summary["monthly_spending_amount"] == "290.00"
+    assert summary["budgeted_spending_amount"] == "290.00"
+    food_row = next(row for row in summary["budget_usage"] if row["category_name"] == "Food")
+    assert food_row["spent_amount"] == "170.00"
+
+
+def test_summary_service_counts_an_undated_pending_charge_in_the_month_it_was_imported() -> None:
+    # Restricted-production pending rows can arrive with neither date set. Without a
+    # last resort the charge belongs to no month at all, so it reaches no review
+    # queue and the owner never sees there is something to categorize.
+    db = make_session()
+    seed_summary_data(db)
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-undated-pending",
+            booking_date=None,
+            value_date=None,
+            amount=Decimal("-18.50"),
+            currency="EUR",
+            description="Card authorization",
+            merchant_name="Bar",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=None,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 19, 21, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 20))
+
+    # The seeded Mystery charge plus this one.
+    assert summary["uncategorized_count"] == 2

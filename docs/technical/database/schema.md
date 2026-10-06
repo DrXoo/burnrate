@@ -191,6 +191,18 @@ Notes:
 
 * `raw_payload` is useful for traceability and future parser improvements.
 * `status` should support values such as `pending`, `booked`, `unknown`, and `ignored`.
+* Month placement does **not** read `booking_date` directly. Every month-windowed
+  query compares the effective date -- `coalesce(booking_date, value_date,
+  date(imported_at))` -- so that a pending row with no booking date still belongs
+  to a month. See `burnrate/db/effective_date.py` and the Transaction section of
+  `docs/technical/domain.md`.
+* That makes the window non-sargable, so the `booking_date` indexes above no
+  longer serve it and those queries plan as sequential scans. Deliberate for now:
+  single-owner volumes make the difference immeasurable (cost 38 to 84 over 487
+  rows), and `AGENTS.md` ranks performance last. The fix when it is needed is an
+  expression index on the coalesce, or the stored `effective_date` column that
+  Phase 8 deferred because it needs a backfill -- the latter restores plain
+  indexing and is the better end state.
 * The first version can stay coupled to Enable Banking transaction identifiers.
 
 ---
