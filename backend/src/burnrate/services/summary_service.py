@@ -13,7 +13,14 @@ from sqlalchemy.orm import Session
 from burnrate.clock import civil_date
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
-from burnrate.domain.metrics import MetricStatus, budget_usage_status, savings_verdict
+from burnrate.domain.metrics import (
+    FixedCommitment,
+    MetricStatus,
+    budget_usage_status,
+    fixed_overrun,
+    safe_to_spend_today,
+    savings_verdict,
+)
 
 
 COMMITTED_STATUSES = ("booked", "pending")
@@ -176,6 +183,30 @@ class SummaryService:
         variable_spend = (monthly_spending - fixed_booked_spend).quantize(Decimal("0.01"))
         variable_budgeted_spend = (budgeted_spending - fixed_booked_spend).quantize(Decimal("0.01"))
 
+        # What the owner may spend today. The overrun reads each fixed budget's booked
+        # spend, which is the same figure the step projection above trusts, so the two
+        # cannot disagree about what a fixed commitment has actually cost.
+        overrun = fixed_overrun(
+            commitments=[
+                FixedCommitment(
+                    budgeted=budget.amount,
+                    booked=fixed_spend_by_category[budget.category_id].booked,
+                )
+                for budget in fixed_budgets
+            ]
+        )
+        allowance = safe_to_spend_today(
+            variable_budget_total=variable_budget_total,
+            variable_budgeted_spend=variable_budgeted_spend,
+            fixed_overrun=overrun,
+            days_in_month=days_in_month,
+            days_elapsed=days_elapsed,
+            is_current_month=self._is_current_month(
+                month_start=month_start,
+                reference_day=reference_day,
+            ),
+        )
+
         # Burn rate reflects the *variable* daily pace only -- fixed lumps are excluded
         # so it captures controllable day-to-day spend. Expected burn is the planned
         # variable pace (variable budgets spread evenly across the month).
@@ -235,6 +266,9 @@ class SummaryService:
 
         return {
             "month": month_value,
+            "safe_to_spend_today_amount": self._format_optional_decimal(allowance.amount),
+            "safe_to_spend_status": allowance.status,
+            "fixed_overrun_amount": self._format_decimal(overrun),
             "current_balance_amount": self._format_decimal(calculation_balance),
             "current_balance_currency": calculation_currency,
             "monthly_spending_amount": self._format_decimal(monthly_spending),
@@ -262,6 +296,10 @@ class SummaryService:
         month_value = month if month is not None else reference_day.strftime("%Y-%m")
         month_start, month_end = month_window(month_value)
         return month_start, month_end, month_value
+
+    def _is_current_month(self, *, month_start: date, reference_day: date) -> bool:
+        """Whether the month being reported is the one the reference day falls in."""
+        return (month_start.year, month_start.month) == (reference_day.year, reference_day.month)
 
     def _days_elapsed_in_month(self, *, month_start: date, reference_day: date, days_in_month: int) -> int:
         month_key = (month_start.year, month_start.month)
@@ -504,3 +542,9 @@ class SummaryService:
 
     def _format_decimal(self, value: Decimal) -> str:
         return format(value.quantize(Decimal("0.01")), ".2f")
+
+    def _format_optional_decimal(self, value: Decimal | None) -> str | None:
+        """A figure the owner may not have, kept distinct from one that is zero."""
+        if value is None:
+            return None
+        return self._format_decimal(value)

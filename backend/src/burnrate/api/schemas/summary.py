@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from burnrate.domain.metrics import MetricStatus
+from burnrate.domain.metrics import MetricStatus, SafeToSpendStatus
 
 
 class BudgetUsageResponse(BaseModel):
@@ -19,6 +19,11 @@ class BudgetUsageResponse(BaseModel):
 
 class SummaryResponse(BaseModel):
     month: str
+    # Null when there is no allowance to report, which the status distinguishes from
+    # an allowance of zero: budgets exist, the month is current, they are used up.
+    safe_to_spend_today_amount: str | None
+    safe_to_spend_status: SafeToSpendStatus
+    fixed_overrun_amount: str
     current_balance_amount: str
     current_balance_currency: str | None
     monthly_spending_amount: str

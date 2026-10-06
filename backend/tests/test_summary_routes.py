@@ -5,10 +5,22 @@ from burnrate.main import create_app
 
 
 class FakeSummaryService:
+    def __init__(
+        self,
+        *,
+        safe_to_spend_today_amount: str | None = "7.19",
+        safe_to_spend_status: str = "watch",
+    ) -> None:
+        self._safe_to_spend_today_amount = safe_to_spend_today_amount
+        self._safe_to_spend_status = safe_to_spend_status
+
     def get_summary(self, *, month: str | None = None):
         assert month == "2026-06"
         return {
             "month": "2026-06",
+            "safe_to_spend_today_amount": self._safe_to_spend_today_amount,
+            "safe_to_spend_status": self._safe_to_spend_status,
+            "fixed_overrun_amount": "50.00",
             "current_balance_amount": "2000.00",
             "current_balance_currency": "EUR",
             "monthly_spending_amount": "260.00",
@@ -51,7 +63,21 @@ def test_summary_route_uses_service_dependency() -> None:
     assert response.savings_rate_percent == 87.0
     assert response.savings_status == "on_track"
     assert response.pending_spend_amount == "25.00"
+    assert response.safe_to_spend_today_amount == "7.19"
+    assert response.safe_to_spend_status == "watch"
+    assert response.fixed_overrun_amount == "50.00"
     assert response.budget_usage[0].status == "over"
+
+
+def test_summary_route_serves_an_allowance_the_owner_does_not_have() -> None:
+    # With no budget set there is no allowance, and the response has to carry that as
+    # a null rather than refusing to serialize. The status says why it is missing.
+    service = FakeSummaryService(safe_to_spend_today_amount=None, safe_to_spend_status="no_budget")
+
+    response = get_summary(month="2026-06", service=service)
+
+    assert response.safe_to_spend_today_amount is None
+    assert response.safe_to_spend_status == "no_budget"
 
 
 def test_app_exposes_phase_3_summary_path() -> None:

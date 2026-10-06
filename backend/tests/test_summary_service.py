@@ -462,6 +462,10 @@ def test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent() 
     # yet is still gone. Income stays booked-only -- a credit the bank has not
     # settled is not money kept.
     #
+    # The headline arrives with this ticket: the 115.00 left of the 400.00 budgeted
+    # has to cover the 15th and the fifteen days after it, so 7.19 a day. Nothing in
+    # the month is fixed, so there is no estimate to overshoot and no overrun.
+    #
     # Every seeded row carries a booking date, so this guards the figures and not
     # the Effective Date fallbacks: the chain always resolves on its first link
     # here. The value-date and import-date links have their own tests below.
@@ -475,6 +479,7 @@ def test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent() 
         "budgeted_spending_amount": "285.00",
         "current_balance_amount": "2000.00",
         "expected_daily_spend_amount": "13.33",
+        "fixed_overrun_amount": "0.00",
         "money_left_amount": "115.00",
         "monthly_budget_amount": "400.00",
         "monthly_income_amount": "2000.00",
@@ -483,6 +488,7 @@ def test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent() 
         "pending_spend_amount": "25.00",
         "projected_month_end_spend_amount": "527.50",
         "projected_overspend_amount": "127.50",
+        "safe_to_spend_today_amount": "7.19",
         "unbudgeted_spending_amount": "0.00",
     }
     assert summary["uncategorized_count"] == 1
@@ -764,3 +770,166 @@ def test_summary_service_does_not_report_a_hold_on_a_fixed_bill_as_unbudgeted() 
     # 140.00 + 25.00 in Food and 120.00 in Utilities. The rent hold counts nowhere
     # until it books: a fixed commitment is judged by its estimate until it settles.
     assert summary["monthly_spending_amount"] == "285.00"
+
+
+def test_summary_service_reports_what_the_owner_can_spend_today() -> None:
+    # The seeded month budgets 400.00, none of it fixed, and 285.00 of it has gone
+    # -- 140.00 of groceries, the 120.00 power bill and the 25.00 snack the bank has
+    # not settled yet. That leaves 115.00 to cover the 15th and the fifteen days
+    # after it, so 115 over 16 days is 7.1875 a day.
+    #
+    # On plan, half a month in, 200.00 of the 400.00 would still be there. 115.00 of
+    # 200.00 is 0.575 -- past the 0.85 the gauge stays green at, not yet down to the
+    # 0.5 that calls the month lost.
+    db = make_session()
+    seed_summary_data(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["safe_to_spend_today_amount"] == "7.19"
+    assert summary["safe_to_spend_status"] == "watch"
+    assert summary["fixed_overrun_amount"] == "0.00"
+
+
+def seed_fixed_rent_charged_over_its_estimate(db: Session) -> None:
+    """A fixed Rent budget of 900.00 whose charge booked at 950.00."""
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    rent = Category(name="Rent", type="expense", active=True)
+    db.add(rent)
+    db.flush()
+    db.add(
+        Budget(
+            category_id=rent.id,
+            amount=Decimal("900.00"),
+            currency="EUR",
+            period_type="monthly",
+            active_from=date(2026, 6, 1),
+            active_to=None,
+            is_fixed=True,
+        )
+    )
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-rent-charged",
+            booking_date=date(2026, 6, 2),
+            value_date=date(2026, 6, 2),
+            amount=Decimal("-950.00"),
+            currency="EUR",
+            description="Rent",
+            merchant_name="Landlord",
+            counterparty_name=None,
+            direction="debit",
+            status="booked",
+            category_id=rent.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 2, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+
+def test_summary_service_takes_a_fixed_budget_overshoot_out_of_the_allowance() -> None:
+    # The rent was estimated at 900.00 and charged at 950.00. That 50.00 is already
+    # gone, and the system knows it -- the step projection trusts the actual charge --
+    # so leaving it in the daily spending money would keep the allowance 50.00 too
+    # generous for the rest of the month.
+    #
+    # The variable budget is still 400.00 with 285.00 spent, so without the overrun
+    # the owner would read 7.19 a day. With it, 65.00 covers 16 days: 4.06, and
+    # 65.00 against the 200.00 that would be left on plan is 0.325 -- past the 0.5
+    # where the month stops being recoverable at the budgeted pace.
+    db = make_session()
+    seed_summary_data(db)
+    seed_fixed_rent_charged_over_its_estimate(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["fixed_overrun_amount"] == "50.00"
+    assert summary["safe_to_spend_today_amount"] == "4.06"
+    assert summary["safe_to_spend_status"] == "over"
+
+
+def test_summary_service_does_not_deepen_a_fixed_overrun_with_a_hold() -> None:
+    # The power bill is a fixed commitment: estimated at 100.00 and booked at 120.00,
+    # so 20.00 is already gone and comes out of the allowance. A further 30.00 the
+    # bank is only holding is not money gone -- a fixed category is judged by what
+    # has settled -- so the overrun stays at 20.00 rather than growing to 50.00 and
+    # quietly taking another 1.88 a day off what the owner may spend.
+    #
+    # The variable slice is Food alone: 300.00 budgeted, 165.00 committed, less the
+    # 20.00 overrun leaves 115.00 over 16 days. Against the 150.00 that would be left
+    # on plan, 115.00 is 0.767.
+    db = make_session()
+    seed_summary_data(db)
+    utilities = db.query(Category).filter(Category.name == "Utilities").one()
+    db.query(Budget).filter(Budget.category_id == utilities.id).update({"is_fixed": True})
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-utilities-hold",
+            booking_date=None,
+            value_date=date(2026, 6, 14),
+            amount=Decimal("-30.00"),
+            currency="EUR",
+            description="Power top-up",
+            merchant_name="Electricity",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=utilities.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 14, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["fixed_overrun_amount"] == "20.00"
+    assert summary["safe_to_spend_today_amount"] == "7.19"
+    assert summary["safe_to_spend_status"] == "watch"
+
+
+def test_summary_service_has_no_allowance_to_report_without_a_budget() -> None:
+    # Nothing budgeted means there is nothing to divide. A 0.00 would tell the owner
+    # they may spend nothing; the status tells them why the figure is missing instead,
+    # so the dashboard can prompt them to set a budget.
+    db = make_session()
+    seed_summary_data(db)
+    db.query(Budget).delete()
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["safe_to_spend_today_amount"] is None
+    assert summary["safe_to_spend_status"] == "no_budget"
+
+
+# A month that is not the one today falls in. The budgets are active in both, so the
+# only thing making the allowance meaningless is that "today" is somewhere else.
+#
+# month asked for, today, what the owner is doing
+OTHER_MONTH_EXAMPLES = [
+    ("2026-06", date(2026, 7, 10), "looking back at a finished month"),
+    ("2026-07", date(2026, 6, 15), "looking ahead at a month not yet started"),
+]
+
+
+@pytest.mark.parametrize(("month", "today", "_what_the_owner_is_doing"), OTHER_MONTH_EXAMPLES)
+def test_summary_service_has_no_allowance_to_report_outside_the_current_month(
+    month: str,
+    today: date,
+    _what_the_owner_is_doing: str,
+) -> None:
+    db = make_session()
+    seed_summary_data(db)
+
+    summary = SummaryService(db=db).get_summary(month=month, today=today)
+
+    assert summary["monthly_budget_amount"] == "400.00"
+    assert summary["safe_to_spend_today_amount"] is None
+    assert summary["safe_to_spend_status"] == "not_current_month"

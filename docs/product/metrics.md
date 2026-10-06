@@ -113,18 +113,94 @@ disagree.
 "Safe to spend today" means the amount the user can spend today without putting
 the month's variable budgets out of reach.
 
-It is the remaining variable budget divided by the days remaining in the month.
-Fixed budgets (rent, utilities) are excluded, because they are scheduled
-commitments rather than discretionary daily spend.
-
 This is BurnRate's headline metric: it is the one figure that changes a decision
 in the moment.
+
+It is the remaining variable budget, less any fixed overrun, divided by the days
+left in the month counting today:
+
+* `remaining variable = variable budget - variable budgeted spend - fixed overrun`
+* `days remaining = days in month - days elapsed + 1`
+
+Fixed budgets (rent, utilities) are excluded from the budget it draws on, because
+they are scheduled commitments rather than discretionary daily spend. What they
+*overshot* by is not excluded -- see the fixed overrun below.
+
+The day count includes today, because the owner is asking what they may spend
+now. The last day of the month therefore has one day to cover and the allowance
+is simply everything left, which falls out of the arithmetic rather than needing
+a case of its own. Bank data also lags, so today's spend has usually not booked
+when the figure is read.
 
 It counts pending spend, so last night's card payment reduces today's allowance
 rather than the allowance of whichever day the bank gets round to settling it.
 
+It is measured on a **budgeted basis**: the spend it subtracts is spend in
+categories that have an active budget. Spend in a category with no budget is
+disclosed beside the headline as unbudgeted spend rather than subtracted from it,
+so the figure stays reconcilable against the per-category budget rows the owner
+can point at. See `docs/adr/0002-safe-to-spend-today-definition.md`.
+
 It is never negative. A month that is already overspent shows zero, not a
 negative allowance.
+
+### Its status
+
+The allowance carries a status so it can be read as a colour without reading the
+number. One field, five values:
+
+* `no_budget` -- nothing is budgeted for day-to-day spend, so there is no
+  allowance. The amount is null, and the interface should prompt the owner to set
+  a budget. A month budgeted entirely to fixed commitments reads this way too.
+* `not_current_month` -- "today" is not in the month being reported, so the
+  metric has no meaning. The amount is null.
+* `on_track`, `watch`, `over` -- the bands below.
+
+The amount is null for the first two cases and never for the others. A zero
+amount therefore means exactly one thing: budgets exist, the month is current,
+and they are used up.
+
+The band is judged against **on-plan remaining**, not against the planned daily
+pace:
+
+* `on plan remaining = variable budget x (days in month - days elapsed) / days in month`
+* `pace ratio = remaining variable / on plan remaining`
+* `>= 0.85` is `on_track`, `0.5` up to `0.85` is `watch`, below `0.5` is `over`
+
+Spend that tracks the budget exactly puts that ratio at 1.0 on every day of the
+month, so the bands mean the same thing on the 29th as on the 1st. Judged against
+the planned daily pace instead, an owner doing nothing wrong would be warned in
+the last week of every month -- a warning they would learn to ignore. The
+arithmetic is in `docs/adr/0002-safe-to-spend-today-definition.md`.
+
+On the last day of the month on-plan remaining is zero, so there is no ratio to
+band and the rule is read directly: anything still left is `on_track`, and
+nothing left is `over`.
+
+---
+
+## Fixed Overrun
+
+"Fixed overrun" means the amount by which the month's charged fixed budgets
+exceeded their budgeted estimates.
+
+It is summed per category -- `max(0, booked spend - budget)` for each fixed
+budget, added together -- so an underrun on one fixed category cannot fund an
+overrun on another. A rent budget of 800 charged at 850 is 50 already gone,
+whatever the utility bill came in under.
+
+It is booked only, like the rest of the fixed slice. A pending hold on a bill is
+not the bill being paid, so it reaches the overrun only once it settles; see
+pending spend above.
+
+That overrun comes out of Safe to Spend Today, because the money is gone and the
+system already knows it -- the fixed step projection trusts the actual charge
+over its estimate for the same reason. Without the deduction, a 50 EUR rent
+increase would quietly stay in the owner's daily spending money for the rest of
+the month.
+
+It is disclosed as its own figure, so a sudden step down in the allowance has a
+visible cause.
 
 ---
 
