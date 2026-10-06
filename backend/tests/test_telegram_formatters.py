@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from burnrate.telegram.formatters import (
+    HELP_TEXT,
     format_budgets,
     format_expiry_alert,
     format_reconnect_alert,
@@ -15,6 +16,8 @@ from burnrate.telegram.formatters import (
 def make_summary(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "month": "2026-06",
+        "safe_to_spend_today_amount": "80.00",
+        "safe_to_spend_status": "on_track",
         "current_balance_amount": "500.00",
         "current_balance_currency": "EUR",
         "monthly_spending_amount": "120.00",
@@ -31,6 +34,70 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+def first_money_line(text: str) -> str:
+    """The first line of the summary carrying a figure, whatever header precedes it."""
+    return next(line for line in text.splitlines() if "EUR" in line)
+
+
+def allowance_line(text: str) -> str:
+    return next(line for line in text.splitlines() if "Safe to spend today" in line)
+
+
+def test_format_summary_opens_with_the_allowance() -> None:
+    text = format_summary(
+        make_summary(safe_to_spend_today_amount="7.19", safe_to_spend_status="on_track")
+    )
+
+    assert first_money_line(text) == "🟢 Safe to spend today: 7.19 EUR"
+
+
+def test_format_summary_prompts_for_a_budget_when_there_is_no_allowance() -> None:
+    text = format_summary(
+        make_summary(
+            safe_to_spend_today_amount=None,
+            safe_to_spend_status="no_budget",
+            monthly_budget_amount="0.00",
+        )
+    )
+
+    assert allowance_line(text) == "⚪ Safe to spend today: set a monthly budget to get a daily number"
+    assert "None" not in text
+    assert "0.00" not in allowance_line(text)
+
+
+def test_format_summary_marks_the_allowance_undefined_outside_the_current_month() -> None:
+    text = format_summary(
+        make_summary(
+            month="2026-05",
+            safe_to_spend_today_amount=None,
+            safe_to_spend_status="not_current_month",
+        )
+    )
+
+    assert allowance_line(text) == "⚪ Safe to spend today: only for the current month"
+    assert "None" not in text
+    assert "Budget left: 80.00 EUR" in text
+
+
+def test_format_summary_colours_the_allowance_by_its_status() -> None:
+    def line(status: str) -> str:
+        return allowance_line(
+            format_summary(
+                make_summary(safe_to_spend_today_amount="12.00", safe_to_spend_status=status)
+            )
+        )
+
+    assert line("on_track") == "🟢 Safe to spend today: 12.00 EUR"
+    assert line("watch") == "🟡 Safe to spend today: 12.00 EUR"
+    assert line("over") == "🔴 Safe to spend today: 12.00 EUR"
+
+
+def test_help_text_describes_what_the_summary_leads_with() -> None:
+    summary_line = next(line for line in HELP_TEXT.splitlines() if line.startswith("/summary"))
+
+    assert summary_line == "/summary [YYYY-MM] — what you can spend today, plus the month so far"
 
 
 def test_format_summary_includes_core_metrics_and_budget() -> None:

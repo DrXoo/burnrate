@@ -136,7 +136,7 @@ To enable it:
 
 Messages from any chat id not on the allow-list are ignored. Available commands:
 
-* `/summary [YYYY-MM]` — money left, spending, burn rate, and runway
+* `/summary [YYYY-MM]` — what you can spend today, then balance, spending, budget, and burn rate
 * `/budgets [YYYY-MM]` — budget status per category
 * `/unknown` — transactions still waiting to be categorized
 * `/help` — list commands

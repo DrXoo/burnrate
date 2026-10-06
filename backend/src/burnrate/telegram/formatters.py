@@ -7,7 +7,7 @@ HELP_TEXT = "\n".join(
     [
         "BurnRate bot — read-only spending visibility.",
         "",
-        "/summary [YYYY-MM] — budget left, spending, and burn rate",
+        "/summary [YYYY-MM] — what you can spend today, plus the month so far",
         "/budgets [YYYY-MM] — budget status per category",
         "/unknown [YYYY-MM] — transactions still waiting to be categorized (this month)",
         "/help — show this message",
@@ -26,11 +26,33 @@ def _money(amount: str, currency: str | None) -> str:
     return f"{amount}{suffix}"
 
 
+def _allowance_line(payload: dict[str, Any], currency: str | None) -> str:
+    """The headline: what the owner may spend today, read off the backend's status.
+
+    The icon is the same status vocabulary the budget rows use, so a colour means
+    the same thing everywhere the bot prints one.
+    """
+    status = payload["safe_to_spend_status"]
+    if status == "no_budget":
+        # No zero here: "0.00" would claim the owner may spend nothing, which is a
+        # different and untrue thing to say. Tell them what to do instead.
+        return "⚪ Safe to spend today: set a monthly budget to get a daily number"
+    if status == "not_current_month":
+        # "Today" is not in the month being asked about. The budget-left line below
+        # already reports how that month stands, so this line only says why the
+        # allowance is absent.
+        return "⚪ Safe to spend today: only for the current month"
+    icon = _BUDGET_STATUS_ICONS[status]
+    return f"{icon} Safe to spend today: {_money(payload['safe_to_spend_today_amount'], currency)}"
+
+
 def format_summary(payload: dict[str, Any]) -> str:
     currency = payload["current_balance_currency"]
     lines = [
         f"📊 Summary for {payload['month']}",
         "━━━━━━━━━━━━━━━━━━",
+        "",
+        _allowance_line(payload, currency),
         "",
         f"💰 Balance: {_money(payload['current_balance_amount'], currency)}",
         "",
