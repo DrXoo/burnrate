@@ -18,6 +18,8 @@ import type { BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction
 interface CategoriesPageProps {
   categories: Category[];
   summary: SummaryDashboard | null;
+  loading: boolean;
+  error: string | null;
   month: string;
   monthLabel: string;
   loadMonthTransactions: () => Promise<Transaction[]>;
@@ -65,6 +67,8 @@ function num(value: string | null | undefined): number {
 export function CategoriesPage({
   categories,
   summary,
+  loading,
+  error,
   month,
   monthLabel,
   loadMonthTransactions,
@@ -91,8 +95,16 @@ export function CategoriesPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
+  // The month's budget rows only exist in a summary *for that month*. A failed or
+  // in-flight fetch leaves the previous month's payload in place, so reading it here
+  // would print one month's budget beside another month's spend -- the stale-month
+  // reading this page has already deleted once. So "we do not know" is a third state,
+  // distinct from "this category has no budget this month".
+  const monthSummary = summary && summary.month === month ? summary : null;
+  const budgetsKnown = monthSummary !== null;
+
   const stats = useMemo<CategoryStat[]>(() => {
-    const usageById = new Map((summary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
+    const usageById = new Map((monthSummary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
     const ledgerCount: Record<string, number> = {};
     const ledgerTotal: Record<string, number> = {};
     for (const transaction of monthTxns) {
@@ -129,7 +141,7 @@ export function CategoriesPage({
         total: ledgerTotal[category.category_id] ?? 0,
       };
     });
-  }, [categories, summary, monthTxns]);
+  }, [categories, monthSummary, monthTxns]);
 
   const selected = stats.find((stat) => stat.category.category_id === selectedId) ?? stats[0];
 
@@ -163,6 +175,26 @@ export function CategoriesPage({
             <span className="num">{categories.length}</span> total
           </span>
         </div>
+
+        {budgetsKnown ? null : (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: "9px 11px",
+              borderRadius: 10,
+              background: error ? "var(--over-dim)" : "var(--bg-3)",
+              border: `1px solid ${error ? "color-mix(in oklab, var(--over) 30%, transparent)" : "var(--line)"}`,
+              color: error ? "var(--over)" : "var(--text-3)",
+              fontSize: 11.5,
+            }}
+          >
+            {loading
+              ? `Loading budgets for ${monthLabel}…`
+              : error
+                ? `Budget figures unavailable: ${error}`
+                : "Budget figures are unavailable for this month."}
+          </div>
+        )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {GROUPS.map((group) => {
@@ -221,7 +253,7 @@ export function CategoriesPage({
                             </div>
                             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
                               <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
-                                {eurPlain(stat.spent)} / {stat.budget != null ? eurPlain(stat.budget) : "no budget"}
+                                {eurPlain(stat.spent)} / {stat.budget != null ? eurPlain(stat.budget) : budgetsKnown ? "no budget" : "—"}
                               </span>
                               <span style={{ fontSize: 11, fontWeight: 600, color: stat.color }}>{pctStr}</span>
                             </div>
@@ -305,7 +337,13 @@ export function CategoriesPage({
         }}
       >
         {selected ? (
-          <CategoryDetail selected={selected} monthLabel={monthLabel} count={selectedTxns.length} txns={selectedTxns} />
+          <CategoryDetail
+            selected={selected}
+            monthLabel={monthLabel}
+            budgetsKnown={budgetsKnown}
+            count={selectedTxns.length}
+            txns={selectedTxns}
+          />
         ) : (
           <div style={{ padding: 26, textAlign: "center", color: "var(--text-3)", fontSize: 13 }}>No categories yet.</div>
         )}
@@ -317,11 +355,15 @@ export function CategoriesPage({
 function CategoryDetail({
   selected,
   monthLabel,
+  budgetsKnown,
   count,
   txns,
 }: {
   selected: CategoryStat;
   monthLabel: string;
+  /** False while the month's budget rows are loading or failed: the panel then says
+      it does not know rather than reporting that no budget exists. */
+  budgetsKnown: boolean;
   count: number;
   txns: Transaction[];
 }) {
@@ -393,7 +435,11 @@ function CategoryDetail({
             <div className="num" style={{ fontSize: 24, fontWeight: 600, marginTop: 2 }}>{eurPlain(selected.total)}</div>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text-3)", textAlign: "right" }}>
-            {isExpense ? "No budget set yet" : `${capitalize(category.type)} categories aren't budgeted`}
+            {!isExpense
+              ? `${capitalize(category.type)} categories aren't budgeted`
+              : budgetsKnown
+                ? "No budget set yet"
+                : "Budget status unavailable"}
           </div>
         </div>
       )}

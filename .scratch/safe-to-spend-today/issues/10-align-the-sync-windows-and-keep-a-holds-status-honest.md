@@ -43,7 +43,10 @@ the existing tests cover a 45-day-old hold -- outside the sweep window entirely 
 but not one 1 to 30 days back in the previous month, which is the reachable case.
 That test gap is the thing to add when this is fixed.
 
-Nothing new to do before then; recorded because three independent passes landing on
+A fourth pass, the branch-wide one run after ticket 08, re-found it again with the
+same January-to-February example and the same conclusion.
+
+Nothing new to do before then; recorded because four independent passes landing on
 it is the strongest signal in this ticket about which defect to fix first.
 
 **2 — A future-dated pending row can never be swept.**

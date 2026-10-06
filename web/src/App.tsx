@@ -283,6 +283,8 @@ export default function App() {
               <CategoriesPage
                 categories={data.categories}
                 summary={data.summary}
+                loading={data.summaryLoading}
+                error={data.summaryError}
                 month={data.filters.month}
                 monthLabel={monthLabel}
                 loadMonthTransactions={data.listMonthTransactions}

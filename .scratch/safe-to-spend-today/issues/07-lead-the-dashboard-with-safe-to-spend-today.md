@@ -234,3 +234,54 @@ a Python environment, and read statically instead. Nothing in this ticket change
 `backend/`, so no backend test was at risk from it; but the caveat stands for the
 branch as a whole and the Definition of Done check should not treat this pass as
 evidence the suite is green.
+
+## Second correction from code review
+
+The branch-wide `/code-review` pass found that my first correction's deletion left a
+hole, and it was right. Removing the `budgets` fallback made `summary == null`
+indistinguishable from "this category has no budget in the month being viewed": with
+no loading or error signal reaching the page, a failed or in-flight `/summary` printed
+"No budget set yet" and `—` utilization for every budgeted category. The owner could
+reasonably read that as their budgets having vanished.
+
+**Probed rather than patched, and the probe widened the defect.** On failure
+`useBurnRateData` sets `summaryError` but does **not** clear `summary`, so after a
+month switch whose fetch fails the page holds the *previous* month's payload. Keying
+the fix on null-ness would have left that case printing May's 300.00 Food budget
+beside June's spend -- which is the stale-month reading my first correction deleted the
+`budgets` fallback for, reintroduced through the error path. One bug, two symptoms.
+
+So the fix keys on the month instead of on null: `summary.month === month` or there is
+nothing to read. Both symptoms close together, and the page now has three states where
+it had two -- a budget row gives the figures and the backend's verdict, a known month
+with no row reads "No budget set yet", and an unknown month reads `—`, "Budget status
+unavailable", and one banner at the top of the list saying whether it is loading or
+what failed.
+
+**The signals already existed and had simply never been handed over.** `summaryLoading`
+and `summaryError` live in `useBurnRateData` and were already passed to `DashboardPage`;
+`CategoriesPage` took six props and neither of them. Two lines at the call site in
+`App.tsx`, and the prop pair is named `loading`/`error` to match the page that already
+had it.
+
+**Verified the two ways available behind a seam with no test runner.** The type check
+passes (`docker build --target build -f web/Dockerfile web/`, which is `tsc -b && vite
+build`). Then four states were rendered through `react-dom/server` and read as text in
+document order: a summary for the month on screen (unchanged -- Food 240.00/300.00, 80%,
+"On track", and Rent still "no budget"), a first load in flight, a cold failure, and a
+failure with the previous month still cached.
+
+**Both halves were mutation-checked, and each mutant printed exactly the failure it is
+there to prevent.** Replacing the month check with plain `summary` prints
+"€240.00 / €300.00 | 80%" for June out of May's payload, with no banner. Forcing
+`budgetsKnown = true` prints "€0.00 / no budget | —" for every category on a failed
+fetch, which is the reviewer's finding verbatim. The harness lived in the scratchpad and
+is gone; nothing was added to `package.json`.
+
+**One adjacent case found while probing, not fixed here, now ticket 11's defect 2.**
+`DashboardPage` has the same exposure in a milder form: its error banner renders only in
+the `error && !summary` branch, so a stale payload plus a failed refresh shows the
+previous month's figures with no banner at all. It is pre-existing, nothing in this
+ticket touches it, and the hero's eyebrow does name the month in the non-current case,
+so there is a weak signal where `CategoriesPage` had none. Recorded with the timezone
+defect it keeps company with rather than widened into here.
