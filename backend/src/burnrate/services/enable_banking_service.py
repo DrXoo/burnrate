@@ -799,12 +799,21 @@ class EnableBankingService:
         A legible response with no rows says the bank has nothing in the window; an
         illegible one says nothing at all. Both yield an empty list, so the shapes are
         recognised here by their *keys* rather than by what they produced: a
-        ``transactions`` list or dict, or top-level ``booked``/``pending`` arrays, even
-        when every one of them is empty.
+        ``transactions`` list, a ``transactions`` object holding ``booked`` or
+        ``pending``, or those arrays at the top level -- even when every one of them is
+        empty.
+
+        The branches mirror ``_extract_transactions`` one for one, deliberately. A
+        ``transactions`` object is not legible merely by being an object: a bank
+        nesting its rows under some other key reports every hold perfectly clearly in
+        a dialect this code does not speak, and accepting that as an empty window
+        sweeps live holds against the bank's own evidence that they are there.
         """
         transactions_node = transactions_payload.get("transactions")
-        if isinstance(transactions_node, list | dict):
+        if isinstance(transactions_node, list):
             return True
+        if isinstance(transactions_node, dict):
+            return "booked" in transactions_node or "pending" in transactions_node
         return "booked" in transactions_payload or "pending" in transactions_payload
 
     def _extract_transactions(self, transactions_payload: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1179,3 +1179,80 @@ def test_a_sync_whose_arrays_arrive_at_the_top_level_still_sweeps() -> None:
 
     assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is None
     assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "other-1")) is not None
+
+
+class UnrecognisedTransactionsShapeClient(PendingTransactionsClient):
+    """A bank that wraps its rows in a ``transactions`` object the extractor cannot read.
+
+    The two shapes `_extract_transactions` knows put the rows in ``booked`` and
+    ``pending`` arrays, either inside ``transactions`` or at the top level. A third
+    bank nesting them under some other key is reporting its holds perfectly clearly
+    -- just not in a dialect this code speaks. Every row falls on the floor, which is
+    indistinguishable from an empty window unless the shape itself is checked.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unrecognised = False
+
+    def get_account_transactions(self, **kwargs):
+        if self.unrecognised:
+            self.transaction_requests.append(kwargs)
+            return {"transactions": {"entries": [make_pending_payload(transaction_id="hold-1")]}}
+        return super().get_account_transactions(**kwargs)
+
+
+def test_a_sync_whose_transactions_arrive_in_an_unrecognised_shape_sweeps_nothing() -> None:
+    # The sharpest form of the gate's job: this bank is still reporting the hold, in a
+    # shape the extractor cannot read. Treating that as a legible empty window deletes
+    # the row against the bank's own evidence that it is live -- and the loss is not
+    # self-healing, because every later sync reads the same unreadable shape.
+    db = make_session()
+    client = UnrecognisedTransactionsShapeClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is not None
+
+    client.unrecognised = True
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    survivor = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1"))
+    assert survivor is not None
+    assert survivor.amount == Decimal("-40.00")
+
+
+class FlatTransactionsListClient(PendingTransactionsClient):
+    """A bank that returns one flat ``transactions`` list, each row carrying its status.
+
+    The third shape ``_extract_transactions`` knows, and the one the rest of this
+    module's fakes never produce in a sweep. Read as illegible it would be the
+    mirror of the top-level-arrays case: the gate would never let a sweep run for
+    this bank, and its phantom holds would accumulate for ever.
+    """
+
+    def get_account_transactions(self, **kwargs):
+        rows = (
+            list(self.pending_payloads)
+            if kwargs.get("transaction_status") == "PDNG"
+            else list(self.booked_payloads)
+        )
+        self.transaction_requests.append(kwargs)
+        return {"transactions": rows, "continuation_key": None}
+
+
+def test_a_sync_whose_transactions_arrive_as_one_flat_list_still_sweeps() -> None:
+    db = make_session()
+    client = FlatTransactionsListClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is not None
+
+    # The hold is released, and a settled purchase arrives in the booked response.
+    client.pending_payloads = []
+    client.booked_payloads = [settle(make_pending_payload(transaction_id="other-1"))]
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is None
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "other-1")) is not None
