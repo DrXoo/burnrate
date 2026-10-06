@@ -43,10 +43,16 @@ class FetchedTransactions:
 
     ``external_ids`` is every identifier the bank reported in the window, which is
     what the pending sweep compares its stored rows against.
+
+    ``readable`` records whether every page arrived in a payload shape this service
+    understands. An unreadable page reports no rows, which is indistinguishable from
+    "the bank has nothing here" unless it is tracked separately -- and the sweep
+    reads the difference as deleting every hold or none.
     """
 
     imported_count: int = 0
     external_ids: set[str] = field(default_factory=set)
+    readable: bool = True
 
 
 @dataclass
@@ -521,12 +527,13 @@ class EnableBankingService:
             date_to=pending_to,
             transaction_status="PDNG",
         )
-        self._sweep_stale_pending_transactions(
-            local_account=local_account,
-            date_from=pending_from,
-            date_to=pending_to,
-            reported_external_ids=booked.external_ids | pending.external_ids,
-        )
+        if booked.readable and pending.readable:
+            self._sweep_stale_pending_transactions(
+                local_account=local_account,
+                date_from=pending_from,
+                date_to=pending_to,
+                reported_external_ids=booked.external_ids | pending.external_ids,
+            )
         return booked.imported_count + pending.imported_count
 
     def _sweep_stale_pending_transactions(
@@ -558,6 +565,16 @@ class EnableBankingService:
         none of the rows on the pages that never arrived, and sweeping on it would
         delete rows that are still live. Deleting rather than flagging is safe because
         the trailing fetch window makes a wrong deletion self-healing on the next sync.
+
+        The caller also gates this on every page arriving in a payload shape this
+        service understands, which the raise above does not cover: a 200 whose body
+        the extractor does not recognise, and a 200 error envelope, both read as a
+        successful fetch of zero rows. An empty ``reported_external_ids`` is therefore
+        a real claim -- the bank reported nothing in this window, which restricted
+        production does for an empty account -- and the expanding ``NOT IN`` renders
+        as always-true on it, so every hold in the window is swept. That is intended
+        *only* because the payload was legible; on an illegible one the same set would
+        delete committed spend the owner's figures depend on.
         """
         resolved = effective_date()
         stale = self.db.scalars(
@@ -600,6 +617,8 @@ class EnableBankingService:
                 continuation_key=continuation_key,
             )
             transactions = self._extract_transactions(transactions_payload)
+            if not self._is_readable_transactions_payload(transactions_payload):
+                fetched.readable = False
             payload_summary = self._summarize_transactions_payload(transactions_payload)
             log_level = logging.INFO if transactions else logging.WARNING
             logger.log(
@@ -773,6 +792,20 @@ class EnableBankingService:
 
         RulesService(db=self.db).apply_rule_to_transaction(transaction=transaction)
         return created
+
+    def _is_readable_transactions_payload(self, transactions_payload: dict[str, Any]) -> bool:
+        """Whether the payload is one of the shapes ``_extract_transactions`` knows.
+
+        A legible response with no rows says the bank has nothing in the window; an
+        illegible one says nothing at all. Both yield an empty list, so the shapes are
+        recognised here by their *keys* rather than by what they produced: a
+        ``transactions`` list or dict, or top-level ``booked``/``pending`` arrays, even
+        when every one of them is empty.
+        """
+        transactions_node = transactions_payload.get("transactions")
+        if isinstance(transactions_node, list | dict):
+            return True
+        return "booked" in transactions_payload or "pending" in transactions_payload
 
     def _extract_transactions(self, transactions_payload: dict[str, Any]) -> list[dict[str, Any]]:
         transactions_node = transactions_payload.get("transactions")

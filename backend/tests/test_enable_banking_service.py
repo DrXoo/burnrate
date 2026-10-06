@@ -1104,3 +1104,78 @@ def test_the_sweep_leaves_a_scheduled_payment_the_booked_fetch_reported() -> Non
     scheduled = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "schd-1"))
     assert scheduled is not None
     assert scheduled.id == original_row_id
+
+
+class UnreadablePayloadClient(PendingTransactionsClient):
+    """A bank that answers 200 with a body the extractor does not recognise.
+
+    From the sweep's side this is indistinguishable from an account the bank reports
+    as empty, and both arrive without raising: ``_extract_transactions`` falls back
+    through two known payload shapes and logs a warning when neither matches, and a
+    200 error envelope looks exactly the same. Restricted production returning empty
+    results for a linked account is a documented product state, not an error.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unreadable = False
+
+    def get_account_transactions(self, **kwargs):
+        if self.unreadable:
+            self.transaction_requests.append(kwargs)
+            return {"message": "no transactions available"}
+        return super().get_account_transactions(**kwargs)
+
+
+def test_a_sync_that_reports_no_transactions_at_all_sweeps_nothing() -> None:
+    # The sweep deletes a pending row the bank did not mention. A response that
+    # mentions nothing at all is not evidence about any particular row, and acting
+    # on it deletes every live hold in the window -- committed spend the owner's
+    # figures depend on, gone in one sync that recorded itself a success.
+    db = make_session()
+    client = UnreadablePayloadClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1"))
+    assert hold is not None
+
+    client.unreadable = True
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    survivor = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1"))
+    assert survivor is not None
+    assert survivor.amount == Decimal("-40.00")
+
+
+class TopLevelArraysClient(PendingTransactionsClient):
+    """A bank that returns the arrays at the top level, with no ``transactions`` wrapper.
+
+    ``_extract_transactions`` has carried this shape as its last fallback since the
+    first import landed, so the legibility gate has to recognise it as well. Read as
+    illegible, a bank like this one would never have a sweep run at all and its
+    phantom holds would accumulate for ever -- the failure the gate itself introduces
+    if it is written against one payload shape.
+    """
+
+    def get_account_transactions(self, **kwargs):
+        if kwargs.get("transaction_status") == "PDNG":
+            return {"booked": [], "pending": list(self.pending_payloads)}
+        return {"booked": list(self.booked_payloads), "pending": []}
+
+
+def test_a_sync_whose_arrays_arrive_at_the_top_level_still_sweeps() -> None:
+    db = make_session()
+    client = TopLevelArraysClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is not None
+
+    # The hold is released, and a settled purchase arrives in the booked response.
+    client.pending_payloads = []
+    client.booked_payloads = [settle(make_pending_payload(transaction_id="other-1"))]
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is None
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "other-1")) is not None
