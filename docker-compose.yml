@@ -29,7 +29,12 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      # Bound to the loopback interface: nginx reaches the backend over the
+      # compose network, so publishing this to the LAN only offered a path that
+      # bypasses the proxy -- and with --forwarded-allow-ips it would have let
+      # anyone on the LAN spoof X-Forwarded-For past both rate limiters. Local
+      # `vite dev` still reaches it on 127.0.0.1.
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./secrets:/run/secrets:ro
     depends_on:
