@@ -42,9 +42,18 @@ def send_sync_notification(
     """Push a Telegram message when a sync pass imported new transactions.
 
     Sending is a stateless outbound call to Telegram's API, so this runs from the
-    worker without any coupling to the bot process. It never raises: a single
+    worker without any coupling to the bot process. No send can raise: a single
     failed send is logged and skipped so notification problems can't disturb the
     sync run. Returns how many chats were notified.
+
+    ``now`` must be an aware datetime if given -- it dates the month whose unknown
+    count the message quotes, and ``civil_date`` rejects a naive instant rather
+    than guessing UTC for it. The worker passes nothing and gets the current
+    instant; the parameter exists so tests can fix the day. This is the one
+    precondition in this module that is not merely best-effort, so it is stated
+    rather than defended against: silently reading a naive instant as UTC is the
+    bug the guard exists to prevent, and swallowing the error here would move a
+    misconfiguration into a wrong month in the message.
     """
     if not settings.telegram_notify_on_sync:
         return 0
