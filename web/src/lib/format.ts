@@ -4,6 +4,7 @@ import type {
   Connection,
   MatchField,
   MatchOperator,
+  SafeToSpendStatus,
   Transaction,
 } from "../types";
 
@@ -40,6 +41,18 @@ export function usageTone(status: BudgetUsageStatus): Tone {
     return "watch";
   }
   return "good";
+}
+
+/** Map the allowance's status to a design tone.
+
+    A status-to-colour lookup, not a rule: the band behind on_track/watch/over is the
+    backend's, and the two statuses with no allowance to report carry no verdict, so
+    they read neutral rather than borrowing a colour they have not earned. */
+export function safeToSpendTone(status: SafeToSpendStatus): Tone {
+  if (status === "no_budget" || status === "not_current_month") {
+    return "neutral";
+  }
+  return usageTone(status);
 }
 
 /** Category swatch color: expenses take their budget tone, income is positive, transfers are muted. */

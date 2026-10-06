@@ -3,6 +3,8 @@ export type MatchField = "description" | "merchant_name" | "counterparty_name";
 export type MatchOperator = "contains" | "equals" | "starts_with" | "ends_with" | "regex";
 export type BudgetStatus = "active" | "scheduled" | "inactive";
 export type BudgetUsageStatus = "on_track" | "watch" | "over";
+/** Why the allowance reads as it does. The amount is null for the first two. */
+export type SafeToSpendStatus = "no_budget" | "not_current_month" | BudgetUsageStatus;
 
 export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
 
@@ -134,6 +136,12 @@ export interface BudgetUsage {
 
 export interface SummaryDashboard {
   month: string;
+  // Null when there is no allowance to report, which the status distinguishes from
+  // an allowance of zero: budgets exist, the month is current, they are used up.
+  safe_to_spend_today_amount: string | null;
+  safe_to_spend_status: SafeToSpendStatus;
+  fixed_overrun_amount: string;
+  pending_spend_amount: string;
   current_balance_amount: string;
   current_balance_currency: string | null;
   monthly_spending_amount: string;

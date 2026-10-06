@@ -4,13 +4,16 @@ import {
   TONE_COLOR,
   TONE_DIM,
   TONE_LABEL,
+  currentMonthValue,
   eur,
   eurPlain,
+  formatMonthLabel,
+  safeToSpendTone,
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
 import type { HeroMode } from "../../lib/viewTypes";
-import type { SummaryDashboard } from "../../types";
+import type { SafeToSpendStatus, SummaryDashboard } from "../../types";
 
 interface DashboardPageProps {
   summary: SummaryDashboard | null;
@@ -44,44 +47,53 @@ function clampFraction(value: number): number {
   return Math.min(1, value);
 }
 
-/** Budget model: how the month is pacing against planned spend. */
+const ALLOWANCE_BADGE: Record<"on_track" | "watch" | "over", string> = {
+  on_track: "On track",
+  watch: "Watch",
+  over: "Over plan",
+};
+
+interface Coach {
+  title: string;
+  body: string;
+}
+
+/** What a banded allowance means, in words. Keyed off the backend's verdict, so the
+    dashboard and the bot cannot disagree about how the month is going. */
+const ALLOWANCE_COACH: Record<"on_track" | "watch" | "over", Coach> = {
+  on_track: {
+    title: "On plan for this point in the month",
+    body: "Your variable budgets have about as much left as the plan expects by now. Today's number is what you can spend without putting the rest of the month out of reach.",
+  },
+  watch: {
+    title: "Spending ahead of plan",
+    body: "Less is left of your variable budgets than the plan expects by now. Today's number already reflects it — staying under it brings the month back.",
+  },
+  over: {
+    title: "Well past the plan for this point in the month",
+    body: "Much less is left of your variable budgets than the plan expects by now. Today's number spreads what little remains over the days still to come.",
+  },
+};
+
+/**
+ * Hero model: the month's verdict, dressed for the gauge and the bar.
+ *
+ * No threshold and no money arithmetic live here. The tone is read off
+ * safe_to_spend_status, and the only numbers this computes are fractions that
+ * become an arc length or a bar width -- never a figure the owner reads.
+ */
 function useHeroModel(summary: SummaryDashboard) {
   return useMemo(() => {
     const budget = num(summary.monthly_budget_amount);
-    const budgetedSpend = num(summary.budgeted_spending_amount);
-    const projected = num(summary.projected_month_end_spend_amount);
-    const overspend = num(summary.projected_overspend_amount);
+    const tone = safeToSpendTone(summary.safe_to_spend_status);
 
-    const tone: Tone =
-      overspend > 0 ? "over" : budget > 0 && budgetedSpend / budget >= 0.85 ? "watch" : "good";
-
-    const spentFrac = budget > 0 ? clampFraction(budgetedSpend / budget) : 0;
-    const projFrac = budget > 0 ? clampFraction(projected / budget) : 0;
+    const spentFrac = budget > 0 ? clampFraction(num(summary.budgeted_spending_amount) / budget) : 0;
+    const projFrac = budget > 0 ? clampFraction(num(summary.projected_month_end_spend_amount) / budget) : 0;
     const dayFrac = summary.days_in_month > 0 ? clampFraction(summary.days_elapsed / summary.days_in_month) : 0;
-
-    const underBudget = budget - projected;
-    const coach =
-      tone === "over"
-        ? {
-            title: `${eurPlain(overspend)} over budget, projected`,
-            body: "At this pace you'll finish over plan. Trim discretionary spend to pull it back.",
-          }
-        : tone === "watch"
-          ? {
-              title: "Getting close to plan",
-              body: `Spending is near your budget with ${summary.days_elapsed} of ${summary.days_in_month} days elapsed — ease off to stay under.`,
-            }
-          : {
-              title: "Nice — plenty of headroom",
-              body: `You're pacing under plan. On this trend you'll finish about ${eurPlain(Math.max(0, underBudget))} under budget.`,
-            };
 
     return {
       tone,
       statusColor: TONE_COLOR[tone],
-      statusDim: TONE_DIM[tone],
-      statusLabel: TONE_LABEL[tone],
-      coach,
       budget,
       spentFrac,
       projFrac,
@@ -91,6 +103,150 @@ function useHeroModel(summary: SummaryDashboard) {
       dayPct: `${(dayFrac * 100).toFixed(1)}%`,
     };
   }, [summary]);
+}
+
+/**
+ * Whether a month the backend has already called "not current" is behind us.
+ *
+ * Tense only, which is why a date comparison is allowed to decide it. The backend
+ * owns the current-month question, because only it knows the owner's timezone. When
+ * the two disagree -- a browser still on the 30th while APP_TIMEZONE has turned the
+ * month -- the month in question is the one that just closed, so equality reads past.
+ */
+function monthHasPassed(month: string): boolean {
+  return month <= currentMonthValue();
+}
+
+interface Headline {
+  eyebrow: string;
+  value: string;
+  /** A figure gets the full 52px; prose gets a size it can wrap at. */
+  isFigure: boolean;
+  badge: string;
+  /** Standalone line under the balance. It cannot continue a sentence from the
+      figure above it, because the balance line comes between the two. */
+  note: string | null;
+  coach: Coach;
+}
+
+/** The headline slot: the allowance, or why there is no allowance to show. */
+function useHeadline(summary: SummaryDashboard): Headline {
+  return useMemo(() => {
+    if (summary.safe_to_spend_status === "no_budget") {
+      return {
+        eyebrow: "Safe to spend today",
+        value: "Set a budget",
+        isFigure: false,
+        badge: "No budget",
+        note: "Add a monthly budget under Rules & Budgets and this becomes your daily number.",
+        coach: {
+          title: "No variable budget to spend from",
+          body: 'A daily allowance needs a monthly budget to draw on. Add one under Rules & Budgets and the headline starts answering "can I spend this?".',
+        },
+      };
+    }
+
+    if (summary.safe_to_spend_status === "not_current_month") {
+      // That month's outcome against plan is the money-left figure the gauge already
+      // shows -- the slot borrows it rather than deriving anything new. Only the
+      // wording changes, so a finished month reads as achieved and a future one as
+      // planned.
+      const monthName = formatMonthLabel(summary.month);
+      const budgeted = eurPlain(summary.monthly_budget_amount);
+      const unavailable = "A daily allowance only means something inside the month you are in.";
+      return monthHasPassed(summary.month)
+        ? {
+            eyebrow: `${monthName} · against plan`,
+            value: eur(summary.money_left_amount),
+            isFigure: true,
+            badge: "Month closed",
+            note: `What ${monthName} finished with, of the ${budgeted} it had budgeted.`,
+            coach: {
+              title: `${monthName} is closed`,
+              body: `${unavailable} The headline shows how that month finished against its budget instead.`,
+            },
+          }
+        : {
+            eyebrow: `${monthName} · planned`,
+            value: eur(summary.money_left_amount),
+            isFigure: true,
+            badge: "Not started yet",
+            note: `What ${monthName} plans to have left of the ${budgeted} budgeted. Nothing is spent yet.`,
+            coach: {
+              title: `${monthName} has not started`,
+              body: `${unavailable} The headline shows what that month plans, not what it achieved.`,
+            },
+          };
+    }
+
+    // The domain pairs a null amount with exactly the two statuses above. Restated
+    // here because nothing in the type system ties the two fields together, so this
+    // is what turns a change to that pairing into a visible state rather than a
+    // crash on the headline.
+    if (summary.safe_to_spend_today_amount == null) {
+      return {
+        eyebrow: "Safe to spend today",
+        value: "Not available",
+        isFigure: false,
+        badge: "Unavailable",
+        note: "The backend reported a status but no amount.",
+        coach: {
+          title: "No allowance to show",
+          body: "The month has a status but no amount to go with it. Nothing is wrong with your data; the dashboard simply has nothing to print here.",
+        },
+      };
+    }
+
+    return {
+      eyebrow: "Safe to spend today",
+      value: eur(summary.safe_to_spend_today_amount),
+      isFigure: true,
+      // "Over plan", not TONE_LABEL's "Over budget": the allowance is banded against
+      // On-Plan Remaining, so the budget total is not what it has overshot.
+      badge: ALLOWANCE_BADGE[summary.safe_to_spend_status],
+      note: null,
+      coach: ALLOWANCE_COACH[summary.safe_to_spend_status],
+    };
+  }, [summary]);
+}
+
+interface Disclosure {
+  amount: string;
+  label: string;
+  title: string;
+}
+
+/**
+ * What the headline does not account for, shown beside it when there is any.
+ *
+ * Each is a backend figure printed as it arrives; the only test applied is whether
+ * there is anything to disclose.
+ */
+function useDisclosures(summary: SummaryDashboard): Disclosure[] {
+  return useMemo(
+    () =>
+      [
+        {
+          amount: summary.unbudgeted_spending_amount,
+          label: "unbudgeted",
+          title:
+            "Spent this month in expense categories with no active budget. The allowance is on a budgeted basis, so it does not count this — hence showing it here.",
+        },
+        {
+          amount: summary.pending_spend_amount,
+          label: "pending",
+          title:
+            "Authorized by the bank but not yet settled. Already deducted from the allowance, so the number does not invite you to spend the same money twice.",
+        },
+        {
+          amount: summary.fixed_overrun_amount,
+          label: "fixed overrun",
+          title:
+            "Fixed commitments that came in above their estimate. Money already gone, so it comes out of the allowance.",
+        },
+      ].filter((disclosure) => num(disclosure.amount) > 0),
+    [summary],
+  );
 }
 
 /** Savings model: the backend's share-of-income verdict, dressed for the gauge. */
@@ -134,6 +290,32 @@ function StatusBadge({ tone, label }: { tone: Tone; label: string }) {
       }}
     >
       <span style={{ width: 7, height: 7, borderRadius: "50%", background: TONE_COLOR[tone] }} />
+      {label}
+    </div>
+  );
+}
+
+function DisclosureChip({ amount, label, title }: Disclosure) {
+  return (
+    <div
+      title={title}
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        gap: 5,
+        padding: "3px 9px",
+        borderRadius: 7,
+        background: "var(--bg-4)",
+        border: "1px solid var(--line-2)",
+        fontSize: 11.5,
+        color: "var(--text-2)",
+        whiteSpace: "nowrap",
+        cursor: "help",
+      }}
+    >
+      <span className="num" style={{ fontWeight: 600, color: "var(--text)" }}>
+        {eurPlain(amount)}
+      </span>
       {label}
     </div>
   );
@@ -349,11 +531,14 @@ function DashboardContent({
   includedAccountCount: number;
 }) {
   const hero = useHeroModel(summary);
+  const headline = useHeadline(summary);
+  const disclosures = useDisclosures(summary);
   const savings = useSavingsModel(summary);
 
   return (
     <div>
-      {/* HERO — Current balance is the headline, twin gauges read the month. */}
+      {/* HERO — Safe to Spend Today is the headline, the balance sits under it, twin
+          gauges read the month as a whole. */}
       <div
         className="br-hero"
         style={{
@@ -375,7 +560,7 @@ function DashboardContent({
           }}
         />
 
-        {/* Headline: current balance + overall status */}
+        {/* Headline: what you can spend today, with the balance kept directly beneath it */}
         <div
           style={{
             position: "relative",
@@ -386,7 +571,7 @@ function DashboardContent({
             flexWrap: "wrap",
           }}
         >
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div
               style={{
                 fontSize: 11.5,
@@ -396,22 +581,50 @@ function DashboardContent({
                 fontWeight: 600,
               }}
             >
-              Current balance
+              {headline.eyebrow}
             </div>
-            <div className="num" style={{ fontSize: 52, fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.02em", margin: "3px 0 2px" }}>
-              {eur(summary.current_balance_amount)}
+            <div
+              className={headline.isFigure ? "num" : undefined}
+              style={{
+                fontSize: headline.isFigure ? 52 : 30,
+                fontWeight: 600,
+                lineHeight: 1.05,
+                letterSpacing: "-0.02em",
+                margin: "3px 0 4px",
+                color: headline.isFigure ? undefined : "var(--text-2)",
+              }}
+            >
+              {headline.value}
             </div>
             <div style={{ fontSize: 13, color: "var(--text-3)" }}>
-              across {includedAccountCount} included account{includedAccountCount === 1 ? "" : "s"}
+              <span className="num" style={{ color: "var(--text-2)", fontWeight: 600 }}>
+                {eur(summary.current_balance_amount)}
+              </span>{" "}
+              in {includedAccountCount} included account{includedAccountCount === 1 ? "" : "s"}
             </div>
+            {headline.note ? (
+              <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 5, maxWidth: 420, lineHeight: 1.5 }}>
+                {headline.note}
+              </div>
+            ) : null}
           </div>
-          <StatusBadge tone={hero.tone} label={hero.statusLabel} />
+
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+            <StatusBadge tone={hero.tone} label={headline.badge} />
+            {disclosures.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 6, maxWidth: 320 }}>
+                {disclosures.map((disclosure) => (
+                  <DisclosureChip key={disclosure.label} {...disclosure} />
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* Twin visualizations: budget pacing + savings rate */}
         {heroMode === "dial" ? (
           <div
-            className="br-hero-gauges"
+            className="br-hero-row"
             style={{ position: "relative", display: "flex", gap: 30, flexWrap: "wrap", justifyContent: "center", marginTop: 20 }}
           >
             <Gauge
@@ -487,10 +700,10 @@ function DashboardContent({
           }}
         >
           <div style={{ flex: 1, minWidth: 260 }}>
-            <div className="num" style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3, marginBottom: 5 }}>
-              {hero.coach.title}
+            <div style={{ fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3, marginBottom: 5 }}>
+              {headline.coach.title}
             </div>
-            <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--text-2)", maxWidth: 440 }}>{hero.coach.body}</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--text-2)", maxWidth: 440 }}>{headline.coach.body}</div>
           </div>
 
           <div style={{ borderLeft: `2px solid ${hero.statusColor}`, paddingLeft: 13 }}>
