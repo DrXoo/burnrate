@@ -110,13 +110,20 @@ def _alert_expiring_connections(*, session: Session, settings: Settings) -> None
 def build_scheduler(settings: Settings) -> BlockingScheduler:
     """Build a scheduler that runs the sync pass on the configured cron.
 
+    The cron runs on ``APP_TIMEZONE``, the same clock as every other civil date the
+    product derives, because an hour in ``SYNC_CRON`` is one the owner chose by
+    looking at their own day. Pinning it to UTC made "0 23 * * *" fire at 01:00 the
+    following local day for an owner an hour ahead, and on the 1st of a month that
+    run's month window had already rolled over before the old month's last day was
+    fetched. ``APP_TIMEZONE`` is validated as an IANA name in ``Settings``.
+
     Raises ``ValueError`` if ``SYNC_CRON`` is not a valid cron expression so a
     misconfigured worker fails fast at startup instead of silently never syncing.
     """
-    scheduler = BlockingScheduler(timezone="UTC")
+    scheduler = BlockingScheduler(timezone=settings.app_timezone)
     scheduler.add_job(
         run_scheduled_sync,
-        trigger=CronTrigger.from_crontab(settings.sync_cron, timezone="UTC"),
+        trigger=CronTrigger.from_crontab(settings.sync_cron, timezone=settings.app_timezone),
         id=SYNC_JOB_ID,
         max_instances=1,
         coalesce=True,
@@ -127,7 +134,7 @@ def build_scheduler(settings: Settings) -> BlockingScheduler:
 def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    logger.info("Starting sync worker with schedule %s", settings.sync_cron)
+    logger.info("Starting sync worker with schedule %s (%s)", settings.sync_cron, settings.app_timezone)
     scheduler = build_scheduler(settings)
     try:
         scheduler.start()
