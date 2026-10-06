@@ -66,9 +66,13 @@ not see at all. Pending transactions are the reason the chain exists: the
 provider has no booking date for them yet, and a null booking date satisfies no
 month comparison in SQL, so such a row belonged to no month and reached no
 review queue. The import date is a last resort for a row the provider dated not
-at all, and it resolves on the UTC calendar day -- SQL has no portable timezone
-conversion, so a charge imported within hours of a month boundary can land in
-the adjacent month until it books.
+at all, and it resolves on the *database session's* calendar day rather than the
+owner's -- SQL has no portable timezone conversion, so a charge imported within
+hours of a month boundary can land in the adjacent month until it books. That the
+day is UTC is a deployment precondition, not a property of the expression:
+PostgreSQL defaults the session to UTC, and setting `TZ` or `PGTZ` on the database
+container would silently move undated charges between months with no test able to
+catch it. See the docstring in `db/effective_date.py`.
 
 `Provider transaction id` should be unique per provider when reliably available.
 

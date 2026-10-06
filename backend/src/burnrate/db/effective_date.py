@@ -34,6 +34,16 @@ def effective_date() -> ColumnElement[date]:
     using an import instant as a proxy for a date the bank withheld, and it
     self-corrects as soon as the charge books.
 
+    This leg is the one place a civil date is *not* resolved through
+    ``APP_TIMEZONE``, so it can disagree with the very window that selects it: for
+    an owner on ``Pacific/Auckland``, a charge imported at 23:30 UTC on the 30th is
+    filed in that month while ``SummaryService`` is already querying the next one,
+    and the row is invisible in both. It only affects rows the bank dated not at
+    all, which is why it is tolerated rather than worked around; the fix is the
+    stored ``effective_date`` column named in ``docs/technical/database/schema.md``,
+    written at import time from ``civil_date``, which needs a migration and a
+    backfill.
+
     Which day it does resolve on is the *database session's*, not UTC:
     ``date(timestamptz)`` in PostgreSQL converts through the session ``TimeZone``,
     so the same instant yields 2026-06-30 under ``UTC`` and 2026-07-01 under
@@ -49,6 +59,26 @@ def effective_date() -> ColumnElement[date]:
         Transaction.value_date,
         func.date(Transaction.imported_at),
     )
+
+
+def month_window(value: str) -> tuple[date, date]:
+    """Parse ``YYYY-MM`` into the half-open window ``[month_start, month_end)``.
+
+    Lives beside ``within_month`` because the two halves of one convention belong
+    together: this produces the pair, that consumes it. Both services derived the
+    bounds themselves before, each repeating the December rollover and the same
+    error message, so a change to what a month's window means had to be made twice
+    and the two could disagree about December.
+    """
+    try:
+        year_text, month_text = value.split("-", maxsplit=1)
+        month_start = date(int(year_text), int(month_text), 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Month must use YYYY-MM format") from exc
+
+    if month_start.month == 12:
+        return month_start, date(month_start.year + 1, 1, 1)
+    return month_start, date(month_start.year, month_start.month + 1, 1)
 
 
 def within_month(*, month_start: date, month_end: date) -> ColumnElement[bool]:

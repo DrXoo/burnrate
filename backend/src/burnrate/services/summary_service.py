@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
-from burnrate.db.effective_date import within_month
+from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.domain.metrics import MetricStatus, budget_usage_status, savings_verdict
 
@@ -191,28 +191,10 @@ class SummaryService:
         }
 
     def _resolve_month(self, *, month: str | None, reference_day: date) -> tuple[date, date, str]:
-        if month is None:
-            month_value = reference_day.strftime("%Y-%m")
-            month_start = date(reference_day.year, reference_day.month, 1)
-        else:
-            month_start = self._parse_month(month)
-            month_value = month
-
-        if month_start.month == 12:
-            month_end = date(month_start.year + 1, 1, 1)
-        else:
-            month_end = date(month_start.year, month_start.month + 1, 1)
-
+        """Resolve the requested month, defaulting to the one the reference day is in."""
+        month_value = month if month is not None else reference_day.strftime("%Y-%m")
+        month_start, month_end = month_window(month_value)
         return month_start, month_end, month_value
-
-    def _parse_month(self, value: str) -> date:
-        try:
-            year_text, month_text = value.split("-", maxsplit=1)
-            month_start = date(int(year_text), int(month_text), 1)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Month must use YYYY-MM format") from exc
-
-        return month_start
 
     def _days_elapsed_in_month(self, *, month_start: date, reference_day: date, days_in_month: int) -> int:
         month_key = (month_start.year, month_start.month)

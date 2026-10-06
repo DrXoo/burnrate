@@ -551,3 +551,43 @@ def test_summary_service_counts_an_undated_pending_charge_in_the_month_it_was_im
 
     # The seeded Mystery charge plus this one.
     assert summary["uncategorized_count"] == 2
+
+
+def test_summary_service_closes_december_on_the_first_of_january() -> None:
+    # December is the only month whose window crosses a year, and the rollover lived
+    # duplicated in two services with no test on either. A window that stayed in the
+    # same year would end before it started and swallow the whole month.
+    db = make_session()
+    seed_summary_data(db)
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    food = db.query(Category).filter(Category.name == "Food").one()
+    for suffix, booking_date, amount in (
+        ("new-years-eve", date(2026, 12, 31), "-40.00"),
+        ("new-years-day", date(2027, 1, 1), "-25.00"),
+    ):
+        db.add(
+            Transaction(
+                account_id=main_account.id,
+                enable_banking_transaction_id=f"tx-{suffix}",
+                booking_date=booking_date,
+                value_date=booking_date,
+                amount=Decimal(amount),
+                currency="EUR",
+                description="Dinner",
+                merchant_name="Restaurant",
+                counterparty_name=None,
+                direction="debit",
+                status="booked",
+                category_id=food.id,
+                matched_rule_id=None,
+                raw_payload=None,
+                imported_at=datetime(booking_date.year, booking_date.month, booking_date.day, tzinfo=timezone.utc),
+            )
+        )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-12", today=date(2026, 12, 31))
+
+    assert summary["days_in_month"] == 31
+    # New Year's Eve counts, New Year's Day does not: the window ends at 2027-01-01.
+    assert summary["monthly_spending_amount"] == "40.00"
