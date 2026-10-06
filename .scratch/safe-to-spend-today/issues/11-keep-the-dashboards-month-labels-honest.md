@@ -1,9 +1,11 @@
 # 11: Keep the dashboard's month labels honest
 
-**What to build:** Two Web UI defects found by the branch-wide `/code-review` after
-ticket 08, both in the same family: the page states something about a month that it
-does not actually know. Neither is reachable in the owner's current configuration,
-which is why they are their own ticket rather than a correction on ticket 07.
+**What to build:** Three Web UI defects, all in the same family: the page states
+something about a month that it does not actually know. The first two were found by
+the branch-wide `/code-review` after ticket 08 and are not reachable in the owner's
+current configuration, which is why they are their own ticket rather than a
+correction on ticket 07. The third was found by `/code-review` on ticket 10 and *is*
+reachable, which is the one to fix first.
 
 **Blocked by:** None (07 is done; this does not block 09)
 
@@ -12,9 +14,10 @@ which is why they are their own ticket rather than a correction on ticket 07.
 - [ ] A month the backend has called "not current" is never labelled as finished when it has not started
 - [ ] No month label or tense is decided by comparing a UTC-derived month against the owner's timezone-resolved one
 - [ ] A stale summary paired with a failed refresh is visibly stale on the dashboard, as it now is on the Categories page
+- [ ] No caption claims a future month is unspent while the figure beside it says otherwise
 - [ ] Nothing new is computed in the Web UI: the fix adds a label rule or reads a backend field, not a financial one
 
-## The two defects
+## The three defects
 
 **1 — `monthHasPassed` reads a future month as a closed one when `APP_TIMEZONE` is
 behind UTC.**
@@ -70,6 +73,25 @@ than each page inventing its own staleness rule. The shared fix is for the hook 
 expose the summary only for the month it was fetched for, which would make both pages
 correct by construction.
 
+**3 — The future-month caption asserts "Nothing is spent yet" while the figure above
+it can already disagree.**
+
+Found by `/code-review` on ticket 10. `DashboardPage`'s future-month branch captions
+the money-left headline with "What <month> plans to have left of the <budget>
+budgeted. Nothing is spent yet." — a hard-coded claim, not a reading of the payload.
+It is already falsifiable: a standing order arrives as pending (`SCHD` normalizes to
+pending) carrying a value date in a future month, so `effective_date()` files it in
+*that* month, `budgeted_spending` for it is non-zero and `money_left_amount` is below
+the budget before the month starts. The dashboard then prints the reduced figure and
+captions it as untouched.
+
+Unlike defects 1 and 2 this needs no unusual timezone or failed request: a scheduled
+payment and a look at next month is enough, and ticket 10's sweep work means such
+rows now persist correctly rather than being treated as phantoms. The fix is to
+derive the sentence from the figures — say nothing about spend when there is spend,
+or disclose it — rather than from which branch the code is in. No new financial
+computation in the UI: the backend already reports the month's budgeted spending.
+
 ## Testing
 
 `web/` has no test runner and installing one stays out of scope, so verification is
@@ -78,3 +100,6 @@ the affected states through `react-dom/server` and reading them, which is how ti
 07 and its corrections were verified. Defect 1 needs both timezone directions
 rendered, since the naive fix passes one and fails the other. If the fix moves the
 current-month question into the backend, that part is seam 2 and carries a real test.
+Defect 3 renders with a future-dated pending row in the payload, and the figure it
+contradicts comes from seam 2, where a future month with a scheduled payment in it
+can be asserted directly.
