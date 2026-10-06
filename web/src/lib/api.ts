@@ -78,6 +78,13 @@ export async function detectApiBase(): Promise<string> {
     candidates.push(window.BURNRATE_API_BASE);
   }
 
+  // Same-origin first: in every deployed setup nginx proxies /api/v1 to the
+  // backend, so this needs no knowledge of the host's IP or port and is never
+  // subject to CORS. The :8000 candidates below are the `vite dev` fallback,
+  // where nothing is proxying — they only work if the origin is listed in
+  // APP_CORS_ORIGINS, so keep them last.
+  candidates.push(`${window.location.origin}/api/v1`);
+
   const hostname = window.location.hostname;
   const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
   if (localHosts.has(hostname)) {
@@ -87,11 +94,7 @@ export async function detectApiBase(): Promise<string> {
     }
   }
 
-  if (window.location.port === "3000") {
-    candidates.push(`${window.location.protocol}//${hostname}:8000/api/v1`);
-  }
-
-  candidates.push(`${window.location.origin}/api/v1`);
+  candidates.push(`${window.location.protocol}//${hostname}:8000/api/v1`);
 
   const errors: string[] = [];
   for (const candidate of dedupe(candidates)) {
