@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from hashlib import sha256
@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from burnrate.api.schemas.enable_banking import StartAuthorizationRequest
 from burnrate.clock import civil_date
 from burnrate.config import Settings
+from burnrate.db.effective_date import effective_date
 from burnrate.services.connection_expiry import as_utc, expiry_status
 from burnrate.db.models import (
     Account,
@@ -34,6 +35,18 @@ logger = logging.getLogger(__name__)
 # requested valid_until does not exceed "now + maximum_consent_validity" by the
 # time Enable Banking evaluates it (they reject anything over the cap).
 _CONSENT_VALIDITY_MARGIN = timedelta(minutes=5)
+
+
+@dataclass
+class FetchedTransactions:
+    """What one complete paginated fetch produced.
+
+    ``external_ids`` is every identifier the bank reported in the window, which is
+    what the pending sweep compares its stored rows against.
+    """
+
+    imported_count: int = 0
+    external_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -493,7 +506,7 @@ class EnableBankingService:
         pending transactions over open banking simply return nothing for the pending call.
         """
         booked_from, booked_to = self._current_month_transaction_window()
-        imported = self._fetch_and_upsert_transactions(
+        booked = self._fetch_and_upsert_transactions(
             local_account=local_account,
             account_uid=account_uid,
             date_from=booked_from,
@@ -501,14 +514,70 @@ class EnableBankingService:
             transaction_status=None,
         )
         pending_from, pending_to = self._pending_transaction_window()
-        imported += self._fetch_and_upsert_transactions(
+        pending = self._fetch_and_upsert_transactions(
             local_account=local_account,
             account_uid=account_uid,
             date_from=pending_from,
             date_to=pending_to,
             transaction_status="PDNG",
         )
-        return imported
+        self._sweep_stale_pending_transactions(
+            local_account=local_account,
+            date_from=pending_from,
+            date_to=pending_to,
+            reported_external_ids=booked.external_ids | pending.external_ids,
+        )
+        return booked.imported_count + pending.imported_count
+
+    def _sweep_stale_pending_transactions(
+        self,
+        *,
+        local_account: Account,
+        date_from: date,
+        date_to: date,
+        reported_external_ids: set[str],
+    ) -> None:
+        """Delete pending rows in the fetched window that the bank no longer reports.
+
+        A hold that vanishes at the bank was cancelled or has booked under a different
+        identifier, and either way leaving it would keep phantom spend in the owner's
+        figures and clutter in their review queue. Rows the owner marked Ignored are
+        left alone: that flag records a decision they made, and deleting the row would
+        hand the transaction back to the unknown queue on the next import.
+
+        ``reported_external_ids`` must span *every* fetch of the sync, not just the
+        pending one. The test is whether the bank mentioned a row anywhere, because a
+        pending row does not only arrive through the ``PDNG`` call: ``SCHD``
+        normalizes to pending, and ``_extract_transactions`` merges a response's
+        ``pending`` array whichever call produced it. Narrowing this to the pending
+        response deletes a standing order the booked fetch just reported, which the
+        next sync re-imports -- the row oscillates, re-announcing itself and losing its
+        category every other sync.
+
+        The caller gates this on *complete* fetches -- a truncated response would list
+        none of the rows on the pages that never arrived, and sweeping on it would
+        delete rows that are still live. Deleting rather than flagging is safe because
+        the trailing fetch window makes a wrong deletion self-healing on the next sync.
+        """
+        resolved = effective_date()
+        stale = self.db.scalars(
+            select(Transaction).where(
+                Transaction.account_id == local_account.id,
+                Transaction.status == "pending",
+                Transaction.excluded_at.is_(None),
+                # Stated rather than left to three-valued logic: a row with no
+                # provider identifier is not the bank's to delete, and `NULL NOT IN
+                # (...)` would already never match it. Nothing writes such a row
+                # today -- the import is the only writer -- so this is here to keep
+                # the reason visible if manual entry ever lands.
+                Transaction.enable_banking_transaction_id.is_not(None),
+                Transaction.enable_banking_transaction_id.not_in(reported_external_ids),
+                resolved >= date_from,
+                resolved <= date_to,
+            )
+        ).all()
+        for transaction in stale:
+            self.db.delete(transaction)
 
     def _fetch_and_upsert_transactions(
         self,
@@ -518,8 +587,8 @@ class EnableBankingService:
         date_from: date,
         date_to: date,
         transaction_status: str | None,
-    ) -> int:
-        imported = 0
+    ) -> FetchedTransactions:
+        fetched = FetchedTransactions()
         continuation_key: str | None = None
         page_number = 1
         while True:
@@ -548,16 +617,19 @@ class EnableBankingService:
             # whole current month on every sync, so counting all fetched rows would
             # re-report the same transactions (and falsely trigger "N new" alerts).
             for transaction_payload in transactions:
+                external_id = self._transaction_external_id(local_account.id, transaction_payload)
+                fetched.external_ids.add(external_id)
                 if self._upsert_transaction(
                     local_account=local_account,
+                    external_id=external_id,
                     transaction_payload=transaction_payload,
                 ):
-                    imported += 1
+                    fetched.imported_count += 1
             continuation_key = transactions_payload.get("continuation_key")
             if not continuation_key:
                 break
             page_number += 1
-        return imported
+        return fetched
 
     def _current_month_transaction_window(self) -> tuple[date, date]:
         today = civil_date(timezone_name=self.settings.app_timezone)
@@ -651,9 +723,14 @@ class EnableBankingService:
         if currency:
             local_account.latest_balance_currency = currency
 
-    def _upsert_transaction(self, *, local_account: Account, transaction_payload: dict[str, Any]) -> bool:
+    def _upsert_transaction(
+        self,
+        *,
+        local_account: Account,
+        external_id: str,
+        transaction_payload: dict[str, Any],
+    ) -> bool:
         """Insert or update one transaction. Returns True only when a new row was created."""
-        external_id = self._transaction_external_id(local_account.id, transaction_payload)
         transaction = self.db.scalar(
             select(Transaction).where(Transaction.enable_banking_transaction_id == external_id)
         )

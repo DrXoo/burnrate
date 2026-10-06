@@ -209,6 +209,24 @@ For the first version, BurnRate should use a simple sync strategy:
 
 BurnRate should assume that transaction imports may be paginated or refreshed incrementally over time, and it should preserve external identifiers needed for safe re-sync behavior.
 
+### Pending Transaction Reconciliation
+
+Enable Banking returns one status per call, so pending transactions are fetched separately with `PDNG` over a trailing 30-day window. An upsert alone cannot keep that set honest: a hold the bank cancels simply stops appearing, and nothing in a later response says it is gone.
+
+After a **fully successful** fetch for an account — both calls, every page — BurnRate deletes the pending rows inside the pending window whose external identifier was absent from *every* response of that sync. This does two jobs:
+
+* A cancelled hold stops counting as spend and leaves the review queue, instead of accumulating as a phantom forever.
+* A hold that settles under a *different* identifier leaves no twin. The dedup key falls back to a content hash that includes the booking date, which a pending row lacks, so one purchase can hash differently once it books. The sweep removes the hold, because a transaction that has booked stops appearing in the pending response.
+
+Three constraints make the sweep safe, and each will look like a bug without this note:
+
+* **It is gated on a complete fetch.** A response truncated by a mid-pagination failure lists none of the holds on the pages that never arrived, so sweeping on it would delete live rows. The scheduled worker isolates a per-connection failure and commits the session anyway, so a partial sweep would persist.
+* **It is scoped to the fetched window and account.** A pending row older than the trailing window was never asked about, and its absence is not evidence that it is gone.
+* **It tests both calls, not just the `PDNG` one.** A pending row does not only arrive through the pending call: `SCHD` normalizes to pending status, and BurnRate merges a response's `pending` array whichever call returned it. Comparing against the pending response alone deletes a standing order the booked call just reported, and the next sync re-imports it — so the row oscillates, re-announcing itself as new and losing its category every other sync.
+* **It skips rows the owner marked Ignored.** That flag records a decision the owner made; deleting the row would hand the transaction back to the unknown queue on the next import. `excluded_at` is deliberately not reused as a soft-delete marker for swept rows — it means Ignored, and overloading it would corrupt the term.
+
+Deletion rather than flagging is safe because the trailing window makes a wrong deletion self-healing on the next sync. See ADR-0003 for why pending spend is load-bearing in the first place.
+
 ### Transient Error Retries
 
 Enable Banking API calls are retried automatically on transient failures inside the infrastructure client (`EnableBankingClient`):

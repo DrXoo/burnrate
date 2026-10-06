@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import create_engine, select
@@ -22,6 +23,7 @@ from burnrate.db.models import (
     SyncSession,
     Transaction,
 )
+from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.rules_service import RulesService
 
@@ -779,3 +781,326 @@ def test_enable_banking_service_applies_existing_rules_during_import() -> None:
     assert second_transaction is not None
     assert second_transaction.category_id == category.id
     assert second_transaction.matched_rule_id is not None
+
+
+def owner_today() -> date:
+    """The owner's calendar day, which ``make_settings`` leaves at UTC."""
+    return datetime.now(timezone.utc).date()
+
+
+def make_pending_payload(
+    *,
+    transaction_id: str | None = None,
+    amount: str = "40.00",
+    value_date: date | None = None,
+    remittance: str = "Dinner hold",
+) -> dict[str, object]:
+    """A pending card authorization as a bank reports one: no booking date yet.
+
+    Omitting ``transaction_id`` is the second payload shape the sweep has to
+    handle -- the bank supplies no stable identifier, so the import falls back to
+    hashing the content.
+    """
+    payload: dict[str, object] = {
+        "transaction_amount": {"amount": amount, "currency": "EUR"},
+        "credit_debit_indicator": "DBIT",
+        "status": "PDNG",
+        "value_date": (value_date or owner_today() - timedelta(days=1)).isoformat(),
+        "remittance_information": [remittance],
+        "creditor": {"name": "Restaurant"},
+        "debtor": {"name": "Owner"},
+    }
+    if transaction_id is not None:
+        payload["transaction_id"] = transaction_id
+    return payload
+
+
+class PendingTransactionsClient(FakeEnableBankingClient):
+    """A bank that exposes pending transactions, each response under the test's control.
+
+    Dates are relative to today because the pending fetch window is a trailing
+    30 days from the owner's calendar day.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.booked_payloads: list[dict[str, object]] = []
+        self.pending_payloads: list[dict[str, object]] = [make_pending_payload(transaction_id="hold-1")]
+
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        transaction_status: str | None = None,
+        continuation_key: str | None = None,
+    ):
+        assert account_id == "account-uid-1"
+        self.transaction_requests.append(
+            {
+                "account_id": account_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "transaction_status": transaction_status,
+                "continuation_key": continuation_key,
+            }
+        )
+        if transaction_status == "PDNG":
+            return {"transactions": {"booked": [], "pending": list(self.pending_payloads)}}
+        return {"transactions": {"booked": list(self.booked_payloads), "pending": []}}
+
+
+def link_bank(*, service: EnableBankingService, db: Session) -> str:
+    """Complete the authorization handshake and return the new connection id."""
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+    callback = service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+    db.commit()
+    return callback["connection_id"]
+
+
+def test_sync_deletes_a_pending_hold_the_bank_stopped_reporting() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is not None
+
+    # The hold was cancelled at the bank, so it is absent from the next pending response.
+    client.pending_payloads = []
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is None
+
+
+def test_sync_keeps_a_pending_hold_the_bank_still_reports() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+
+    # The client keeps reporting hold-1: the restaurant has not released it yet.
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    holds = db.scalars(select(Transaction).where(Transaction.status == "pending")).all()
+    assert len(holds) == 1
+    assert holds[0].enable_banking_transaction_id == "hold-1"
+    assert holds[0].amount == Decimal("-40.00")
+
+
+def settle(pending_payload: dict[str, object]) -> dict[str, object]:
+    """The same purchase once the bank books it: a booking date arrives, the status changes.
+
+    For a bank that supplies no stable identifier this is what makes the row a
+    twin -- the content hash standing in for the identifier covers the booking
+    date, so the booked copy of one purchase hashes differently from its hold.
+    """
+    booked = dict(pending_payload)
+    booked["status"] = "BOOK"
+    booked["booking_date"] = owner_today().isoformat()
+    return booked
+
+
+def test_a_pending_hold_that_books_under_a_new_identifier_leaves_no_twin() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    # This bank supplies no transaction_id, so the import falls back to the content hash.
+    hold = make_pending_payload()
+    client.pending_payloads = [hold]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    assert len(db.scalars(select(Transaction)).all()) == 1
+
+    # The dinner settles: it appears in the booked response and leaves the pending one.
+    client.pending_payloads = []
+    client.booked_payloads = [settle(hold)]
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    transactions = db.scalars(select(Transaction)).all()
+    assert len(transactions) == 1
+    assert transactions[0].status == "booked"
+    assert transactions[0].amount == Decimal("-40.00")
+
+
+class FailingSecondPendingPageClient(PendingTransactionsClient):
+    """The pending fetch returns one page and then fails, so the response is truncated."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_page_payloads: list[dict[str, object]] = []
+
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        transaction_status: str | None = None,
+        continuation_key: str | None = None,
+    ):
+        if transaction_status != "PDNG":
+            return super().get_account_transactions(
+                account_id=account_id,
+                date_from=date_from,
+                date_to=date_to,
+                transaction_status=transaction_status,
+                continuation_key=continuation_key,
+            )
+        if continuation_key is None:
+            return {
+                "transactions": {"booked": [], "pending": list(self.first_page_payloads)},
+                "continuation_key": "pending-page-2",
+            }
+        raise EnableBankingAPIError(status_code=502, detail="pending page unavailable")
+
+
+def test_a_pending_fetch_that_fails_mid_pagination_sweeps_nothing() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    hold_one = make_pending_payload(transaction_id="hold-1")
+    hold_two = make_pending_payload(transaction_id="hold-2", amount="12.50", remittance="Lunch hold")
+    client.pending_payloads = [hold_one, hold_two]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    assert len(db.scalars(select(Transaction).where(Transaction.status == "pending")).all()) == 2
+
+    # Only hold-1 arrives before the fetch dies; hold-2 was on the page that never came,
+    # so a sweep reading the truncated response would delete a hold that is still live.
+    failing_client = FailingSecondPendingPageClient()
+    failing_client.first_page_payloads = [hold_one]
+    failing_service = EnableBankingService(db=db, settings=make_settings(), client=failing_client)
+    with pytest.raises(EnableBankingAPIError):
+        failing_service.sync_connection(connection_id=connection_id)
+    # The scheduled run isolates a per-connection failure and commits the session anyway.
+    db.commit()
+
+    holds = db.scalars(select(Transaction).where(Transaction.status == "pending")).all()
+    assert {hold.enable_banking_transaction_id for hold in holds} == {"hold-1", "hold-2"}
+
+
+def test_the_sweep_leaves_a_pending_hold_the_owner_ignored() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1"))
+    assert hold is not None
+    hold.excluded_at = datetime.now(timezone.utc)
+    db.commit()
+
+    # The bank stops reporting it, but Ignored is a decision the owner made: deleting
+    # the row would hand the transaction back to the unknown queue on the next import.
+    client.pending_payloads = []
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    ignored = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1"))
+    assert ignored is not None
+    assert ignored.excluded_at is not None
+
+
+def test_a_hold_with_no_identifier_survives_resync_on_its_content_hash() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    # No transaction_id: the sweep has to recognise the row by the same fallback hash
+    # the import stored it under, or a still-live hold churns on every sync.
+    client.pending_payloads = [make_pending_payload()]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    holds = db.scalars(select(Transaction).where(Transaction.status == "pending")).all()
+    assert len(holds) == 1
+    original_row_id = holds[0].id
+
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    holds = db.scalars(select(Transaction).where(Transaction.status == "pending")).all()
+    assert len(holds) == 1
+    assert holds[0].id == original_row_id
+
+
+def test_the_sweep_leaves_a_pending_hold_older_than_the_fetched_window() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    client.pending_payloads = [
+        make_pending_payload(transaction_id="hold-old", value_date=owner_today() - timedelta(days=45))
+    ]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+
+    # The pending fetch covers a trailing 30 days, so the bank was never asked about
+    # this hold: its absence from the response is not evidence that it is gone.
+    client.pending_payloads = []
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-old")) is not None
+
+
+class StandingOrderClient(FakeEnableBankingClient):
+    """A bank that reports a scheduled payment in the default call, not the PDNG one.
+
+    ``_extract_transactions`` merges a response's ``pending`` array whichever call
+    produced it, and ``SCHD`` normalizes to pending, so a row with pending status can
+    enter from the booked fetch. The sweep has to recognise it as reported.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scheduled_payloads: list[dict[str, object]] = [
+            {
+                "transaction_id": "schd-1",
+                "transaction_amount": {"amount": "60.00", "currency": "EUR"},
+                "credit_debit_indicator": "DBIT",
+                "status": "SCHD",
+                "booking_date": owner_today().isoformat(),
+                "value_date": owner_today().isoformat(),
+                "remittance_information": ["Gym standing order"],
+            }
+        ]
+
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        transaction_status: str | None = None,
+        continuation_key: str | None = None,
+    ):
+        assert account_id == "account-uid-1"
+        if transaction_status == "PDNG":
+            return {"transactions": {"booked": [], "pending": []}}
+        return {"transactions": {"booked": [], "pending": list(self.scheduled_payloads)}}
+
+
+def test_the_sweep_leaves_a_scheduled_payment_the_booked_fetch_reported() -> None:
+    db = make_session()
+    service = EnableBankingService(db=db, settings=make_settings(), client=StandingOrderClient())
+    connection_id = link_bank(service=service, db=db)
+    scheduled = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "schd-1"))
+    assert scheduled is not None
+    assert scheduled.status == "pending"
+    original_row_id = scheduled.id
+
+    # The bank keeps reporting it, just not through the pending call. Sweeping on the
+    # pending response alone deletes it, and the next sync re-imports it -- so the row
+    # oscillates, re-announcing itself and losing its category on every other sync.
+    for _ in range(2):
+        assert service.sync_connection(connection_id=connection_id)["transactions_imported"] == 0
+        db.commit()
+
+    scheduled = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "schd-1"))
+    assert scheduled is not None
+    assert scheduled.id == original_row_id
