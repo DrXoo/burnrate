@@ -13,7 +13,7 @@ import {
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
-import type { Budget, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
+import type { Budget, BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
 
 interface CategoriesPageProps {
   categories: Category[];
@@ -27,6 +27,10 @@ interface CategoriesPageProps {
 
 interface CategoryStat {
   category: Category;
+  /** The month's budget row from the backend, when this category has one. Every
+      budget figure and the verdict are read off it, so this page and the dashboard
+      cannot disagree about the same category. */
+  usage: BudgetUsage | undefined;
   budget: number | null;
   spent: number;
   tone: Tone;
@@ -109,19 +113,14 @@ export function CategoriesPage({
       const ledgerSpent = ledgerTotal[category.category_id] ?? 0;
       const spent = usage ? num(usage.spent_amount) : ledgerSpent;
 
-      let tone: Tone = "neutral";
-      if (category.type === "expense") {
-        if (usage) {
-          tone = usageTone(usage.status);
-        } else if (budget && budget > 0) {
-          tone = spent / budget > 1 ? "over" : spent / budget >= 0.85 ? "watch" : "good";
-        } else {
-          tone = "good";
-        }
-      }
+      // Only the backend bands a budget. With no budget row for the month being
+      // viewed there is no verdict to show, so the category reads neutral rather
+      // than this page inventing a threshold of its own.
+      const tone: Tone = category.type === "expense" && usage ? usageTone(usage.status) : "neutral";
 
       return {
         category,
+        usage,
         budget,
         spent,
         tone,
@@ -189,8 +188,8 @@ export function CategoriesPage({
                   {groupStats.map((stat) => {
                     const isSelected = selected?.category.category_id === stat.category.category_id;
                     const isExpense = stat.category.type === "expense";
-                    const barPct = stat.budget && stat.budget > 0 ? `${Math.min(100, (stat.spent / stat.budget) * 100).toFixed(0)}%` : "0%";
-                    const pctStr = stat.budget && stat.budget > 0 ? `${Math.round((stat.spent / stat.budget) * 100)}%` : "—";
+                    const barPct = stat.usage ? `${Math.min(100, Math.max(0, stat.usage.utilization_percent)).toFixed(0)}%` : "0%";
+                    const pctStr = stat.usage ? `${Math.round(stat.usage.utilization_percent)}%` : "—";
                     return (
                       <button
                         key={stat.category.category_id}
@@ -326,15 +325,15 @@ function CategoryDetail({
   count: number;
   txns: Transaction[];
 }) {
-  const { category, budget, spent, tone, color } = selected;
+  const { category, tone, color, usage } = selected;
   const isExpense = category.type === "expense";
-  const hasBudget = isExpense && budget != null && budget > 0;
-  const remaining = budget != null ? budget - spent : 0;
+  // A budget panel needs the month's budget row: that is where the figures come from.
+  const hasBudget = isExpense && usage != null;
   const badgeLabel = hasBudget ? TONE_LABEL[tone] : capitalize(category.type);
   const badgeColor = hasBudget ? color : "var(--text-2)";
   const badgeDim = hasBudget ? TONE_DIM[tone] : "var(--bg-4)";
-  const barPct = hasBudget ? `${Math.min(100, (spent / (budget as number)) * 100).toFixed(0)}%` : "0%";
-  const pctStr = hasBudget ? `${Math.round((spent / (budget as number)) * 100)}%` : "—";
+  const barPct = usage ? `${Math.min(100, Math.max(0, usage.utilization_percent)).toFixed(0)}%` : "0%";
+  const pctStr = usage ? `${Math.round(usage.utilization_percent)}%` : "—";
 
   return (
     <>
@@ -349,21 +348,21 @@ function CategoryDetail({
         {capitalize(category.type)} · {monthLabel} · <span className="num">{count}</span> transactions
       </div>
 
-      {hasBudget ? (
+      {hasBudget && usage ? (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Spent</div>
-              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(spent)}</div>
+              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(usage.spent_amount)}</div>
             </div>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Budget</div>
-              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(budget as number)}</div>
+              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(usage.budget_amount)}</div>
             </div>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Remaining</div>
               <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2, color }}>
-                {remaining >= 0 ? eurPlain(remaining) : `−${eurPlain(-remaining)}`}
+                {eur(usage.remaining_amount)}
               </div>
             </div>
           </div>
