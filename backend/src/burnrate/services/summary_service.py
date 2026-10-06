@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -52,6 +52,14 @@ NO_SPEND = SpendByStatus()
 
 @dataclass(frozen=True)
 class ActiveBudgetWindow:
+    """What one *category* has budgeted for the month being reported.
+
+    One per category, not one per ``Budget`` row: every figure derived from these
+    reads spend that is grouped by category, so a category holding two rows in one
+    month would have its commitment counted once per row. ``amount`` is therefore
+    the sum of that category's active estimates.
+    """
+
     category_id: UUID
     category_name: str
     amount: Decimal
@@ -385,6 +393,21 @@ class SummaryService:
         return Decimal(total_amount).quantize(Decimal("0.01"))
 
     def _get_active_budgets(self, *, month_start: date, month_end: date) -> list[ActiveBudgetWindow]:
+        """One budget window per category, with the month's estimates folded together.
+
+        A category can hold more than one ``Budget`` row overlapping a month, and the
+        spend every derived figure reads is grouped by category. Pairing each row with
+        it counted the whole commitment once per row: a Rent category budgeted 500.00
+        then 600.00 and charged exactly 1100.00 invented 1100.00 of fixed overrun,
+        which zeroed Safe to Spend Today and flagged the month ``over`` for an owner
+        on budget, added the step projection a second time, and printed two Rent rows
+        each claiming all of the spend.
+
+        Summing the estimates is the reading ``monthly_budget`` already takes of the
+        same rows, so the total and the rows beneath it cannot disagree. A category
+        with any fixed row counts as fixed, which is how the spend side has always
+        read it -- so which slice a category belongs to is decided once.
+        """
         rows = self.db.execute(
             select(Budget, Category.name)
             .join(Category, Category.id == Budget.category_id)
@@ -395,16 +418,25 @@ class SummaryService:
             .order_by(Category.name.asc(), Budget.active_from.desc(), Budget.created_at.desc())
         ).all()
 
-        return [
-            ActiveBudgetWindow(
-                category_id=budget.category_id,
-                category_name=category_name,
-                amount=budget.amount.quantize(Decimal("0.01")),
-                currency=budget.currency,
-                is_fixed=budget.is_fixed,
+        folded: dict[UUID, ActiveBudgetWindow] = {}
+        for budget, category_name in rows:
+            amount = budget.amount.quantize(Decimal("0.01"))
+            existing = folded.get(budget.category_id)
+            if existing is None:
+                folded[budget.category_id] = ActiveBudgetWindow(
+                    category_id=budget.category_id,
+                    category_name=category_name,
+                    amount=amount,
+                    currency=budget.currency,
+                    is_fixed=budget.is_fixed,
+                )
+                continue
+            folded[budget.category_id] = replace(
+                existing,
+                amount=(existing.amount + amount).quantize(Decimal("0.01")),
+                is_fixed=existing.is_fixed or budget.is_fixed,
             )
-            for budget, category_name in rows
-        ]
+        return list(folded.values())
 
     def _get_budget_category_spend(
         self,

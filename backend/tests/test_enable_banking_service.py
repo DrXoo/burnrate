@@ -376,12 +376,15 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     today = datetime.now(timezone.utc).date()
     booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
     pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
-    # Booked transactions are fetched for the current month.
-    assert booked_requests[0]["date_from"] == today.replace(day=1)
-    assert booked_requests[0]["date_to"] == today
-    # Pending transactions are fetched separately over a trailing 30-day window.
+    # Pending transactions are fetched separately over a trailing 30-day window,
+    # which is also the window the sweep judges.
     assert pending_requests[0]["date_from"] == today - timedelta(days=30)
     assert pending_requests[0]["date_to"] == today
+    # The booked call covers at least that window. A constraint, not two numbers kept
+    # in step by hand: the sweep deletes a hold the pending response omits, and only
+    # the booked call can bring the settled copy of it back.
+    assert booked_requests[0]["date_from"] <= pending_requests[0]["date_from"]
+    assert booked_requests[0]["date_to"] >= pending_requests[0]["date_to"]
 
 
 def test_reconnect_supersedes_previous_connection_for_same_bank() -> None:
@@ -598,11 +601,12 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     today = datetime.now(timezone.utc).date()
     booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
     pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
-    # The most recent resync fetched booked for the current month and pending over a trailing window.
-    assert booked_requests[-1]["date_from"] == today.replace(day=1)
-    assert booked_requests[-1]["date_to"] == today
+    # The most recent resync fetched both statuses over the trailing window, with the
+    # booked call still covering everything the sweep is allowed to delete.
     assert pending_requests[-1]["date_from"] == today - timedelta(days=30)
     assert pending_requests[-1]["date_to"] == today
+    assert booked_requests[-1]["date_from"] <= pending_requests[-1]["date_from"]
+    assert booked_requests[-1]["date_to"] >= pending_requests[-1]["date_to"]
 
 
 def test_resync_of_unchanged_month_counts_zero_new_transactions() -> None:
@@ -898,16 +902,20 @@ def test_sync_keeps_a_pending_hold_the_bank_still_reports() -> None:
     assert holds[0].amount == Decimal("-40.00")
 
 
-def settle(pending_payload: dict[str, object]) -> dict[str, object]:
+def settle(pending_payload: dict[str, object], *, booking_date: date | None = None) -> dict[str, object]:
     """The same purchase once the bank books it: a booking date arrives, the status changes.
 
     For a bank that supplies no stable identifier this is what makes the row a
     twin -- the content hash standing in for the identifier covers the booking
     date, so the booked copy of one purchase hashes differently from its hold.
+
+    ``booking_date`` defaults to today because most settlements land the day they
+    are seen; a bank that books a charge under the date it was authorized is what
+    makes the fetch window, not just the sweep window, load-bearing.
     """
     booked = dict(pending_payload)
     booked["status"] = "BOOK"
-    booked["booking_date"] = owner_today().isoformat()
+    booked["booking_date"] = (booking_date or owner_today()).isoformat()
     return booked
 
 
@@ -1256,3 +1264,204 @@ def test_a_sync_whose_transactions_arrive_as_one_flat_list_still_sweeps() -> Non
 
     assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-1")) is None
     assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "other-1")) is not None
+
+
+class WindowedTransactionsClient(PendingTransactionsClient):
+    """A bank that answers only for the window it was asked about.
+
+    Every other fake here returns its payloads whatever dates the service
+    requested, so a fetch window too narrow to re-ask for a charge was invisible
+    through them: the service could forget to ask and still be handed the answer.
+    A real bank answers the window and nothing else.
+    """
+
+    def get_account_transactions(
+        self,
+        *,
+        account_id: str,
+        date_from=None,
+        date_to=None,
+        transaction_status: str | None = None,
+        continuation_key: str | None = None,
+    ):
+        payload = super().get_account_transactions(
+            account_id=account_id,
+            date_from=date_from,
+            date_to=date_to,
+            transaction_status=transaction_status,
+            continuation_key=continuation_key,
+        )
+        node = payload["transactions"]
+        return {
+            "transactions": {
+                array: [row for row in node[array] if self._reported_in(row, date_from, date_to)]
+                for array in ("booked", "pending")
+            }
+        }
+
+    @staticmethod
+    def _reported_in(row: dict[str, object], date_from: date, date_to: date) -> bool:
+        reported = row.get("booking_date") or row.get("value_date")
+        return date_from <= date.fromisoformat(str(reported)) <= date_to
+
+
+def test_a_hold_that_books_after_a_month_boundary_is_re_imported_rather_than_lost() -> None:
+    db = make_session()
+    client = WindowedTransactionsClient()
+    hold = make_pending_payload(transaction_id="hold-jan-31", value_date=date(2026, 1, 31))
+    client.pending_payloads = [hold]
+    january = EnableBankingService(
+        db=db,
+        settings=make_settings(),
+        client=client,
+        clock=lambda: datetime(2026, 1, 31, 18, 0, tzinfo=timezone.utc),
+    )
+    connection_id = link_bank(service=january, db=db)
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-jan-31")) is not None
+
+    # Overnight the 40.00 card charge settles, and the bank books it under the date
+    # it was authorized. On the 1st the hold is absent from the pending response and
+    # the booked copy sits in January: a sync that re-asks only for February's booked
+    # transactions sweeps the hold and never learns the charge settled, so 40.00 of
+    # January's spend ends up in neither status and January is understated for good.
+    client.pending_payloads = []
+    client.booked_payloads = [settle(hold, booking_date=date(2026, 1, 31))]
+    february = EnableBankingService(
+        db=db,
+        settings=make_settings(),
+        client=client,
+        clock=lambda: datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc),
+    )
+    february.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    charges = db.scalars(select(Transaction)).all()
+    assert len(charges) == 1
+    assert charges[0].status == "booked"
+    assert charges[0].amount == Decimal("-40.00")
+    assert charges[0].booking_date == date(2026, 1, 31)
+
+
+def test_the_sweep_deletes_a_cancelled_standing_order_dated_in_the_future() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    # A standing order the bank reports today for a date two weeks out. ``SCHD``
+    # normalizes to pending, and its Effective Date resolves to the day it is due,
+    # which ``within_month`` counts as this month's spend.
+    client.pending_payloads = [
+        make_pending_payload(
+            transaction_id="schd-due-later",
+            amount="60.00",
+            value_date=owner_today() + timedelta(days=15),
+            remittance="Gym standing order",
+        )
+        | {"status": "SCHD"}
+    ]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    scheduled = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "schd-due-later"))
+    assert scheduled is not None
+    assert scheduled.status == "pending"
+
+    # The owner cancels it at the bank, so it leaves the response. A sweep that stops
+    # at today can never reach a row dated after today, and the 60.00 would count as
+    # this month's spend for ever. The lower bound is the one that earns its place --
+    # it keeps the sweep from judging days the bank was never asked about -- while a
+    # row dated past today is inside the fetch's subject matter whatever date it carries.
+    client.pending_payloads = []
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    assert db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "schd-due-later")) is None
+
+
+def unmarked(payload: dict[str, object]) -> dict[str, object]:
+    """The same row from a bank that marks status by array, not per transaction."""
+    return {key: value for key, value in payload.items() if key != "status"}
+
+
+def test_the_array_a_row_arrives_in_decides_its_status_when_the_row_does_not() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    client.pending_payloads = [unmarked(make_pending_payload(transaction_id="hold-unmarked"))]
+    client.booked_payloads = [
+        unmarked(settle(make_pending_payload(transaction_id="charge-unmarked", amount="12.00")))
+    ]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    link_bank(service=service, db=db)
+
+    # Storing the hold as booked is the failure ADR-0003 exists to prevent: it
+    # under-reports pending spend, lets a 1.00 pre-authorization project a 900.00 rent
+    # as 1.00, and hides the row from the sweep, which filters on pending status.
+    hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-unmarked"))
+    assert hold is not None
+    assert hold.status == "pending"
+    # The booked array keeps its meaning too: an unmarked row there has settled.
+    charge = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "charge-unmarked"))
+    assert charge is not None
+    assert charge.status == "booked"
+
+
+def test_a_flat_response_to_the_pending_call_stores_its_rows_as_pending() -> None:
+    db = make_session()
+    client = FlatTransactionsListClient()
+    # A bank that uses the flat shape *and* marks status by response rather than per
+    # row: there is no array to imply a status, but the call itself asked for PDNG.
+    client.pending_payloads = [unmarked(make_pending_payload(transaction_id="hold-flat"))]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    link_bank(service=service, db=db)
+
+    # The request is the bank's own context for the answer, and it is strictly better
+    # evidence than "assume settled": storing this as booked under-reports pending
+    # spend, feeds the fixed step projection a partial authorization, and leaves the
+    # row invisible to the sweep for ever.
+    hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-flat"))
+    assert hold is not None
+    assert hold.status == "pending"
+
+
+def test_a_provider_status_in_lower_case_is_still_recognised() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    # The sharp case: the bank spells the code in lower case *and* puts the row in the
+    # booked array, so an unrecognised status falls back to settled and the hold reads
+    # as money already gone. A cancellation code would land the same way.
+    client.booked_payloads = [make_pending_payload(transaction_id="hold-lowercase") | {"status": "pdng"}]
+    client.pending_payloads = []
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    link_bank(service=service, db=db)
+
+    hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-lowercase"))
+    assert hold is not None
+    assert hold.status == "pending"
+
+
+def test_a_charge_the_bank_dated_not_at_all_is_filed_on_the_day_the_sync_ran() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    # No booking date and no value date: the Effective Date chain falls through to the
+    # day the row was imported, which is the only thing that decides which month this
+    # charge counts in.
+    client.pending_payloads = [
+        {
+            "transaction_id": "hold-undated",
+            "transaction_amount": {"amount": "18.00", "currency": "EUR"},
+            "credit_debit_indicator": "DBIT",
+            "status": "PDNG",
+            "remittance_information": ["Undated hold"],
+        }
+    ]
+    service = EnableBankingService(
+        db=db,
+        settings=make_settings(),
+        client=client,
+        clock=lambda: datetime(2026, 1, 31, 18, 0, tzinfo=timezone.utc),
+    )
+    link_bank(service=service, db=db)
+
+    # Stamped from the same clock the fetch window came from. Reading the host's wall
+    # clock instead would file the charge in whatever month the process happens to run
+    # in, which for a row with no dates of its own is the whole of its month membership.
+    hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-undated"))
+    assert hold is not None
+    assert hold.imported_at.date() == date(2026, 1, 31)

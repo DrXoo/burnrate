@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -36,6 +37,10 @@ logger = logging.getLogger(__name__)
 # time Enable Banking evaluates it (they reject anything over the cap).
 _CONSENT_VALIDITY_MARGIN = timedelta(minutes=5)
 
+# How far back a sync re-asks the bank. One number, because the booked fetch, the
+# pending fetch and the sweep all read it: see ``_transaction_window``.
+_TRANSACTION_WINDOW = timedelta(days=30)
+
 
 @dataclass
 class FetchedTransactions:
@@ -55,6 +60,25 @@ class FetchedTransactions:
     readable: bool = True
 
 
+@dataclass(frozen=True)
+class ReportedTransaction:
+    """One row the bank reported, with the status the array it arrived in implies.
+
+    A response marks status per transaction *or* by which array a row sits in, and
+    the two are not interchangeable. Flattening to ``[*booked, *pending]`` and then
+    defaulting an absent status to booked stores a hold as settled spend: it
+    under-reports pending spend, feeds a partial authorization to the fixed step
+    projection -- a 1.00 pre-authorization projecting 900.00 of rent as 1.00, the
+    failure ADR-0003 exists to prevent -- and hides the row from the sweep, which
+    filters on pending status, so it is never cleaned up either.
+
+    Which shape the real bank sends is still unknown, which is why both are carried.
+    """
+
+    payload: dict[str, Any]
+    default_status: str
+
+
 @dataclass
 class ImportSummary:
     accounts_imported: int = 0
@@ -62,10 +86,24 @@ class ImportSummary:
 
 
 class EnableBankingService:
-    def __init__(self, *, db: Session, settings: Settings, client: EnableBankingClient) -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        settings: Settings,
+        client: EnableBankingClient,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.db = db
         self.settings = settings
         self.client = client
+        # The owner's "now", for the two things that decide which month a charge
+        # belongs to: the fetch window and an undated row's import stamp. Injectable
+        # for the same reason ``SummaryService`` takes one -- a hold that books across
+        # a month boundary cannot be exercised on whatever day the suite happens to
+        # run. It deliberately does not reach the sync and expiry timestamps, which
+        # record when the process actually ran.
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def list_connections(self) -> list[dict[str, Any]]:
         """List the current connection for each bank link, newest first.
@@ -505,33 +543,32 @@ class EnableBankingService:
     def _import_account_transactions(self, *, local_account: Account, account_uid: str) -> int:
         """Import booked and pending transactions for one external account.
 
-        Booked transactions are fetched for the current month (the amounts that drive
-        the budgets). Pending transactions are fetched separately with ``PDNG`` over a
-        trailing window, because Enable Banking returns a single status per call and a held
-        transaction may have originated in the previous month. Banks that do not expose
-        pending transactions over open banking simply return nothing for the pending call.
+        Two calls over one window: Enable Banking returns a single status per call,
+        and a held transaction may have originated in the previous month. The window
+        is shared rather than tuned per call -- see ``_transaction_window`` for why
+        the booked call cannot be the narrower of the two. Banks that do not expose
+        pending transactions over open banking simply return nothing for the pending
+        call.
         """
-        booked_from, booked_to = self._current_month_transaction_window()
+        window_from, window_to = self._transaction_window()
         booked = self._fetch_and_upsert_transactions(
             local_account=local_account,
             account_uid=account_uid,
-            date_from=booked_from,
-            date_to=booked_to,
+            date_from=window_from,
+            date_to=window_to,
             transaction_status=None,
         )
-        pending_from, pending_to = self._pending_transaction_window()
         pending = self._fetch_and_upsert_transactions(
             local_account=local_account,
             account_uid=account_uid,
-            date_from=pending_from,
-            date_to=pending_to,
+            date_from=window_from,
+            date_to=window_to,
             transaction_status="PDNG",
         )
         if booked.readable and pending.readable:
             self._sweep_stale_pending_transactions(
                 local_account=local_account,
-                date_from=pending_from,
-                date_to=pending_to,
+                date_from=window_from,
                 reported_external_ids=booked.external_ids | pending.external_ids,
             )
         return booked.imported_count + pending.imported_count
@@ -541,7 +578,6 @@ class EnableBankingService:
         *,
         local_account: Account,
         date_from: date,
-        date_to: date,
         reported_external_ids: set[str],
     ) -> None:
         """Delete pending rows in the fetched window that the bank no longer reports.
@@ -560,6 +596,14 @@ class EnableBankingService:
         response deletes a standing order the booked fetch just reported, which the
         next sync re-imports -- the row oscillates, re-announcing itself and losing its
         category every other sync.
+
+        The window has a lower bound only. The bound is what keeps the sweep from
+        judging rows the bank was never asked about, and that risk is entirely
+        backwards: a row the bank dates *after* today is inside the fetch's subject
+        matter whatever date it carries. An upper bound at today merely put scheduled
+        payments out of reach -- ``SCHD`` normalizes to pending and resolves its
+        Effective Date to the day it falls due, so a standing order the owner cancels
+        before it is charged would have counted as this month's spend for ever.
 
         The caller gates this on *complete* fetches -- a truncated response would list
         none of the rows on the pages that never arrived, and sweeping on it would
@@ -590,7 +634,6 @@ class EnableBankingService:
                 Transaction.enable_banking_transaction_id.is_not(None),
                 Transaction.enable_banking_transaction_id.not_in(reported_external_ids),
                 resolved >= date_from,
-                resolved <= date_to,
             )
         ).all()
         for transaction in stale:
@@ -616,7 +659,10 @@ class EnableBankingService:
                 transaction_status=transaction_status,
                 continuation_key=continuation_key,
             )
-            transactions = self._extract_transactions(transactions_payload)
+            transactions = self._extract_transactions(
+                transactions_payload,
+                requested_status=transaction_status,
+            )
             if not self._is_readable_transactions_payload(transactions_payload):
                 fetched.readable = False
             payload_summary = self._summarize_transactions_payload(transactions_payload)
@@ -632,16 +678,16 @@ class EnableBankingService:
                 len(transactions),
                 payload_summary,
             )
-            # Count only genuinely-new rows: booked transactions are re-fetched for the
-            # whole current month on every sync, so counting all fetched rows would
-            # re-report the same transactions (and falsely trigger "N new" alerts).
-            for transaction_payload in transactions:
-                external_id = self._transaction_external_id(local_account.id, transaction_payload)
+            # Count only genuinely-new rows: the whole window is re-fetched on every
+            # sync, so counting all fetched rows would re-report the same transactions
+            # (and falsely trigger "N new" alerts).
+            for reported in transactions:
+                external_id = self._transaction_external_id(local_account.id, reported.payload)
                 fetched.external_ids.add(external_id)
                 if self._upsert_transaction(
                     local_account=local_account,
                     external_id=external_id,
-                    transaction_payload=transaction_payload,
+                    reported=reported,
                 ):
                     fetched.imported_count += 1
             continuation_key = transactions_payload.get("continuation_key")
@@ -650,13 +696,22 @@ class EnableBankingService:
             page_number += 1
         return fetched
 
-    def _current_month_transaction_window(self) -> tuple[date, date]:
-        today = civil_date(timezone_name=self.settings.app_timezone)
-        return date(today.year, today.month, 1), today
+    def _transaction_window(self) -> tuple[date, date]:
+        """The one trailing window both fetches use, and the sweep is scoped to.
 
-    def _pending_transaction_window(self) -> tuple[date, date]:
-        today = civil_date(timezone_name=self.settings.app_timezone)
-        return today - timedelta(days=30), today
+        The booked re-import has to cover at least what the sweep judges, because the
+        sweep deletes a hold the pending response omits and only the booked call can
+        bring its settled copy back. Deriving all three from one value is what keeps
+        that from being numbers kept in step by hand, which is how a hold that booked
+        across a month boundary came to be deleted and never re-imported. That loss,
+        and why widening the booked call was the cheap direction, are written up once
+        in ``docs/technical/bank-integrations/enable-banking.md``.
+        """
+        today = self._owner_today()
+        return today - _TRANSACTION_WINDOW, today
+
+    def _owner_today(self) -> date:
+        return civil_date(timezone_name=self.settings.app_timezone, instant=self._clock())
 
     def _supersede_previous_connections(self, connection: EnableBankingConnection) -> None:
         """Deactivate earlier connections to the same bank/account-type.
@@ -747,9 +802,10 @@ class EnableBankingService:
         *,
         local_account: Account,
         external_id: str,
-        transaction_payload: dict[str, Any],
+        reported: ReportedTransaction,
     ) -> bool:
         """Insert or update one transaction. Returns True only when a new row was created."""
+        transaction_payload = reported.payload
         transaction = self.db.scalar(
             select(Transaction).where(Transaction.enable_banking_transaction_id == external_id)
         )
@@ -763,7 +819,10 @@ class EnableBankingService:
         else:
             direction = "credit"
 
-        status = self._normalize_transaction_status(transaction_payload.get("status"))
+        status = self._normalize_transaction_status(
+            transaction_payload.get("status"),
+            default=reported.default_status,
+        )
         description = self._build_transaction_description(transaction_payload)
         creditor = transaction_payload.get("creditor") or {}
         debtor = transaction_payload.get("debtor") or {}
@@ -775,7 +834,12 @@ class EnableBankingService:
             transaction = Transaction(
                 account_id=local_account.id,
                 enable_banking_transaction_id=external_id,
-                imported_at=datetime.now(UTC),
+                # The injected clock, not the wall clock: this is the last leg of the
+                # Effective Date chain, so for a row the bank dated not at all it is
+                # the whole of its month membership -- a product rule, not an audit
+                # stamp. The sync and expiry instants stay on the real clock, because
+                # "when did this process run" has to be true even under a pinned one.
+                imported_at=self._clock(),
             )
             self.db.add(transaction)
 
@@ -816,19 +880,50 @@ class EnableBankingService:
             return "booked" in transactions_node or "pending" in transactions_node
         return "booked" in transactions_payload or "pending" in transactions_payload
 
-    def _extract_transactions(self, transactions_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _extract_transactions(
+        self,
+        transactions_payload: dict[str, Any],
+        *,
+        requested_status: str | None = None,
+    ) -> list[ReportedTransaction]:
+        """Flatten a response, keeping what each row's position implies about its status.
+
+        The branches mirror ``_is_readable_transactions_payload`` one for one.
+        """
         transactions_node = transactions_payload.get("transactions")
         if isinstance(transactions_node, list):
-            return transactions_node
+            # One flat list: no array to imply a status, so the fall-back is what the
+            # call itself asked for. A ``PDNG`` request is the bank's own context for
+            # the answer and strictly better evidence than assuming settled -- without
+            # it, a bank using this shape *and* marking status by response stores every
+            # hold as booked spend.
+            return [
+                ReportedTransaction(
+                    payload=row,
+                    default_status=self._normalize_transaction_status(
+                        requested_status,
+                        default="booked",
+                    ),
+                )
+                for row in transactions_node
+            ]
 
         if isinstance(transactions_node, dict):
-            booked = transactions_node.get("booked") or []
-            pending = transactions_node.get("pending") or []
-            return [*booked, *pending]
+            return self._reported_by_array(transactions_node)
 
-        booked = transactions_payload.get("booked") or []
-        pending = transactions_payload.get("pending") or []
-        return [*booked, *pending]
+        return self._reported_by_array(transactions_payload)
+
+    def _reported_by_array(self, source: dict[str, Any]) -> list[ReportedTransaction]:
+        return [
+            *(
+                ReportedTransaction(payload=row, default_status="booked")
+                for row in source.get("booked") or []
+            ),
+            *(
+                ReportedTransaction(payload=row, default_status="pending")
+                for row in source.get("pending") or []
+            ),
+        ]
 
     def _summarize_transactions_payload(self, transactions_payload: dict[str, Any]) -> dict[str, Any]:
         transactions_node = transactions_payload.get("transactions")
@@ -875,7 +970,19 @@ class EnableBankingService:
             return " | ".join(remittance)
         return transaction_payload.get("note") or transaction_payload.get("reference_number")
 
-    def _normalize_transaction_status(self, provider_status: str | None) -> str:
+    def _normalize_transaction_status(self, provider_status: str | None, *, default: str) -> str:
+        """Map a provider status onto BurnRate's stored vocabulary.
+
+        An explicit status always wins: a ``BOOK`` row inside a ``pending`` array is
+        the bank saying it has settled. An absent or unrecognised one falls back to
+        what the row's position implies rather than to booked -- see
+        ``ReportedTransaction``.
+
+        Matched case-insensitively. The codes are documented upper case and nothing
+        enforces that, and a near miss is not a harmless one: a lower-case ``pdng`` in
+        the booked array would read as money already settled, and a lower-case
+        ``cncl`` as spend the owner never made.
+        """
         mapping = {
             "BOOK": "booked",
             "PDNG": "pending",
@@ -883,7 +990,7 @@ class EnableBankingService:
             "RJCT": "ignored",
             "SCHD": "pending",
         }
-        return mapping.get(provider_status or "", "booked")
+        return mapping.get((provider_status or "").upper(), default)
 
     def _upsert_app_config(self) -> None:
         config = self.db.scalar(select(EnableBankingAppConfig))

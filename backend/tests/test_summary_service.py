@@ -933,3 +933,144 @@ def test_summary_service_has_no_allowance_to_report_outside_the_current_month(
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["safe_to_spend_today_amount"] is None
     assert summary["safe_to_spend_status"] == "not_current_month"
+
+
+def seed_rent_with_two_budget_rows_in_one_month(db: Session) -> None:
+    """A fixed Rent category holding two budget rows in June: 500.00, then 600.00.
+
+    Seeded straight into the session because ``BudgetService`` refuses this shape --
+    ``_validate_month_start`` forces a period to begin on the 1st of a month and
+    ``_ensure_no_overlap`` rejects a second period touching an existing one. So this
+    is a missing invariant in ``SummaryService`` rather than a live miscalculation,
+    and the seam that can state it is this one.
+
+    The charge books once, at 1100.00: exactly the two estimates together, so an
+    owner in this state is precisely on budget.
+    """
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    rent = Category(name="Rent", type="expense", active=True)
+    db.add(rent)
+    db.flush()
+    db.add_all(
+        [
+            Budget(
+                category_id=rent.id,
+                amount=Decimal("500.00"),
+                currency="EUR",
+                period_type="monthly",
+                active_from=date(2026, 6, 1),
+                active_to=date(2026, 6, 14),
+                is_fixed=True,
+            ),
+            Budget(
+                category_id=rent.id,
+                amount=Decimal("600.00"),
+                currency="EUR",
+                period_type="monthly",
+                active_from=date(2026, 6, 15),
+                active_to=None,
+                is_fixed=True,
+            ),
+        ]
+    )
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-rent-two-estimates",
+            booking_date=date(2026, 6, 2),
+            value_date=date(2026, 6, 2),
+            amount=Decimal("-1100.00"),
+            currency="EUR",
+            description="Rent",
+            merchant_name="Landlord",
+            counterparty_name=None,
+            direction="debit",
+            status="booked",
+            category_id=rent.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 2, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+
+def test_summary_service_counts_a_fixed_commitment_once_when_its_category_has_two_budget_rows() -> None:
+    # Rent is estimated at 500.00 and then 600.00 in the same month and the charge
+    # books at 1100.00, so the owner is exactly on budget. Pairing each budget row
+    # with the category's whole-month spend reads the commitment once per row: 600.00
+    # over one estimate plus 500.00 over the other is 1100.00 of overrun invented out
+    # of nothing, which zeroes the allowance and flags the month `over`.
+    #
+    # Folded to one commitment per category -- 1100.00 estimated, 1100.00 booked --
+    # there is no overrun, and the variable slice is left alone: 400.00 budgeted with
+    # 285.00 committed leaves 115.00 over 16 days, 7.19 a day, which is 0.575 of the
+    # 200.00 that would be left on plan.
+    db = make_session()
+    seed_summary_data(db)
+    seed_rent_with_two_budget_rows_in_one_month(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["fixed_overrun_amount"] == "0.00"
+    assert summary["safe_to_spend_today_amount"] == "7.19"
+    assert summary["safe_to_spend_status"] == "watch"
+    # The variable slice projects to 527.50, and the rent is added back as its step
+    # projection -- once, not once per budget row.
+    assert summary["projected_month_end_spend_amount"] == "1627.50"
+
+
+def test_summary_service_prints_one_budget_row_per_category() -> None:
+    # Two budget rows for Rent printed two Rent rows, each claiming the category's
+    # whole 1100.00 against its own estimate: the same rent shown paid twice, at 220%
+    # of one row and 183.3% of the other. One row per category, with the estimates
+    # summed the way the monthly budget total already sums them.
+    db = make_session()
+    seed_summary_data(db)
+    seed_rent_with_two_budget_rows_in_one_month(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    rent_rows = [row for row in summary["budget_usage"] if row["category_name"] == "Rent"]
+    assert len(rent_rows) == 1
+    assert rent_rows[0]["budget_amount"] == "1100.00"
+    assert rent_rows[0]["spent_amount"] == "1100.00"
+    assert rent_rows[0]["remaining_amount"] == "0.00"
+    assert summary["monthly_budget_amount"] == "1500.00"
+
+
+def test_summary_service_keeps_a_category_fixed_when_only_one_of_its_rows_says_so() -> None:
+    # Utilities is budgeted 100.00 from the 1st and 80.00 from the 15th, and only the
+    # later row is marked fixed. Folding the two has to decide the category's slice,
+    # and reading the flag off whichever row happens to sort first would hand that
+    # decision to SQL: the bill the owner marked fixed would be paced day by day, its
+    # 120.00 charge would land in the variable slice, and the whole 180.00 estimate
+    # would be offered as day-to-day spending money.
+    #
+    # Fixed, so the variable slice is Food alone: 300.00 budgeted, 165.00 committed,
+    # 135.00 over 16 days is 8.44 a day -- 0.9 of the 150.00 that would be left on plan.
+    db = make_session()
+    seed_summary_data(db)
+    utilities = db.query(Category).filter(Category.name == "Utilities").one()
+    db.add(
+        Budget(
+            category_id=utilities.id,
+            amount=Decimal("80.00"),
+            currency="EUR",
+            period_type="monthly",
+            active_from=date(2026, 6, 15),
+            active_to=None,
+            is_fixed=True,
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["monthly_budget_amount"] == "480.00"
+    assert summary["safe_to_spend_today_amount"] == "8.44"
+    assert summary["safe_to_spend_status"] == "on_track"
+    usage = {row["category_name"]: row for row in summary["budget_usage"]}
+    assert usage["Utilities"]["is_fixed"] is True
+    assert usage["Utilities"]["budget_amount"] == "180.00"
+    assert usage["Utilities"]["spent_amount"] == "120.00"

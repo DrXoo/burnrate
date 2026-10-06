@@ -33,6 +33,13 @@ the 30-day trailing window makes the loss self-healing on the next sync.
 excluded something (**Ignored** in `GLOSSARY.md`), and a phantom is not a
 decision the owner made.
 
+That self-healing clause is load-bearing, and it was not true when this was
+written: the booked fetch was the narrower window, so a hold that booked across a
+month boundary was deleted and never re-imported. Both fetches and the sweep now
+share one trailing window. See
+`docs/technical/bank-integrations/enable-banking.md` for the constraint and the
+case that proved it.
+
 **The fixed slice stays booked-only.** `_project_fixed` trusts actual spend over
 the budgeted estimate as soon as `spent > 0`, so a 1 EUR pre-authorization on a
 utility would make it project a 120 EUR bill as 1 EUR. The fixed overrun from

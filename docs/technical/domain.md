@@ -154,6 +154,8 @@ For the first version, monthly budgets are sufficient.
 
 Budgets should be defined per category.
 
+A category can hold more than one budget row overlapping a single month, so a month's commitment for a category is the sum of its active rows, and the category counts as fixed if any of them is. Every budget-basis figure is derived from that per-category fold rather than from the rows themselves, because the spend it is compared against is grouped per category: pairing each row with it counts the commitment once per row — inventing a fixed overrun for an owner who is exactly on budget, adding the step projection twice, and printing the same category twice with each row claiming all of its spend.
+
 There is no need for a separate global monthly budget entity in the first version, because the overall budget can be derived as the sum of all active category budgets.
 
 ---
@@ -252,6 +254,7 @@ BurnRate should preserve the following invariants:
 * Unknown transactions are uncategorized transactions that require review
 * Every transaction belongs to exactly one month, resolved by its effective date
 * Transfer categories should not inflate spending metrics
+* Budget-basis figures are derived per category, never per budget row: a category's monthly commitment is the sum of its active budget rows
 * Pending transactions count as spend in the variable slice only, while the fixed slice is judged by its budgeted estimate until a charge books
 * Income should remain a minimal classification concern and should not drive budget reporting in the first version
 * Runway should only use balances from accounts explicitly included for runway calculations
