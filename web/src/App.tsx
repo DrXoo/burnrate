@@ -282,7 +282,6 @@ export default function App() {
             {section === "categories" ? (
               <CategoriesPage
                 categories={data.categories}
-                budgets={data.budgets}
                 summary={data.summary}
                 month={data.filters.month}
                 monthLabel={monthLabel}

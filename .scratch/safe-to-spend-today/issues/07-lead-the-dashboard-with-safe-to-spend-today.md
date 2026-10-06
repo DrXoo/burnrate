@@ -191,3 +191,46 @@ Not renamed: `web/src/types.ts` still calls the shared three-value status
 `BudgetUsageStatus` while the backend has renamed it `MetricStatus`. It is used for
 `savings_status` too, so the name is already wrong on both sides of the wire. A
 cross-file rename is refactoring, which is not part of the loop.
+
+## Correction from code review
+
+`/code-review` returned two findings. One was a real defect introduced by this
+ticket and is fixed here; the other belongs to ticket 10 and was recorded there.
+
+**The finding against this ticket's code was mine, and the reviewer was right.**
+Making the bar and the percentage read `stat.usage` while the text beside them still
+read `stat.budget`/`stat.spent` left the three disagreeing: a category with an active
+budget record but no budget row for the viewed month rendered a 0% bar and "—" next
+to a confident "€240.00 / €300.00", with the detail panel saying "No budget set yet"
+underneath. I had seen the symptom in the render check and misread it as benign,
+because the fixture's category had no transactions, so the line read "€0.00 / €80.00"
+and the contradiction did not look like one. A fixture with spend in it would have
+shown it.
+
+Probed rather than patched, and the probe found the fallback was wrong to begin with.
+`budget_usage` is built from *every* budget active in the requested month —
+`_serialize_budget_usage` runs over `active_budgets` with `NO_SPEND` where there is no
+spend — so a missing usage row means no budget active **in the month being viewed**.
+The fallback it fell back to, `budgets.filter((budget) => budget.active)`, is the set
+active *now*, regardless of the month on screen. Viewing September with a budget that
+started in October printed October's amount against September's spend. That predates
+this ticket; my change only made it visible by letting the other two displays tell the
+truth.
+
+So the fix is a deletion, not a reconciliation: `budget` comes from the usage row or
+is null. All three displays now agree, and the stale-month reading is gone with it.
+The `budgets` prop became dead and was removed from `CategoriesPage` and its call site
+in `App.tsx`; `RulesBudgetsPage` still takes it and still needs it.
+
+**The sweep-window finding is ticket 10's defect 1, now found by three independent
+passes.** Not fixed here: it is in `enable_banking_service.py`, nothing in this ticket
+touches it, and ticket 10 already carries the analysis and the chosen fix. This pass
+did add something, which is recorded there — the existing tests cover a 45-day-old
+hold, outside the sweep window entirely, but not one 1 to 30 days back in the previous
+month, which is the reachable case. That is the test to write when it is fixed.
+
+**On the review's caveat.** It reported that backend tests could not be run for want of
+a Python environment, and read statically instead. Nothing in this ticket changed
+`backend/`, so no backend test was at risk from it; but the caveat stands for the
+branch as a whole and the Definition of Done check should not treat this pass as
+evidence the suite is green.

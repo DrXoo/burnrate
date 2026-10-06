@@ -13,11 +13,10 @@ import {
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
-import type { Budget, BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
+import type { BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
 
 interface CategoriesPageProps {
   categories: Category[];
-  budgets: Budget[];
   summary: SummaryDashboard | null;
   month: string;
   monthLabel: string;
@@ -65,7 +64,6 @@ function num(value: string | null | undefined): number {
 
 export function CategoriesPage({
   categories,
-  budgets,
   summary,
   month,
   monthLabel,
@@ -95,7 +93,6 @@ export function CategoriesPage({
 
   const stats = useMemo<CategoryStat[]>(() => {
     const usageById = new Map((summary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
-    const budgetById = new Map(budgets.filter((budget) => budget.active).map((budget) => [budget.category_id, budget]));
     const ledgerCount: Record<string, number> = {};
     const ledgerTotal: Record<string, number> = {};
     for (const transaction of monthTxns) {
@@ -108,9 +105,12 @@ export function CategoriesPage({
 
     return categories.map((category) => {
       const usage = usageById.get(category.category_id);
-      const budgetRecord = budgetById.get(category.category_id);
-      const budget = usage ? num(usage.budget_amount) : budgetRecord ? num(budgetRecord.amount) : null;
       const ledgerSpent = ledgerTotal[category.category_id] ?? 0;
+      // Every budget active in the month being viewed has a usage row, spend or no
+      // spend, so no row means no budget for that month. A budget record that is
+      // active *now* says nothing about the month on screen, which is why it is not
+      // a fallback: it would print next month's amount beside this month's spend.
+      const budget = usage ? num(usage.budget_amount) : null;
       const spent = usage ? num(usage.spent_amount) : ledgerSpent;
 
       // Only the backend bands a budget. With no budget row for the month being
@@ -129,7 +129,7 @@ export function CategoriesPage({
         total: ledgerTotal[category.category_id] ?? 0,
       };
     });
-  }, [categories, budgets, summary, monthTxns]);
+  }, [categories, summary, monthTxns]);
 
   const selected = stats.find((stat) => stat.category.category_id === selectedId) ?? stats[0];
 

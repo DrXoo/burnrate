@@ -36,9 +36,15 @@ independent numbers that have to be kept in step by hand.
 
 A second `/code-review` pass, on ticket 06, re-found this independently and reached
 the same conclusion from the same evidence -- the docstring's "self-healing on the
-next sync" claim holds only for rows still in pending state. Nothing new to do;
-recorded because two independent passes landing on it is the strongest signal in
-this ticket about which defect to fix first.
+next sync" claim holds only for rows still in pending state. A third pass, on ticket
+07, found it again, with the sharper framing that the sweep window sits outside the
+booked window for roughly the first 30 days of every month, and the observation that
+the existing tests cover a 45-day-old hold -- outside the sweep window entirely --
+but not one 1 to 30 days back in the previous month, which is the reachable case.
+That test gap is the thing to add when this is fixed.
+
+Nothing new to do before then; recorded because three independent passes landing on
+it is the strongest signal in this ticket about which defect to fix first.
 
 **2 — A future-dated pending row can never be swept.**
 The sweep's window predicate is `resolved >= date_from, resolved <= date_to` with
