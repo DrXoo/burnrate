@@ -42,6 +42,28 @@ will want to send themselves a link or use the back button; putting it in the qu
 string answers both and removes the question of what resets it. Not a requirement
 above, because it is a routing decision the rest of the app has not had to make yet.
 
+## What ticket 11 left here
+
+Three things, all found by `/code-review` on ticket 11 and worth reading before the
+selector is written, because a selector is what makes the first two live:
+
+* **The backend now reports `current_month`.** The fourth criterion above — no
+  UTC-derived default — is a matter of reading that field instead of
+  `currentMonthValue()`, which means it needs no new API work. `currentMonthStart()` in
+  `web/src/lib/format.ts` is unused and can go with it.
+* **`applyFilters` now coerces an empty month to the current one.** `buildQuery` drops
+  an empty query value, so the backend would answer for its own current month and the
+  summary gate would then withhold every payload: a blank page with no error. A selector
+  that can produce `""` is the obvious way to hit that, hence the guard.
+* **`CategoriesPage`'s `month` prop no longer selects anything.** It keys the effect at
+  line 96, but the fetch that effect triggers — `listMonthTransactions` — reads
+  `filters.month` internally and ignores the prop. Since ticket 11 removed the page's own
+  month comparison, the prop is a cache key and half of a label pair. Either drop it or
+  give it a job while the four pages are being wired to one selection.
+
+**Ticket 18 is the one to read alongside this.** Its first two defects are races between
+a background refresh and a month change, which cannot happen until this ticket ships.
+
 ## Testing
 
 `web/` has no test runner and installing one stays out of scope for this phase, so

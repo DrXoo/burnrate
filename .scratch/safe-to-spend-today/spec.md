@@ -168,16 +168,22 @@ every threshold behind it lives in the backend.
 
 ### API contract
 
-Six new fields on the summary response. Nothing is removed, so no client breaks.
+Seven new fields on the summary response. Nothing is removed, so no client breaks.
 
 | Field | Type |
 |---|---|
+| `current_month` | `YYYY-MM` |
 | `safe_to_spend_today_amount` | 2dp decimal string, nullable |
 | `safe_to_spend_status` | `no_budget \| not_current_month \| on_track \| watch \| over` |
 | `pending_spend_amount` | 2dp decimal string |
 | `fixed_overrun_amount` | 2dp decimal string |
 | `savings_rate_percent` | float |
 | `savings_status` | `on_track \| watch \| over` |
+
+`current_month` is the month the owner is in, resolved through `APP_TIMEZONE`. It was
+added during ticket 11 rather than designed here: a client comparing the reported
+`month` against a month of its own disagrees with the backend for part of every
+month-end, and so labels a month that has not started as one that closed.
 
 `savings_status` reuses the existing budget-usage status vocabulary so the
 codebase has one status language. `unbudgeted_spending_amount` and
@@ -194,7 +200,8 @@ currently computes twice as "saved" and "net".
 * For a month that is not the current one, the headline slot shows that month's
   outcome against plan, which is the existing money-left figure — no new
   calculation. The presentation chooses the wording by comparing the response's
-  month to the current one; that is a label, not a financial rule.
+  month to the `current_month` the same response reports; that is a label, not a
+  financial rule.
 * The duplicate "saved / net" tile collapses to one, reading the backend field.
 * Telegram: the allowance becomes the first line of the `/summary` output, and
   the `/help` text is corrected to match. No new command — the MVP doc fixes the
