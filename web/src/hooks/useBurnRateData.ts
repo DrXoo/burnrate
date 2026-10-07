@@ -382,8 +382,14 @@ export function useBurnRateData() {
   }
 
   function applyFilters(nextFilters: FiltersState) {
+    // Every other filter uses "" for "unset", but a month must not: `buildQuery` drops
+    // an empty value, the backend then answers for its own current month, and a payload
+    // whose month nothing asked for is withheld by the gate below on every successful
+    // fetch -- a blank page with no error to explain it. A selection is a month or it is
+    // the month we are in.
+    const month = nextFilters.month || currentMonthValue();
     startTransition(() => {
-      setFilters(nextFilters);
+      setFilters({ ...nextFilters, month });
       setTransactionsPaging((current) => ({ ...current, offset: 0 }));
       setUnknownPaging((current) => ({ ...current, offset: 0 }));
     });
@@ -581,6 +587,15 @@ export function useBurnRateData() {
     setSummary(nextSummary);
   }
 
+  // A payload describes the month it was fetched for and no other. A failed refresh
+  // leaves the previous month's payload in state while every consumer reads the month
+  // now selected, so handing it over prints one month's figures under another month's
+  // heading -- silently, because a page cannot tell a current payload from a stale
+  // one. Withholding it puts those pages in the loading or error state they already
+  // have for a month whose figures are unknown. The Categories page reached this
+  // conclusion for its budget rows; this is that rule applied once, at the door.
+  const summaryForSelectedMonth = summary && summary.month === filters.month ? summary : null;
+
   return {
     apiBase,
     bootLoading,
@@ -593,7 +608,7 @@ export function useBurnRateData() {
     categories,
     rules,
     budgets,
-    summary,
+    summary: summaryForSelectedMonth,
     summaryLoading,
     summaryError,
     uncategorizedCount,

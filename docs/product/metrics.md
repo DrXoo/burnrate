@@ -160,6 +160,19 @@ The amount is null for the first two cases and never for the others. A zero
 amount therefore means exactly one thing: budgets exist, the month is current,
 and they are used up.
 
+`not_current_month` does not say whether that month is behind or ahead: one value
+covers both. An interface that needs the difference -- to caption a month that has
+closed differently from one that has not started -- compares the reported `month`
+against `current_month`, which names the month the owner is actually in, resolved
+through `APP_TIMEZONE`. Deriving that month client-side instead reads a month that
+has not started as a closed one, quoting its untouched budget as an outcome, for
+the hours of every month-end where the client's clock and `APP_TIMEZONE` disagree.
+
+A month that has not started is not necessarily untouched: a standing order
+arrives as a hold carrying a future value date, so its effective date files it in
+the month it is due. Anything captioning a future month reads the month's spend
+figures rather than assuming they are zero.
+
 The band is judged against **on-plan remaining**, not against the planned daily
 pace:
 

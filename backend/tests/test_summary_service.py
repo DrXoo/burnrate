@@ -390,6 +390,53 @@ def test_summary_service_rejects_a_clock_without_a_timezone() -> None:
         service.get_summary()
 
 
+# Which month the owner is actually in, as the backend's own clock reads it. The
+# dashboard labels a month's tense by comparing the month on screen to this, because
+# only this side knows APP_TIMEZONE: a browser deriving the current month from UTC
+# disagrees with it for part of every month-end, in whichever direction the offset
+# points, and then captions a month with the wrong tense.
+#
+# timezone, instant, month asked for, the month the owner is in, what the owner is doing
+CIVIL_MONTH_EXAMPLES = [
+    (
+        "Pacific/Honolulu",
+        datetime(2026, 7, 1, 2, 0, tzinfo=timezone.utc),
+        "2026-07",
+        "2026-06",
+        "opening a month that has not started while UTC has already turned",
+    ),
+    (
+        "Europe/Madrid",
+        datetime(2026, 6, 30, 23, 0, tzinfo=timezone.utc),
+        "2026-06",
+        "2026-07",
+        "looking back at a month that just closed while UTC is still in it",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("timezone_name", "instant", "month", "current_month", "_what_the_owner_is_doing"),
+    CIVIL_MONTH_EXAMPLES,
+)
+def test_summary_service_names_the_month_the_owner_is_in(
+    timezone_name: str,
+    instant: datetime,
+    month: str,
+    current_month: str,
+    _what_the_owner_is_doing: str,
+) -> None:
+    db = make_session()
+    seed_summary_data(db)
+    service = SummaryService(db=db, timezone_name=timezone_name, clock=lambda: instant)
+
+    summary = service.get_summary(month=month)
+
+    assert summary["month"] == month
+    assert summary["current_month"] == current_month
+    assert summary["safe_to_spend_status"] == "not_current_month"
+
+
 def test_summary_service_reports_the_savings_rate_and_its_verdict() -> None:
     db = make_session()
     seed_summary_data(db)
@@ -933,6 +980,88 @@ def test_summary_service_has_no_allowance_to_report_outside_the_current_month(
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["safe_to_spend_today_amount"] is None
     assert summary["safe_to_spend_status"] == "not_current_month"
+
+
+def test_summary_service_counts_a_scheduled_payment_in_the_month_it_falls_due() -> None:
+    # A standing order arrives as a hold carrying next month's value date and no
+    # booking date, so the effective date files it in the month it is due. A month the
+    # owner has not reached therefore already has spend in it, which is why nothing
+    # reading this payload may claim an unstarted month is untouched.
+    db = make_session()
+    seed_summary_data(db)
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    food = db.query(Category).filter(Category.name == "Food").one()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-standing-order",
+            booking_date=None,
+            value_date=date(2026, 7, 3),
+            amount=Decimal("-80.00"),
+            currency="EUR",
+            description="Meal plan standing order",
+            merchant_name="Market",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=food.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 15, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-07", today=date(2026, 6, 15))
+
+    # 400.00 budgeted against the one 80.00 charge that falls in July.
+    assert summary["safe_to_spend_status"] == "not_current_month"
+    assert summary["monthly_budget_amount"] == "400.00"
+    assert summary["budgeted_spending_amount"] == "80.00"
+    assert summary["pending_spend_amount"] == "80.00"
+    assert summary["money_left_amount"] == "320.00"
+
+
+def test_summary_service_discloses_a_scheduled_payment_no_budget_covers() -> None:
+    # The same standing order, in a category nothing budgets for. No budget-basis figure
+    # counts it, so money left reads the full budget and the only places the charge
+    # surfaces are the month's spend and the unbudgeted disclosure. Anything saying what
+    # a month holds has to read those, because the budgeted figure says 0.00 while
+    # 80.00 of the owner's money is committed.
+    db = make_session()
+    seed_summary_data(db)
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    hobbies = Category(name="Hobbies", type="expense", active=True)
+    db.add(hobbies)
+    db.flush()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id="tx-unbudgeted-standing-order",
+            booking_date=None,
+            value_date=date(2026, 7, 3),
+            amount=Decimal("-80.00"),
+            currency="EUR",
+            description="Climbing gym standing order",
+            merchant_name="Gym",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=hobbies.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 15, 8, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+    summary = SummaryService(db=db).get_summary(month="2026-07", today=date(2026, 6, 15))
+
+    assert summary["safe_to_spend_status"] == "not_current_month"
+    assert summary["monthly_spending_amount"] == "80.00"
+    assert summary["unbudgeted_spending_amount"] == "80.00"
+    assert summary["budgeted_spending_amount"] == "0.00"
+    assert summary["money_left_amount"] == "400.00"
 
 
 def seed_rent_with_two_budget_rows_in_one_month(db: Session) -> None:

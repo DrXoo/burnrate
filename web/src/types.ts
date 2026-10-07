@@ -136,6 +136,10 @@ export interface BudgetUsage {
 
 export interface SummaryDashboard {
   month: string;
+  // The month the owner is in, on the owner's own clock. Compared against `month` to
+  // decide a month's tense, because a month derived here from UTC disagrees with the
+  // backend's for part of every month-end.
+  current_month: string;
   // Null when there is no allowance to report, which the status distinguishes from
   // an allowance of zero: budgets exist, the month is current, they are used up.
   safe_to_spend_today_amount: string | null;

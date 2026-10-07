@@ -18,6 +18,7 @@ class FakeSummaryService:
         assert month == "2026-06"
         return {
             "month": "2026-06",
+            "current_month": "2026-06",
             "safe_to_spend_today_amount": self._safe_to_spend_today_amount,
             "safe_to_spend_status": self._safe_to_spend_status,
             "fixed_overrun_amount": "50.00",
@@ -59,6 +60,7 @@ def test_summary_route_uses_service_dependency() -> None:
     response = get_summary(month="2026-06", service=FakeSummaryService())
 
     assert response.month == "2026-06"
+    assert response.current_month == "2026-06"
     assert response.current_balance_amount == "2000.00"
     assert response.savings_rate_percent == 87.0
     assert response.savings_status == "on_track"

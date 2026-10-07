@@ -89,7 +89,8 @@ class SummaryService:
             timezone_name=self._timezone_name,
             instant=self._clock(),
         )
-        month_start, month_end, month_value = self._resolve_month(month=month, reference_day=reference_day)
+        current_month = reference_day.strftime("%Y-%m")
+        month_start, month_end, month_value = self._resolve_month(month=month, current_month=current_month)
         days_in_month = (month_end - month_start).days
         days_elapsed = self._days_elapsed_in_month(
             month_start=month_start,
@@ -274,6 +275,13 @@ class SummaryService:
 
         return {
             "month": month_value,
+            # The month the owner is actually in, resolved through APP_TIMEZONE like
+            # every other civil date here. Reported so a client can tell a past month
+            # from a future one without a clock of its own: a browser deriving it from
+            # UTC disagrees with this for part of every month-end. It is the same value
+            # the month defaults to, so what is reported and what is served cannot
+            # disagree about which month is current.
+            "current_month": current_month,
             "safe_to_spend_today_amount": self._format_optional_decimal(allowance.amount),
             "safe_to_spend_status": allowance.status,
             "fixed_overrun_amount": self._format_decimal(overrun),
@@ -299,9 +307,9 @@ class SummaryService:
             "budget_usage": budget_usage,
         }
 
-    def _resolve_month(self, *, month: str | None, reference_day: date) -> tuple[date, date, str]:
-        """Resolve the requested month, defaulting to the one the reference day is in."""
-        month_value = month if month is not None else reference_day.strftime("%Y-%m")
+    def _resolve_month(self, *, month: str | None, current_month: str) -> tuple[date, date, str]:
+        """Resolve the requested month, defaulting to the one the owner is in."""
+        month_value = month if month is not None else current_month
         month_start, month_end = month_window(month_value)
         return month_start, month_end, month_value
 

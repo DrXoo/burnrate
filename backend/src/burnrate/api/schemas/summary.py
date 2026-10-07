@@ -19,6 +19,9 @@ class BudgetUsageResponse(BaseModel):
 
 class SummaryResponse(BaseModel):
     month: str
+    # The month the owner is in, on the owner's own clock. A client compares the month
+    # it asked for against this to decide tense, rather than against a month of its own.
+    current_month: str
     # Null when there is no allowance to report, which the status distinguishes from
     # an allowance of zero: budgets exist, the month is current, they are used up.
     safe_to_spend_today_amount: str | None

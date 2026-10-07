@@ -95,16 +95,15 @@ export function CategoriesPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
-  // The month's budget rows only exist in a summary *for that month*. A failed or
-  // in-flight fetch leaves the previous month's payload in place, so reading it here
-  // would print one month's budget beside another month's spend -- the stale-month
-  // reading this page has already deleted once. So "we do not know" is a third state,
-  // distinct from "this category has no budget this month".
-  const monthSummary = summary && summary.month === month ? summary : null;
-  const budgetsKnown = monthSummary !== null;
+  // The month's budget rows only exist in a summary *for that month*, and
+  // `useBurnRateData` withholds a payload fetched for any other month, so a null
+  // summary here means the month's budgets are unknown -- loading or failed. That is a
+  // third state, distinct from "this category has no budget this month", which is a
+  // payload that carries no row for it.
+  const budgetsKnown = summary !== null;
 
   const stats = useMemo<CategoryStat[]>(() => {
-    const usageById = new Map((monthSummary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
+    const usageById = new Map((summary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
     const ledgerCount: Record<string, number> = {};
     const ledgerTotal: Record<string, number> = {};
     for (const transaction of monthTxns) {
@@ -141,7 +140,7 @@ export function CategoriesPage({
         total: ledgerTotal[category.category_id] ?? 0,
       };
     });
-  }, [categories, monthSummary, monthTxns]);
+  }, [categories, summary, monthTxns]);
 
   const selected = stats.find((stat) => stat.category.category_id === selectedId) ?? stats[0];
 
