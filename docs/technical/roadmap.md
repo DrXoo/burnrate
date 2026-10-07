@@ -160,7 +160,8 @@ useful part of the record.
   the status bands the unclamped remainder, so an overspent month still reads
   `over`), the last day of the month (the day count includes today, so it
   resolves to 1 and needs no special case), and a month that is not the current
-  one (`not_current_month`, with the amount null).
+  one (`month_closed` or `month_not_started`, with the amount null -- the status
+  names the tense so no interface has to work it out, per `ADR-0002`'s amendment).
 
 No migration: the Effective Date is resolved in query rather than stored, and
 the sweep deletes rows. The stored `effective_date` column is the better end
@@ -302,13 +303,17 @@ against the current branch:
   a month can change — which is exactly what ticket 14 adds, so whoever takes 14 has
   to read 18.
 
-**Tickets 16 and 17 are one defect in two interfaces**, and both files record the same
-alternative: split `not_current_month` into a closed/not-started pair so the domain
-owns tense outright. Each ticket declined it for touching the status enum that
-`ADR-0002` fixes at five values. With two tense defects open rather than one — and
-ticket 17 being the "next client re-implements the comparison" that ticket 11's review
-predicted — that trade is worth re-deciding rather than inheriting. Taking the split
-would absorb both tickets and amend `ADR-0002`.
+**Tickets 16 and 17 were one defect in two interfaces, and the split was taken.**
+Both files recorded the same alternative and both declined it for touching the status
+enum `ADR-0002` fixed at five values. With two tense defects open rather than one, and
+ticket 17 being exactly the "next client re-implements the comparison" that ticket 11's
+review predicted, that trade was re-decided rather than inherited.
+`safe_to_spend_status` now carries `month_closed` and `month_not_started` in place of
+`not_current_month`, tense outranks `no_budget`, and `ADR-0002` records the amendment.
+That closed ticket 16 and shrank ticket 17: the Telegram formatter reads the tense off
+the status instead of needing one of its own, so what is left there is the rendering —
+a used-budget bar, a pace over zero elapsed days and a projection, all still printed
+for a month that has not begun.
 
 ---
 
@@ -534,11 +539,10 @@ Phase 8's original first three steps — the domain calculation, moving the
 savings-rate threshold out of `DashboardPage.tsx`, and re-leading the dashboard
 with the allowance — are done. What is left:
 
-1. Close the two live backend defects the later reviews found: tickets 15 and 16.
-   Both are small, both sit at seams this phase already agreed, and both are
-   reproduced against the current branch. Ticket 16 carries a decision first — whether
-   to move one line in the domain or to split `not_current_month` into a
-   closed/not-started pair, which would absorb ticket 17 and amend `ADR-0002`.
+1. Give the Telegram summary its month's tense: ticket 17, now small, because the
+   status it needs to branch on exists. Tickets 15 and 16 are done — the projection
+   floor for a month that has not started, and the tense split that closed 16 and
+   shrank 17.
 2. Give the Web UI a month selector and stop it choosing the month in UTC — one piece
    of work, not two, and ticket 14 owns it. Read ticket 18 alongside it: its first two
    defects become reachable the moment a month can change.

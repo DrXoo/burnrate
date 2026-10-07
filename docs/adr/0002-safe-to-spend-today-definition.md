@@ -38,9 +38,36 @@ is reached on day 26 of a perfectly on-plan 30-day month. Comparing against
 spend is on plan, at any point in the month, so the bands are time-stable.
 `roadmap.md` is explicit that this product fails by crying wolf.
 
+## Amendment: the status names the month's tense
+
+Superseding the original five-value status, `safe_to_spend_status` carries
+`no_budget | month_closed | month_not_started | on_track | watch | over`.
+
+The original had one `not_current_month`, on the reasoning that a month the owner
+is not in has no allowance and the reason is all the status owes them. That was
+true of the allowance and false of everything beside it: a client cannot caption a
+month, pick a tense for a sentence, or decide whether a figure is an outcome or a
+plan without knowing which side of today the month falls on. So each client derived
+it, and two of the three got it wrong. The dashboard compared the month on screen
+against one it derived from UTC, which read a month that had not started as a closed
+one for the hours of every month-end where the two clocks disagree. The Telegram
+summary did not derive it at all and printed a used-budget bar, a daily pace over
+zero elapsed days and a month-end projection for a month that had not begun.
+
+Naming the tense in the status is what stops the next client being the third. The
+comparison stays in `SummaryService`, which is the only side that knows
+`APP_TIMEZONE`; what a tense *means* stays in `domain/metrics.py`.
+
+**Tense now outranks `no_budget`.** The original order returned `no_budget` first,
+on the reasoning that it is the more actionable of the two — it tells the owner what
+they can do about it. About a month that closed before they ever set a budget they
+can do nothing, and the dashboard printed "Set a budget / this becomes your daily
+number" over a month weeks gone. A current month with nothing budgeted for
+day-to-day spend still reads `no_budget`, including one budgeted entirely to fixed
+commitments.
+
 ## Consequences
 
-The metric is never negative, per `metrics.md`. `safe_to_spend_status` carries
-`no_budget | not_current_month | on_track | watch | over`, with a null amount for
-the first two, so a zero amount means exactly one thing: budgets exist, the
-month is current, and they are used up.
+The metric is never negative, per `metrics.md`. The three statuses above with no
+allowance to report pair with a null amount, so a zero amount means exactly one
+thing: budgets exist, the month is current, and they are used up.

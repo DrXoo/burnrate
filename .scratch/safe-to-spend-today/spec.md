@@ -97,10 +97,16 @@ every threshold behind it lives in the backend.
 * **Fixed Overrun** = `Σ max(0, booked_spend_in_category − budget_amount)` over
   Fixed Budgets, summed per category so an underrun on one cannot fund an
   overrun on another. Booked only.
-* **Status** is a single five-value enum: `no_budget`, `not_current_month`,
-  `on_track`, `watch`, `over`. The amount is null for the first two. A zero
-  amount therefore means exactly one thing: budgets exist, the month is current,
-  and they are used up.
+* **Status** is a single six-value enum: `no_budget`, `month_closed`,
+  `month_not_started`, `on_track`, `watch`, `over`. The amount is null for the
+  first three. A zero amount therefore means exactly one thing: budgets exist, the
+  month is current, and they are used up. Tense is decided before the budget, so a
+  month the owner is not in reads its tense rather than `no_budget`.
+
+  Amended by ticket 16: this shipped as five values with one `not_current_month`,
+  and both interfaces then derived the tense themselves — the dashboard off a
+  UTC-derived month, the Telegram summary not at all. See
+  `docs/adr/0002-safe-to-spend-today-definition.md`.
 * **Status is judged against On-Plan Remaining**, not against the planned daily
   pace: `on_plan_remaining = variable_budget_total × (days_in_month − days_elapsed) / days_in_month`,
   and `pace_ratio = remaining_variable / on_plan_remaining`. Bands: `≥ 0.85`
@@ -174,7 +180,7 @@ Seven new fields on the summary response. Nothing is removed, so no client break
 |---|---|
 | `current_month` | `YYYY-MM` |
 | `safe_to_spend_today_amount` | 2dp decimal string, nullable |
-| `safe_to_spend_status` | `no_budget \| not_current_month \| on_track \| watch \| over` |
+| `safe_to_spend_status` | `no_budget \| month_closed \| month_not_started \| on_track \| watch \| over` |
 | `pending_spend_amount` | 2dp decimal string |
 | `fixed_overrun_amount` | 2dp decimal string |
 | `savings_rate_percent` | float |

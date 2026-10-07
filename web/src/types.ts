@@ -3,8 +3,16 @@ export type MatchField = "description" | "merchant_name" | "counterparty_name";
 export type MatchOperator = "contains" | "equals" | "starts_with" | "ends_with" | "regex";
 export type BudgetStatus = "active" | "scheduled" | "inactive";
 export type BudgetUsageStatus = "on_track" | "watch" | "over";
-/** Why the allowance reads as it does. The amount is null for the first two. */
-export type SafeToSpendStatus = "no_budget" | "not_current_month" | BudgetUsageStatus;
+/** Why the allowance reads as it does. The amount is null for the first three.
+
+    The two tenses are separate values because a caption needs to tell them apart, and
+    with one value this client derived the comparison itself off a UTC-derived month --
+    which read a month that had not started as a closed one. Read the tense off here. */
+export type SafeToSpendStatus =
+  | "no_budget"
+  | "month_closed"
+  | "month_not_started"
+  | BudgetUsageStatus;
 
 export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
 

@@ -107,8 +107,31 @@ def fixed_overrun(*, commitments: Iterable[FixedCommitment]) -> Decimal:
     ).quantize(Decimal("0.01"))
 
 
-SafeToSpendStatus = Literal["no_budget", "not_current_month", "on_track", "watch", "over"]
-"""Why the allowance reads as it does. The amount is null for the first two."""
+MonthTense = Literal["current", "closed", "not_started"]
+"""Where a month sits relative to the owner's today.
+
+A calendar fact, so the caller establishes it -- comparing two dates is not policy and
+only the service knows which day the owner is on. What a tense *means* for a metric is
+policy, and that lives here.
+"""
+
+SafeToSpendStatus = Literal[
+    "no_budget",
+    "month_closed",
+    "month_not_started",
+    "on_track",
+    "watch",
+    "over",
+]
+"""Why the allowance reads as it does. The amount is null for the first three.
+
+The two tenses are separate values, not one ``not_current_month``, because a client
+cannot caption a month without telling them apart -- and with a single value each
+client re-derived the comparison from a clock of its own. The dashboard did it against
+a UTC-derived month and read a month that had not started as a closed one; the Telegram
+summary did not do it at all and printed a used-budget bar over a month with no days
+elapsed. Naming the tense here is what stops the next client being the third.
+"""
 
 
 @dataclass(frozen=True)
@@ -126,7 +149,7 @@ def safe_to_spend_today(
     fixed_overrun: Decimal,
     days_in_month: int,
     days_elapsed: int,
-    is_current_month: bool,
+    month_tense: MonthTense,
 ) -> SafeToSpendVerdict:
     """What the owner can spend today without putting the month out of reach.
 
@@ -134,17 +157,26 @@ def safe_to_spend_today(
     to cover and needs no special case. See
     ``docs/adr/0002-safe-to-spend-today-definition.md``.
     """
+    if month_tense != "current":
+        # "Today" is not in the month being asked about, so the metric has no meaning.
+        # What a past month finished at, or a future one plans, is a different figure and
+        # the caller already has it.
+        #
+        # Tense is decided before the budget, and the order is load-bearing. No-budget
+        # used to win on the reasoning that it tells the owner what they can do about
+        # it -- but about a month that closed before they ever set a budget they can do
+        # nothing, and the dashboard printed "Set a budget / this becomes your daily
+        # number" over a month weeks gone.
+        return SafeToSpendVerdict(
+            amount=None,
+            status="month_closed" if month_tense == "closed" else "month_not_started",
+        )
     if variable_budget_total <= 0:
         # Nothing has been budgeted for day-to-day spend, so there is no allowance to
         # report. A zero would read as "you may spend nothing", which is a different
         # and untrue claim; the owner needs to be told to set a budget instead. A
         # month budgeted entirely to fixed commitments lands here too.
         return SafeToSpendVerdict(amount=None, status="no_budget")
-    if not is_current_month:
-        # "Today" is not in the month being asked about, so the metric has no
-        # meaning. What a past month finished at, or a future one plans, is a
-        # different figure and the caller already has it.
-        return SafeToSpendVerdict(amount=None, status="not_current_month")
 
     remaining = variable_budget_total - variable_budgeted_spend - fixed_overrun
     days_remaining = days_in_month - days_elapsed + 1

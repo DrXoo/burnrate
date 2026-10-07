@@ -7,13 +7,13 @@ headline beside it already shows the budget blown. Found by `/code-review` on ti
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A month that has not started projects at least the spend already committed in it
-- [ ] `projected_overspend_amount` is non-zero when committed spend already exceeds the budget, whichever month it is
-- [ ] The same holds with no budget set, where the extrapolation currently returns 0.00
-- [ ] Every projection figure for a current or past month is unchanged to the cent
-- [ ] The behaviour is stated at seam 2 as a worked example, not as a restatement of the formula
+- [x] A month that has not started projects at least the spend already committed in it
+- [x] `projected_overspend_amount` is non-zero when committed spend already exceeds the budget, whichever month it is
+- [x] The same holds with no budget set, where the extrapolation currently returns 0.00
+- [x] Every projection figure for a current or past month is unchanged to the cent
+- [x] The behaviour is stated at seam 2 as a worked example, not as a restatement of the formula
 
 ## The defect
 
@@ -60,3 +60,26 @@ Seam 2, the summary service through its `month` and `today` parameters, which is
 the figures above were taken from. The worked example is the table at the top. The
 existing `test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent`
 is the regression that the live month is unchanged.
+
+## Comments
+
+**A floor, exactly as the ticket proposed, on both paths.**
+`_project_spend` returns `max(spend_to_date, budget_reference)` when
+`days_elapsed <= 0`, and `_extrapolate_spend` returns `spend_to_date` instead of
+0.00. Both branches only fire before a month begins, so every current- and
+past-month figure is untouched — the existing
+`test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent` is the
+regression and it never moved.
+
+**The worked example from the ticket, now a test.** 500.00 committed to July against a
+300.00 Food budget, read on 15 June: `projected_month_end_spend_amount` 500.00 and
+`projected_overspend_amount` 200.00, where it was 300.00 and 0.00. A second test covers
+the no-budget path, where the extrapolation had been discarding the committed spend
+entirely — the one figure the owner has for that month, in the one case where it is all
+they have. Both mutation-checked: restoring either branch fails its test.
+
+**The nearest-neighbour question the ticket raised is left alone deliberately.** Whether
+the confidence blend wants the same floor on day 1 of a live month, where `days_elapsed`
+is 1 and one large hold dominates a pace computed over a single day. It does not: that
+is the blend doing its job, and a floor there would override real signal rather than
+substitute for absent signal. Recorded rather than changed.

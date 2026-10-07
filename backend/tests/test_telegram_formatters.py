@@ -72,7 +72,7 @@ def test_format_summary_marks_the_allowance_undefined_outside_the_current_month(
         make_summary(
             month="2026-05",
             safe_to_spend_today_amount=None,
-            safe_to_spend_status="not_current_month",
+            safe_to_spend_status="month_not_started",
         )
     )
 

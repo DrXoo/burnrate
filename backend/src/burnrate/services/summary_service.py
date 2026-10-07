@@ -17,6 +17,7 @@ from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.domain.metrics import (
     FixedCommitment,
     MetricStatus,
+    MonthTense,
     budget_usage_status,
     fixed_overrun,
     safe_to_spend_today,
@@ -211,7 +212,7 @@ class SummaryService:
             fixed_overrun=overrun,
             days_in_month=days_in_month,
             days_elapsed=days_elapsed,
-            is_current_month=self._is_current_month(
+            month_tense=self._month_tense(
                 month_start=month_start,
                 reference_day=reference_day,
             ),
@@ -314,9 +315,18 @@ class SummaryService:
         month_start, month_end = month_window(month_value)
         return month_start, month_end, month_value
 
-    def _is_current_month(self, *, month_start: date, reference_day: date) -> bool:
-        """Whether the month being reported is the one the reference day falls in."""
-        return (month_start.year, month_start.month) == (reference_day.year, reference_day.month)
+    def _month_tense(self, *, month_start: date, reference_day: date) -> MonthTense:
+        """Where the month being reported sits relative to the owner's day.
+
+        The comparison lives here because ``reference_day`` is resolved through
+        ``APP_TIMEZONE`` and only this side knows it. Every client reads the tense off
+        the status field instead of repeating this, which is the point of the split.
+        """
+        month_key = (month_start.year, month_start.month)
+        reference_key = (reference_day.year, reference_day.month)
+        if month_key == reference_key:
+            return "current"
+        return "closed" if month_key < reference_key else "not_started"
 
     def _days_elapsed_in_month(self, *, month_start: date, reference_day: date, days_in_month: int) -> int:
         month_key = (month_start.year, month_start.month)
@@ -550,7 +560,10 @@ class SummaryService:
     ) -> Decimal:
         """Straight linear extrapolation of spend to the full month (no budget prior)."""
         if days_elapsed <= 0:
-            return Decimal("0.00")
+            # Before the month begins there is no pace to extrapolate, so the committed
+            # spend is the whole of what can be said. Returning zero discarded it, which
+            # with no budget set leaves the owner nothing at all for that month.
+            return spend_to_date.quantize(Decimal("0.01"))
         if days_elapsed >= days_in_month:
             return spend_to_date.quantize(Decimal("0.01"))
         daily = spend_to_date / Decimal(days_elapsed)
@@ -571,8 +584,16 @@ class SummaryService:
         budget dominates (little signal); late in the month the observed pace does.
         """
         if days_elapsed <= 0:
-            # No signal yet: assume spending simply tracks the budget.
-            return budget_reference.quantize(Decimal("0.01"))
+            # No signal yet, so assume spending tracks the budget -- but never project
+            # below what the month already holds. That assumption was safe while a month
+            # that had not started could hold nothing; the Effective Date files a hold
+            # carrying a future value date in the month it falls due, so a future month
+            # can arrive already committed. Returning the budget reference alone claimed
+            # such a month landed on budget while the headline beside it showed the
+            # budget blown. A floor rather than a model: there is no pace to extrapolate
+            # from before the month begins, so refusing to go below the committed figure
+            # is the most that can honestly be said.
+            return max(spend_to_date, budget_reference).quantize(Decimal("0.01"))
         if days_elapsed >= days_in_month:
             return spend_to_date.quantize(Decimal("0.01"))
 

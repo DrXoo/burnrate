@@ -8,13 +8,13 @@ does not know.
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A month that is not the current one never asks the owner to set a budget for it
-- [ ] A current month with no variable budget still reads `no_budget`
-- [ ] A current month budgeted entirely to fixed commitments still reads `no_budget`
-- [ ] The precedence is stated at seam 1 as its own case, both orders covered
-- [ ] `docs/product/metrics.md` and `docs/adr/0002-safe-to-spend-today-definition.md` describe the precedence that ships
+- [x] A month that is not the current one never asks the owner to set a budget for it
+- [x] A current month with no variable budget still reads `no_budget`
+- [x] A current month budgeted entirely to fixed commitments still reads `no_budget`
+- [x] The precedence is stated at seam 1 as its own case, both orders covered
+- [x] `docs/product/metrics.md` and `docs/adr/0002-safe-to-spend-today-definition.md` describe the precedence that ships
 
 ## The defect
 
@@ -54,3 +54,45 @@ Seam 1, the pure domain functions. The case is a table row, not a fixture: no bu
 and not the current month, both orders of the two conditions, plus the two cases that
 must not move (a current month with no variable budget, and one budgeted entirely to
 fixed commitments).
+
+## Comments
+
+**The third way was taken, not the preferred one.** `safe_to_spend_status` now carries
+`month_closed` and `month_not_started` in place of `not_current_month`, so the domain
+owns tense and no client derives it. The ticket scoped this out for touching the enum
+`ADR-0002` fixes at five values; the decision was re-made because by then there were
+*two* tense defects open rather than one, and ticket 17 is precisely the "next client
+re-implements the comparison" that `/code-review` predicted on ticket 11. `ADR-0002`
+carries the amendment with the reasoning for the original five values and why they did
+not survive.
+
+**`is_current_month: bool` became `month_tense: MonthTense`.** The calendar comparison
+stays in `SummaryService._month_tense`, because `reference_day` is resolved through
+`APP_TIMEZONE` and only that side knows it; what a tense *means* stays in the domain.
+Comparing two dates is not policy.
+
+**Tense now outranks `no_budget`, which is the ticket's actual subject.** Verified: May
+2026 read on 15 June returns `month_closed` where it returned `no_budget`. The
+dashboard's set-a-budget branch can no longer fire for a month the owner is not in,
+because the backend never sends `no_budget` for one — so the fix is in the domain and
+the UI inherits it. Mutation-checked: swapping the two branches back fails the two
+table rows that cover it.
+
+**The caption question the ticket flagged was real, and is answered.** "What May 2026
+finished with, of the €0.00 it had budgeted" is true and reads as noise, so a month with
+no budget gets its own wording: "May 2026 closed with no budget set, so there is no plan
+to compare it against", and "July 2026 has no budget set yet" ahead of the committed-spend
+sentence. Rendered through `react-dom/server` across four states — closed with no budget,
+not started with no budget, not started with 500.00 committed, and the current month with
+no budget — confirming the first three no longer ask the owner to set a budget and the
+fourth still does.
+
+**`monthHasPassed` is gone.** It existed to compare `month` against `current_month`,
+which is the comparison the split removes from every client. `web/` type-checks through
+`docker build --target build`.
+
+**What this left for ticket 17.** The Telegram formatter now reads the tense off the
+status — the two tenses are rendered alike in the allowance line on purpose, and the
+lines beneath it still describe a month that has not begun as if it were in progress.
+That rendering is 17's, and it no longer has a "where does tense come from" question in
+front of it.

@@ -10,7 +10,7 @@ that has not started. Found by `/code-review` on ticket 11.
 - [ ] A month that is not the current one is named as such in the first lines of the output, not only in the allowance line
 - [ ] A month that has not started does not report a used-budget bar, a daily pace over zero days, or a projection as if it were in progress
 - [ ] The bot and the dashboard describe the same payload's month the same way
-- [ ] The tense comes from the payload's `current_month`, not from a clock of the bot's own
+- [x] The tense comes from the payload, not from a clock of the bot's own — done by ticket 16, which put it in `safe_to_spend_status` as `month_closed` / `month_not_started`
 - [ ] Seam 4 carries the renderings
 
 ## The defect
@@ -44,6 +44,20 @@ real, it is visible, and nothing routes the owner into it by accident.
 
 `format_summary` already receives everything it needs: the payload carries
 `current_month` as of ticket 11.
+
+## What ticket 16 left here
+
+Ticket 16 took the enum split that both this file and 16 had recorded as the
+alternative, so the formatter no longer has a "where does tense come from" question in
+front of it. `safe_to_spend_status` is `month_closed` or `month_not_started`, the
+allowance line already branches on both — rendered alike on purpose — and the fourth
+criterion above is met.
+
+What is left is the rendering, which is the whole of the defect above: the used-budget
+bar, the pace over zero elapsed days and the projection are still printed for a month
+that has not begun. The projection figure itself was ticket 15's and is now correct, so
+the remaining work is suppressing or re-wording three lines at seam 4, not deciding
+anything.
 
 ## Testing
 

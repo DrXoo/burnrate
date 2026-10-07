@@ -397,23 +397,33 @@ def test_summary_service_rejects_a_clock_without_a_timezone() -> None:
 # disagrees with it for part of every month-end, in whichever direction the offset
 # points, and then captions a month with the wrong tense.
 #
-# timezone, instant, month asked for, the month the owner is in, what the owner is doing
+# timezone, instant, the month the owner is in, month asked for, the status it earns,
+# what the owner is doing
 CIVIL_MONTH_EXAMPLES = [
     (
         *BEHIND_UTC,
         "2026-07",
+        "month_not_started",
         "opening a month that has not started while UTC has already turned",
     ),
     (
         *AHEAD_OF_UTC,
         "2026-06",
+        "month_closed",
         "looking back at a month that just closed while UTC is still in it",
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("timezone_name", "instant", "current_month", "month", "_what_the_owner_is_doing"),
+    (
+        "timezone_name",
+        "instant",
+        "current_month",
+        "month",
+        "expected_status",
+        "_what_the_owner_is_doing",
+    ),
     CIVIL_MONTH_EXAMPLES,
 )
 def test_summary_service_names_the_month_the_owner_is_in(
@@ -421,6 +431,7 @@ def test_summary_service_names_the_month_the_owner_is_in(
     instant: datetime,
     current_month: str,
     month: str,
+    expected_status: str,
     _what_the_owner_is_doing: str,
 ) -> None:
     db = make_session()
@@ -431,7 +442,9 @@ def test_summary_service_names_the_month_the_owner_is_in(
 
     assert summary["month"] == month
     assert summary["current_month"] == current_month
-    assert summary["safe_to_spend_status"] == "not_current_month"
+    # The status names the tense, so a client never has to compare the two months
+    # above -- which is the comparison that was being got wrong off a UTC clock.
+    assert summary["safe_to_spend_status"] == expected_status
 
 
 def test_summary_service_reports_the_savings_rate_and_its_verdict() -> None:
@@ -956,17 +969,21 @@ def test_summary_service_has_no_allowance_to_report_without_a_budget() -> None:
 # A month that is not the one today falls in. The budgets are active in both, so the
 # only thing making the allowance meaningless is that "today" is somewhere else.
 #
-# month asked for, today, what the owner is doing
+# month asked for, today, the status it earns, what the owner is doing
 OTHER_MONTH_EXAMPLES = [
-    ("2026-06", date(2026, 7, 10), "looking back at a finished month"),
-    ("2026-07", date(2026, 6, 15), "looking ahead at a month not yet started"),
+    ("2026-06", date(2026, 7, 10), "month_closed", "looking back at a finished month"),
+    ("2026-07", date(2026, 6, 15), "month_not_started", "looking ahead at a month not yet started"),
 ]
 
 
-@pytest.mark.parametrize(("month", "today", "_what_the_owner_is_doing"), OTHER_MONTH_EXAMPLES)
+@pytest.mark.parametrize(
+    ("month", "today", "expected_status", "_what_the_owner_is_doing"),
+    OTHER_MONTH_EXAMPLES,
+)
 def test_summary_service_has_no_allowance_to_report_outside_the_current_month(
     month: str,
     today: date,
+    expected_status: str,
     _what_the_owner_is_doing: str,
 ) -> None:
     db = make_session()
@@ -976,7 +993,7 @@ def test_summary_service_has_no_allowance_to_report_outside_the_current_month(
 
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["safe_to_spend_today_amount"] is None
-    assert summary["safe_to_spend_status"] == "not_current_month"
+    assert summary["safe_to_spend_status"] == expected_status
 
 
 def test_summary_service_counts_a_scheduled_payment_in_the_month_it_falls_due() -> None:
@@ -1012,7 +1029,7 @@ def test_summary_service_counts_a_scheduled_payment_in_the_month_it_falls_due() 
     summary = SummaryService(db=db).get_summary(month="2026-07", today=date(2026, 6, 15))
 
     # 400.00 budgeted against the one 80.00 charge that falls in July.
-    assert summary["safe_to_spend_status"] == "not_current_month"
+    assert summary["safe_to_spend_status"] == "month_not_started"
     assert summary["monthly_budget_amount"] == "400.00"
     assert summary["budgeted_spending_amount"] == "80.00"
     assert summary["pending_spend_amount"] == "80.00"
@@ -1054,7 +1071,7 @@ def test_summary_service_discloses_a_scheduled_payment_no_budget_covers() -> Non
 
     summary = SummaryService(db=db).get_summary(month="2026-07", today=date(2026, 6, 15))
 
-    assert summary["safe_to_spend_status"] == "not_current_month"
+    assert summary["safe_to_spend_status"] == "month_not_started"
     assert summary["monthly_spending_amount"] == "80.00"
     assert summary["unbudgeted_spending_amount"] == "80.00"
     assert summary["budgeted_spending_amount"] == "0.00"
@@ -1320,3 +1337,95 @@ def test_summary_service_keeps_an_ignored_credit_out_of_the_income_figure() -> N
     # less the 285.00 spent. An ignored credit inflates both if the query lets it.
     assert summary["monthly_income_amount"] == "2000.00"
     assert summary["net_cash_flow_amount"] == "1715.00"
+
+
+def seed_future_standing_order(db: Session, *, with_budget: bool) -> None:
+    """A 500.00 standing order due 3 July, read from June. Optionally a 300.00 budget.
+
+    A hold carrying a future value date is filed by its Effective Date in the month it
+    falls due, so a month that has not started can already hold committed spend. That
+    is what makes a projection for it answerable at all -- and what the "no signal yet"
+    branch was written before.
+    """
+    account = Account(
+        display_name="Main account",
+        currency="EUR",
+        included_in_calculations=True,
+        latest_balance_amount=Decimal("2000.00"),
+        latest_balance_currency="EUR",
+    )
+    food = Category(name="Food", type="expense", active=True)
+    db.add_all([account, food])
+    db.flush()
+    if with_budget:
+        db.add(
+            Budget(
+                category_id=food.id,
+                amount=Decimal("300.00"),
+                currency="EUR",
+                period_type="monthly",
+                active_from=date(2026, 6, 1),
+                active_to=None,
+            )
+        )
+    db.add(
+        Transaction(
+            account_id=account.id,
+            enable_banking_transaction_id="tx-standing-order",
+            booking_date=None,
+            value_date=date(2026, 7, 3),
+            amount=Decimal("-500.00"),
+            currency="EUR",
+            description="Standing order",
+            merchant_name="Landlord",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=food.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 10, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+
+def test_summary_service_never_projects_a_future_month_below_what_it_already_holds() -> None:
+    """A month that has not started cannot be projected under its committed spend.
+
+    Worked example: 500.00 already committed to July against a 300.00 Food budget,
+    read on 15 June. There is no elapsed day to extrapolate a pace from, so the
+    projection has nothing cleverer available than refusing to go below what is
+    already there. It used to return the budget untouched -- the dashboard printed
+    "spent 500.00" and "projected 300.00" on the same bar, and the projection needle
+    claimed the month landed on budget while the headline read -200.00.
+    """
+    db = make_session()
+    seed_future_standing_order(db, with_budget=True)
+
+    summary = SummaryService(db=db).get_summary(month="2026-07", today=date(2026, 6, 15))
+
+    assert summary["budgeted_spending_amount"] == "500.00"
+    assert summary["money_left_amount"] == "-200.00"
+    assert summary["projected_month_end_spend_amount"] == "500.00"
+    assert summary["projected_overspend_amount"] == "200.00"
+
+
+def test_summary_service_discloses_a_future_months_committed_spend_with_no_budget_set() -> None:
+    """With no budget there is nothing to anchor to, but the spend is still there.
+
+    The extrapolation returned 0.00 for a month that has not started, which dropped
+    the committed 500.00 entirely -- the one figure the owner has for that month, in
+    the one case where it is all they have.
+    """
+    db = make_session()
+    seed_future_standing_order(db, with_budget=False)
+
+    summary = SummaryService(db=db).get_summary(month="2026-07", today=date(2026, 6, 15))
+
+    assert summary["monthly_budget_amount"] == "0.00"
+    assert summary["monthly_spending_amount"] == "500.00"
+    assert summary["projected_month_end_spend_amount"] == "500.00"
+    # No budget to overshoot, so there is no overspend to report -- that is the
+    # no_budget state, not a claim that the month is fine.
+    assert summary["projected_overspend_amount"] == "0.00"

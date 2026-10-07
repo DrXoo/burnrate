@@ -37,10 +37,16 @@ def _allowance_line(payload: dict[str, Any], currency: str | None) -> str:
         # No zero here: "0.00" would claim the owner may spend nothing, which is a
         # different and untrue thing to say. Tell them what to do instead.
         return "⚪ Safe to spend today: set a monthly budget to get a daily number"
-    if status == "not_current_month":
+    if status in {"month_closed", "month_not_started"}:
         # "Today" is not in the month being asked about. The budget-left line below
         # already reports how that month stands, so this line only says why the
         # allowance is absent.
+        #
+        # The two tenses are deliberately rendered alike *here* and are available to be
+        # told apart: the lines under this one still describe a month that has not begun
+        # as if it were in progress -- a used-budget bar, a pace over zero elapsed days,
+        # a projection. Fixing that is ticket 17, and it now reads this status rather
+        # than deriving the tense from a clock of the bot's own.
         return "⚪ Safe to spend today: only for the current month"
     icon = _BUDGET_STATUS_ICONS[status]
     return f"{icon} Safe to spend today: {_money(payload['safe_to_spend_today_amount'], currency)}"

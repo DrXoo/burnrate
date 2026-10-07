@@ -104,28 +104,6 @@ function useHeroModel(summary: SummaryDashboard) {
   }, [summary]);
 }
 
-/**
- * Whether a month the backend has already called "not current" is behind us.
- *
- * `current_month` is the month the owner is in, resolved by the backend through
- * APP_TIMEZONE. `month` is the month this payload was fetched for, echoed back
- * unchanged. So this compares the month on screen against the one clock that knows the
- * owner's timezone, which is what makes it exact whichever direction that timezone is
- * offset. Deciding it against a month derived here from UTC instead read a month that
- * had not started as a closed one -- "what July finished with", quoting an untouched
- * budget as an outcome -- for the hours of every month-end where the two clocks
- * disagree. Equality means the month on screen is the current one, which the backend
- * would not have called not-current; if it ever arrives it reads as not yet passed,
- * which is the less damaging of the two captions.
- *
- * The month *asked for* is a separate question, and still derived from the browser's
- * clock in `useBurnRateData`. That decides which month the owner lands on, not whether
- * this label is true of the month they are looking at.
- */
-function monthHasPassed(summary: SummaryDashboard): boolean {
-  return summary.month < summary.current_month;
-}
-
 interface Headline {
   eyebrow: string;
   value: string;
@@ -155,7 +133,10 @@ function useHeadline(summary: SummaryDashboard): Headline {
       };
     }
 
-    if (summary.safe_to_spend_status === "not_current_month") {
+    if (
+      summary.safe_to_spend_status === "month_closed" ||
+      summary.safe_to_spend_status === "month_not_started"
+    ) {
       // That month's outcome against plan is the money-left figure the gauge already
       // shows -- the slot borrows it rather than deriving anything new. Only the
       // wording changes, so a finished month reads as achieved and a future one as
@@ -179,13 +160,20 @@ function useHeadline(summary: SummaryDashboard): Headline {
         committed > 0
           ? `${eurPlain(summary.monthly_spending_amount)} is already committed.`
           : "Nothing is spent yet.";
-      return monthHasPassed(summary)
+      // A month the owner never budgeted for has no plan to be judged against, so the
+      // note says that instead of quoting a zero as if it were the plan. Reachable
+      // because tense now outranks no_budget: before, such a month was captioned with
+      // the set-a-budget invitation, which is the defect this replaced.
+      const hadNoBudget = num(summary.monthly_budget_amount) <= 0;
+      return summary.safe_to_spend_status === "month_closed"
         ? {
             eyebrow: `${monthName} · against plan`,
             value: eur(summary.money_left_amount),
             isFigure: true,
             badge: "Month closed",
-            note: `What ${monthName} finished with, of the ${budgeted} it had budgeted.`,
+            note: hadNoBudget
+              ? `${monthName} closed with no budget set, so there is no plan to compare it against.`
+              : `What ${monthName} finished with, of the ${budgeted} it had budgeted.`,
             coach: {
               title: `${monthName} is closed`,
               body: `${unavailable} The headline shows how that month finished against its budget instead.`,
@@ -196,7 +184,9 @@ function useHeadline(summary: SummaryDashboard): Headline {
             value: eur(summary.money_left_amount),
             isFigure: true,
             badge: "Not started yet",
-            note: `What ${monthName} plans to have left of the ${budgeted} budgeted. ${spendNote}`,
+            note: hadNoBudget
+              ? `${monthName} has no budget set yet. ${spendNote}`
+              : `What ${monthName} plans to have left of the ${budgeted} budgeted. ${spendNote}`,
             coach: {
               title: `${monthName} has not started`,
               body: `${unavailable} The headline shows what that month plans, not what it achieved.`,

@@ -147,26 +147,35 @@ negative allowance.
 ### Its status
 
 The allowance carries a status so it can be read as a colour without reading the
-number. One field, five values:
+number. One field, six values:
 
-* `no_budget` -- nothing is budgeted for day-to-day spend, so there is no
-  allowance. The amount is null, and the interface should prompt the owner to set
-  a budget. A month budgeted entirely to fixed commitments reads this way too.
-* `not_current_month` -- "today" is not in the month being reported, so the
-  metric has no meaning. The amount is null.
+* `month_closed` -- the month being reported is behind the owner's today, so the
+  allowance has no meaning. The amount is null, and the month's figures are an
+  outcome.
+* `month_not_started` -- the month is ahead of the owner's today. The amount is
+  null, and the month's figures are a plan.
+* `no_budget` -- nothing is budgeted for day-to-day spend in the *current* month,
+  so there is no allowance. The amount is null, and the interface should prompt the
+  owner to set a budget. A month budgeted entirely to fixed commitments reads this
+  way too.
 * `on_track`, `watch`, `over` -- the bands below.
 
-The amount is null for the first two cases and never for the others. A zero
+The amount is null for the first three cases and never for the others. A zero
 amount therefore means exactly one thing: budgets exist, the month is current,
 and they are used up.
 
-`not_current_month` does not say whether that month is behind or ahead: one value
-covers both. An interface that needs the difference -- to caption a month that has
-closed differently from one that has not started -- compares the reported `month`
-against `current_month`, which names the month the owner is actually in, resolved
-through `APP_TIMEZONE`. Deriving that month client-side instead reads a month that
-has not started as a closed one, quoting its untouched budget as an outcome, for
-the hours of every month-end where the client's clock and `APP_TIMEZONE` disagree.
+**Tense is decided before the budget**, so a month the owner is not in never reads
+`no_budget` — it reads its tense. The other order told an owner looking at a month
+that closed before they ever budgeted anything to set a budget for it, which is
+advice about a month they cannot change.
+
+**The status names the tense so no interface has to work it out.** The comparison is
+the backend's, against `current_month` — the month the owner is actually in, resolved
+through `APP_TIMEZONE`, which is the only clock that knows it. An interface deriving
+the tense itself reads a month that has not started as a closed one, quoting its
+untouched budget as an outcome, for the hours of every month-end where its clock and
+`APP_TIMEZONE` disagree. Both interfaces did a version of this before the tense had a
+name; see `docs/adr/0002-safe-to-spend-today-definition.md`.
 
 A month that has not started is not necessarily untouched: a standing order
 arrives as a hold carrying a future value date, so its effective date files it in

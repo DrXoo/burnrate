@@ -127,7 +127,7 @@ def test_safe_to_spend_today_spreads_what_is_left_over_the_days_left_counting_to
         fixed_overrun=Decimal("0.00"),
         days_in_month=30,
         days_elapsed=15,
-        is_current_month=True,
+        month_tense="current",
     )
 
     assert verdict.amount == Decimal("9.38")
@@ -143,7 +143,7 @@ def test_safe_to_spend_today_charges_the_owner_for_a_fixed_budget_that_overshot(
         fixed_overrun=Decimal("50.00"),
         days_in_month=30,
         days_elapsed=15,
-        is_current_month=True,
+        month_tense="current",
     )
 
     assert verdict.amount == Decimal("6.25")
@@ -177,7 +177,7 @@ def test_safe_to_spend_today_is_never_negative(
         fixed_overrun=Decimal(overrun),
         days_in_month=30,
         days_elapsed=15,
-        is_current_month=True,
+        month_tense="current",
     )
 
     assert verdict.amount == Decimal("0.00")
@@ -238,7 +238,7 @@ def test_safe_to_spend_today_reads_the_band_the_month_is_in(
         fixed_overrun=Decimal("0.00"),
         days_in_month=30,
         days_elapsed=days_elapsed,
-        is_current_month=True,
+        month_tense="current",
     )
 
     assert verdict.amount == Decimal(expected_amount)
@@ -279,41 +279,48 @@ def test_safe_to_spend_today_resolves_the_last_day_of_the_month(
         fixed_overrun=Decimal("0.00"),
         days_in_month=30,
         days_elapsed=30,
-        is_current_month=True,
+        month_tense="current",
     )
 
     assert verdict.amount == Decimal(expected_amount)
     assert verdict.status == expected_status
 
 
-# The two cases with no allowance to report, where the status carries the reason
-# and the amount is null. A null rather than a zero is what lets a zero mean one
-# thing only: budgets exist, the month is current, and they are used up.
+# The cases with no allowance to report, where the status carries the reason and the
+# amount is null. A null rather than a zero is what lets a zero mean one thing only:
+# budgets exist, the month is current, and they are used up.
 #
-# A month whose budgets are all fixed has a variable total of zero and so lands in
-# the first case -- there is no slice for a daily allowance to draw on, and
-# printing 0.00 would tell the owner they may spend nothing when the truth is that
-# nothing has been budgeted to spend.
+# A month whose budgets are all fixed has a variable total of zero and so reads
+# no_budget -- there is no slice for a daily allowance to draw on, and printing 0.00
+# would tell the owner they may spend nothing when the truth is that nothing has been
+# budgeted to spend.
 #
-# When both hold, no-budget wins. It is the more useful of the two: it says what
-# the owner can do about it, while telling them a budgetless month finished
-# against a plan it never had would say nothing at all.
+# **Tense wins when both hold**, and the status says which tense. no_budget used to
+# win, on the reasoning that it tells the owner what they can do about it -- but what
+# they can do about a month that closed before they ever set a budget is nothing, and
+# the dashboard printed its set-a-budget invitation over a month weeks gone. The two
+# tenses are separate values rather than one not_current_month because every client
+# needs to tell them apart to caption the month at all: with one value each of them
+# re-derived the comparison from a clock of its own, which is how the Telegram summary
+# came to print a used-budget bar for a month that had not begun.
 #
-# variable budget, is current month, verdict
+# variable budget, month tense, verdict
 UNDEFINED_EXAMPLES = [
-    ("0.00", True, "no_budget"),
-    ("300.00", False, "not_current_month"),
-    ("0.00", False, "no_budget"),
+    ("0.00", "current", "no_budget"),
+    ("300.00", "closed", "month_closed"),
+    ("300.00", "not_started", "month_not_started"),
+    ("0.00", "closed", "month_closed"),
+    ("0.00", "not_started", "month_not_started"),
 ]
 
 
 @pytest.mark.parametrize(
-    ("variable_budget_total", "is_current_month", "expected_status"),
+    ("variable_budget_total", "month_tense", "expected_status"),
     UNDEFINED_EXAMPLES,
 )
 def test_safe_to_spend_today_has_no_amount_when_it_has_no_meaning(
     variable_budget_total: str,
-    is_current_month: bool,
+    month_tense: str,
     expected_status: str,
 ) -> None:
     verdict = safe_to_spend_today(
@@ -322,7 +329,7 @@ def test_safe_to_spend_today_has_no_amount_when_it_has_no_meaning(
         fixed_overrun=Decimal("0.00"),
         days_in_month=30,
         days_elapsed=15,
-        is_current_month=is_current_month,
+        month_tense=month_tense,
     )
 
     assert verdict.amount is None
