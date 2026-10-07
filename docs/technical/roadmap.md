@@ -205,16 +205,19 @@ it is available work, not a defect.
 
 Recorded explicitly, so that none of them is rediscovered as a surprise:
 
-* **The timezone work has almost no test coverage.** `APP_TIMEZONE` was applied
-  to four call sites and only one of them — the summary service — is exercised
-  off UTC. `BudgetService._budget_status` and `deactivate_budget` compare
-  `active_from >= today` against the owner's calendar day, the Telegram router's
-  `_civil_month` and the notifier's `civil_date` call are untested, and no test
-  anywhere references `civil_date`. This is not a one-line fix: `SummaryService`
-  got an injectable `clock` seam and `BudgetService` got only `timezone_name`,
-  so it cannot be tested without freezing the system clock. Closing it means
-  agreeing a seam, which is design work rather than a test to backfill. It is
-  also a straight miss against the TDD rule in `AGENTS.md`.
+* ~~**The timezone work has almost no test coverage.**~~ **Closed by ticket 13.**
+  `APP_TIMEZONE` was applied to four call sites and only the summary service was
+  exercised off UTC. Every call site now takes the instant from an injectable
+  `clock`, which `BudgetService` was missing, and `civil_date` requires the instant
+  rather than defaulting to the wall clock, so the seam is enforced by the signature
+  instead of by convention. Where the timezone comes from still varies —
+  `EnableBankingService` reads it off the `Settings` it already holds, the other
+  three take a `timezone_name` — and both forms are recorded. Four boundary tests,
+  each over both offset directions: a budget starting on the 1st, the day a budget
+  is cancelled on, the month a bare `/unknown` scopes to, and the month a sync
+  notification counts, plus `civil_date` itself. The convention is in
+  `burnrate/clock.py` and the two boundary instants in `tests/conftest.py`, so a
+  fifth civil date has one shape to copy rather than a fourth to invent.
 * **The Web UI picks the month in UTC while the backend picks it in
   `APP_TIMEZONE`.** `currentMonthValue()` is `new Date().toISOString().slice(0, 7)`.
   For any non-UTC `APP_TIMEZONE` the two disagree at every month boundary: in
@@ -224,14 +227,15 @@ Recorded explicitly, so that none of them is rediscovered as a surprise:
   `APP_TIMEZONE`, so the fix is either to drop the client-side default and let
   the server choose the month it already defaults to, or to expose the timezone
   in a settings payload.
-* **Three month-label defects in the dashboard**, all of the same kind — the
-  page states something about a month it does not actually know. `monthHasPassed`
-  reads a future month as a closed one when `APP_TIMEZONE` is behind UTC; a
-  stale summary paired with a failed refresh renders with no banner, because the
-  hook does not clear the payload on failure; and the future-month caption
-  asserts "Nothing is spent yet" while a scheduled payment filed into that month
-  by the Effective Date can already contradict it. The third needs no unusual
-  configuration.
+* ~~**Three month-label defects in the dashboard**~~ **Closed by ticket 11.** All of
+  the same kind — the page stated something about a month it did not actually know.
+  `monthHasPassed` read a future month as a closed one when `APP_TIMEZONE` is behind
+  UTC; a stale summary paired with a failed refresh rendered with no banner; and the
+  future-month caption asserted "Nothing is spent yet" while a scheduled payment
+  filed into that month by the Effective Date already contradicted it. The backend
+  now reports `current_month` so the comparison is exact in both offset directions,
+  the hook withholds a payload for the wrong month, and the caption reads the figures
+  beside it.
 * **There is no month selector in the Web UI.** The headline handles a past and
   a future month correctly and no owner can reach either by clicking:
   `filters.month` is initialised to the current month and nothing ever changes
@@ -240,22 +244,21 @@ Recorded explicitly, so that none of them is rediscovered as a surprise:
   groundwork, reachable today only by editing the default and rebuilding.
   Whether Phase 8 owes the picker or a later phase does is open; it changes
   navigation across four pages that all read `filters.month`.
-* **An Ignored transaction does not stay Ignored across a re-import.**
-  Pre-existing and reachable in the owner's own configuration.
-  `RulesService.apply_rule_to_transaction` guards on `category_id is None` and
-  never reads `excluded_at`, so a row the owner excluded that matches an active
-  rule is handed its category back on the next sync — the ledger still shows it
-  excluded and the unknown queue stays quiet, while the money is back in
-  monthly spending and therefore back out of the allowance. This phase made it
-  matter more: the allowance is the figure that moves. The sweep already
-  respects the flag, so the precedent exists.
+* ~~**An Ignored transaction does not stay Ignored across a re-import.**~~
+  **Closed by ticket 12.** `RulesService` guarded on `category_id is None` and never
+  read `excluded_at`, so a row the owner excluded that matched an active rule was
+  handed its category back on the next sync — the ledger still showed it excluded
+  and the unknown queue stayed quiet, while the money was back in monthly spending
+  and therefore back out of the allowance. The rule engine now states which rows it
+  may decide, and the spend and income queries state the exclusion rather than
+  inheriting it from a null category.
 
-All five are open tickets in this phase's own backlog. Two need no unusual
-configuration to fire — the Ignored defect, and a failed refresh leaving a stale
-month on screen — and those are the ones to close first. The timezone coverage
-is a prerequisite for trusting a civil date off UTC in any later phase, and the
-rest wait on an `APP_TIMEZONE` outside UTC or on a month the owner cannot
-currently navigate to.
+Three of the five are closed: the Ignored defect by ticket 12, the month-label
+defects by ticket 11, and the timezone coverage by ticket 13. The two that remain
+are the Web UI's month selection and the missing month selector, and they are the
+same piece of work seen from two sides — ticket 14 owns both. Neither can fire for
+an owner who cannot navigate away from the current month, which is exactly what
+makes them easy to leave and what Phase 3's lesson says about leaving them.
 
 ---
 
@@ -481,17 +484,14 @@ Phase 8's original first three steps — the domain calculation, moving the
 savings-rate threshold out of `DashboardPage.tsx`, and re-leading the dashboard
 with the allowance — are done. What is left:
 
-1. Close Phase 8's open gaps, in this order: the Ignored-across-a-re-import
-   defect (reachable today, and it moves the allowance), the dashboard's
-   month-label defects, then the UI/backend month-selection mismatch.
-2. Give `BudgetService` and the Telegram notifier the same clock seam
-   `SummaryService` has, and cover the four `APP_TIMEZONE` call sites. Until
-   this is done, no later phase can trust a civil date off UTC.
-3. Decide whether Phase 8 owes a month selector, or whether the past- and
-   future-month headlines stay groundwork for a later phase.
-4. Add trailing per-category baselines, as the foundation for Phase 9.
-5. Decide whether to promote Phase 12's categorization copilot, based on whether
+1. Close Phase 8's last open gap, which is one piece of work rather than two: give
+   the Web UI a month selector and stop it choosing the month in UTC. Three of the
+   five known gaps are already closed — the Ignored-across-a-re-import defect, the
+   dashboard's month-label defects, and the timezone coverage. Ticket 14 owns this
+   one.
+2. Add trailing per-category baselines, as the foundation for Phase 9.
+3. Decide whether to promote Phase 12's categorization copilot, based on whether
    the unknown queue is actually the daily friction.
 
-Steps 1 and 2 finish Phase 8 honestly. Phase 3's lesson was that a phase closed
+Step 1 is what finishes Phase 8 honestly. Phase 3's lesson was that a phase closed
 over a known gap stays closed for six phases.

@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from burnrate.db.base import Base
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.services.summary_service import SummaryService
+from conftest import AHEAD_OF_UTC, BEHIND_UTC
 
 
 def make_session() -> Session:
@@ -399,31 +400,27 @@ def test_summary_service_rejects_a_clock_without_a_timezone() -> None:
 # timezone, instant, month asked for, the month the owner is in, what the owner is doing
 CIVIL_MONTH_EXAMPLES = [
     (
-        "Pacific/Honolulu",
-        datetime(2026, 7, 1, 2, 0, tzinfo=timezone.utc),
+        *BEHIND_UTC,
         "2026-07",
-        "2026-06",
         "opening a month that has not started while UTC has already turned",
     ),
     (
-        "Europe/Madrid",
-        datetime(2026, 6, 30, 23, 0, tzinfo=timezone.utc),
+        *AHEAD_OF_UTC,
         "2026-06",
-        "2026-07",
         "looking back at a month that just closed while UTC is still in it",
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("timezone_name", "instant", "month", "current_month", "_what_the_owner_is_doing"),
+    ("timezone_name", "instant", "current_month", "month", "_what_the_owner_is_doing"),
     CIVIL_MONTH_EXAMPLES,
 )
 def test_summary_service_names_the_month_the_owner_is_in(
     timezone_name: str,
     instant: datetime,
-    month: str,
     current_month: str,
+    month: str,
     _what_the_owner_is_doing: str,
 ) -> None:
     db = make_session()

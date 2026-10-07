@@ -233,4 +233,5 @@ The architecture should preserve the following constraints:
 * Self-hosted operation should remain easy on modest hardware
 * Monetary values must not use floating-point storage
 * Timestamps must be stored in UTC, while civil dates ("today", "the current month") must be derived in the owner's own timezone, named by `APP_TIMEZONE` (an IANA name, default `UTC`) and resolved through the single `burnrate.clock.civil_date` helper
+* A service that resolves a civil date must take the instant from an injectable clock, because the month-end boundary is the only place the derivation is ever wrong and it is reachable only by choosing the instant. `civil_date` requires the instant rather than defaulting to the wall clock, so this is enforced by the signature; where the timezone comes from varies with what the service already holds, and both forms are recorded in `burnrate/clock.py`
 * The resolved current month must be reported to clients rather than left for each one to derive, because only the backend knows `APP_TIMEZONE`

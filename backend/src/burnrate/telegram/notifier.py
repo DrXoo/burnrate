@@ -66,7 +66,10 @@ def send_sync_notification(
     if new_count <= 0:
         return 0
 
-    month = civil_date(timezone_name=settings.app_timezone, instant=now).strftime("%Y-%m")
+    month = civil_date(
+        timezone_name=settings.app_timezone,
+        instant=now or datetime.now(UTC),
+    ).strftime("%Y-%m")
     uncategorized_count = LedgerService(db=session).get_uncategorized_transaction_count(month=month)
     text = format_sync_notification(new_count=new_count, uncategorized_count=uncategorized_count)
 

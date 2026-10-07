@@ -4,6 +4,8 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import pytest
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -17,6 +19,7 @@ from burnrate.telegram.notifier import (
     send_reconnect_alerts,
     send_sync_notification,
 )
+from conftest import AHEAD_OF_UTC, BEHIND_UTC
 
 NOW = datetime(2026, 7, 4, tzinfo=UTC)
 
@@ -348,3 +351,58 @@ def test_reconnect_alert_skips_when_notifications_disabled() -> None:
 
     assert sent == 0
     assert client.sent == []
+
+
+AHEAD_TZ, AHEAD_INSTANT, _ = AHEAD_OF_UTC
+BEHIND_TZ, BEHIND_INSTANT, _ = BEHIND_UTC
+
+# Which month's unknown count the message quotes, as the owner's clock reads it. The
+# fixture's two uncategorized transactions are dated July 2026, so each row flips if
+# the month comes straight off UTC: the owner is told nothing needs a category when
+# two do, or sent chasing a queue that belongs to a month they are not in.
+#
+# timezone, instant, the count the message quotes, what the owner is living through
+SYNC_MONTH_EXAMPLES = [
+    (
+        AHEAD_TZ,
+        AHEAD_INSTANT,
+        2,
+        "a sync just after their midnight, while UTC is still in June",
+    ),
+    (
+        BEHIND_TZ,
+        BEHIND_INSTANT,
+        0,
+        "a sync on their last evening of June, while UTC has already turned",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("timezone_name", "instant", "uncategorized_count", "_what_the_owner_is_living_through"),
+    SYNC_MONTH_EXAMPLES,
+)
+def test_sync_notification_counts_the_month_the_owner_is_in(
+    timezone_name: str,
+    instant: datetime,
+    uncategorized_count: int,
+    _what_the_owner_is_living_through: str,
+) -> None:
+    client = FakeClient()
+
+    send_sync_notification(
+        run_result=run_result(3),
+        session=make_session(),
+        client=client,
+        settings=make_settings(APP_TIMEZONE=timezone_name),
+        now=instant,
+    )
+
+    text = client.sent[0][1]
+    # The whole message, not just a substring: the behind-UTC row asserts the absence
+    # of the second line, and "no such phrase" would also hold for a message that lost
+    # it for an unrelated reason, or for an empty body.
+    expected = ["🔔 3 new transactions imported."]
+    if uncategorized_count:
+        expected.append(f"{uncategorized_count} still need a category — send /unknown.")
+    assert text.splitlines() == expected

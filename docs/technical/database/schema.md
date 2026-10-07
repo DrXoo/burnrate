@@ -305,6 +305,16 @@ Notes:
 
 * For the first version, `period_type` is expected to be `monthly`.
 * The total monthly budget is derived by summing active category budgets.
+* **The window is month-granular at both ends, and the counting rule is why.** A
+  budget is counted in full for any month its `[active_from, active_to]` window
+  touches at all — there is no proration — so a window edge landing one day inside a
+  month hands that month the whole amount. `active_from` is therefore required to be
+  a 1st, and `active_to` must be written as the last day a month the budget really
+  covered: cancelling a budget records *yesterday*, not today, or cancelling on the
+  1st would give the new month a budget the owner had just switched off. An open
+  window (`active_to` NULL) is the normal state and rolls forward indefinitely, which
+  is why nothing asks the owner to close a month; changing an amount from a given
+  month creates the next row and closes the previous one automatically.
 
 ---
 

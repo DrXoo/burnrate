@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from collections.abc import Callable
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -13,12 +14,23 @@ from burnrate.db.models import Budget, Category
 
 
 class BudgetService:
-    def __init__(self, *, db: Session, timezone_name: str = "UTC") -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        timezone_name: str = "UTC",
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.db = db
         self._timezone_name = timezone_name
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def _civil_today(self) -> date:
-        return civil_date(timezone_name=self._timezone_name)
+        """The owner's calendar day, which decides every budget's status.
+
+        The clock is injectable for the reason given in ``burnrate.clock``.
+        """
+        return civil_date(timezone_name=self._timezone_name, instant=self._clock())
 
     def list_budgets(self) -> list[dict[str, Any]]:
         rows = self.db.execute(
@@ -120,7 +132,14 @@ class BudgetService:
             # becomes inactive immediately rather than staying active for today.
             budget.active_to = budget.active_from - timedelta(days=1)
         else:
-            budget.active_to = today
+            # Yesterday, not today: cancelling means the budget stops, and a budget
+            # is month-granular on the way out as well as in. ``active_from`` must be
+            # a 1st, and ``_get_active_budgets`` counts a budget in full for any month
+            # it touches at all -- so recording *today* on the 1st of a month handed
+            # the whole amount to a month the owner had just cancelled in, while the
+            # budget list already read it as inactive. Ending it yesterday keeps the
+            # months the budget actually covered and gives away none that it did not.
+            budget.active_to = today - timedelta(days=1)
 
         return self._serialize_budget(
             budget=budget,
