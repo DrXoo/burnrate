@@ -7,14 +7,14 @@ metric was missing, and the gap went unnoticed for six phases.
 
 **Blocked by:** 01, 07, 08
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Phase 8's scope in the roadmap matches what shipped, with a line on why it grew beyond "a derivation, not new accounting"
-- [ ] The Definition of Done gains the clause: a Pending charge reduces the allowance the day it appears, and a Pending row that later books is not counted twice
-- [ ] Every Definition of Done item is checked against the implementation, and the result recorded
-- [ ] The deliberately unchanged per-category budget threshold is recorded as a choice, not left as an oversight
-- [ ] The schema doc is confirmed untouched, since this phase carries no migration
-- [ ] Any gap found is recorded explicitly in the roadmap rather than left implicit
+- [x] Phase 8's scope in the roadmap matches what shipped, with a line on why it grew beyond "a derivation, not new accounting"
+- [x] The Definition of Done gains the clause: a Pending charge reduces the allowance the day it appears, and a Pending row that later books is not counted twice
+- [x] Every Definition of Done item is checked against the implementation, and the result recorded
+- [x] The deliberately unchanged per-category budget threshold is recorded as a choice, not left as an oversight
+- [x] The schema doc is confirmed untouched, since this phase carries no migration
+- [x] Any gap found is recorded explicitly in the roadmap rather than left implicit
 
 ## Comments
 
@@ -109,3 +109,64 @@ default and let the server choose) or it is added to a settings payload the clie
 And `monthHasPassed`, added in ticket 07, calls the same UTC `currentMonthValue()`; its
 docstring records why equality reads as past, which keeps the *tense* right when the two
 clocks disagree, but it cannot repair a request for the wrong month.
+
+---
+
+**Closed. What the check found.**
+
+The roadmap's Phase 8 entry now describes what shipped, its Definition of Done
+carries the Pending clause, and every clause is checked in a table with the
+evidence beside it rather than a claim. 266 backend tests pass.
+
+*Four clauses met, one met in substance only.* The schema doc is **not** untouched,
+which this ticket assumed it would be. No migration exists and no table or column
+changed, so the assumption behind the criterion holds, but the doc gained two notes:
+that month placement reads the effective date rather than `booking_date`, and that
+this makes the window non-sargable so those queries plan as sequential scans. Both
+describe existing tables and belong there. Recorded as "met in substance, not
+literally" rather than ticked, because a future reader comparing the criterion to
+`git diff` would otherwise find it false and not know which way to resolve it.
+
+*The 0.85 in the dashboard hero is gone*, as this ticket's comment predicted — ticket
+07's sixth criterion closed it. The only constants left in `DashboardPage` are sign
+tests that pick wording (`remaining >= 0` choosing "left" or "over"), which the
+spec's own line allows.
+
+*The per-category band is recorded twice, deliberately.* The roadmap carries it under
+Phase 8, and `docs/product/metrics.md` gained a paragraph in **Its status**. The
+roadmap entry ages into history once the phase does; the metrics doc is where a
+maintainer reads the hero's bands and would otherwise assume the per-category band
+got the same treatment. It did not, and that is the oversight this criterion exists
+to prevent.
+
+**Two decisions this ticket was asked to make, and the tickets they produced.**
+
+*The timezone coverage gap is now ticket 13.* Confirmed still open:
+`test_budget_service.py` and `test_telegram_router.py` contain no `timezone_name`,
+and no test in the suite references `civil_date`. One of four `APP_TIMEZONE` call
+sites is covered. The ticket is scoped as the seam decision the comment above called
+for, not as tests to backfill.
+
+*Phase 8 owes the month selector, and it is ticket 14.* The question was left open
+for this gate to settle. Settled against deferring it: stories 22 and 23 are Phase 8
+stories, ticket 07 implemented both headline states correctly, and no owner can reach
+either by clicking. A user story nobody can reach is not delivered. Blocked by 11,
+because 11 decides what a reached month is allowed to claim and there is no point
+making wrong labels reachable first.
+
+*The client-side UTC month is not a new ticket.* It is ticket 11's second criterion
+already. Recorded in the roadmap's gap list because it is the one gap whose symptom
+the owner sees on the morning of the 1st, and ticket 11 reads as three label defects
+unless the shared root is stated somewhere durable.
+
+**Phase 8 is recorded as "Shipped, with known gaps", not as done.** Five gaps are
+listed explicitly under the phase: the timezone coverage, the client/backend month
+mismatch, the three dashboard month-label defects, the missing month selector, and
+the Ignored-across-a-re-import defect. Four are open tickets (11, 12, 13, 14). The
+"Recommended Immediate Next Steps" section now leads with closing them rather than
+with the three steps that already shipped. This is the Phase 3 lesson applied to
+Phase 8 directly: the gap there was invisible because the phase read as complete.
+
+**No TDD cycle.** This ticket changes documentation only and adds no behaviour, so
+there is nothing to drive red-green. The verification it performs is the test suite
+it reports on. Noted per the TDD rule in `AGENTS.md`.

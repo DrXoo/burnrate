@@ -92,7 +92,7 @@ If the target user ever changes, re-order Act II before writing any code.
 
 ---
 
-## Phase 8: "How much can I spend today?"
+## Phase 8: "How much can I spend today?" — Shipped, with known gaps
 
 ### Objective
 
@@ -101,24 +101,161 @@ buying something.
 
 ### Scope
 
-* Domain calculation for **Safe to Spend Today**: remaining variable budget
-  divided by days remaining in the month. The inputs already exist in
-  `SummaryService` — `variable_budget_total`, `variable_budgeted_spend` and the
-  fixed/variable split — so this is a derivation, not new accounting. Fixed
-  commitments are already carved out of the variable slice and must not be
-  subtracted twice.
-* Expose it through the summary API as a first-class field.
-* Make it the headline of the dashboard, above balance and budget.
-* Move the savings-rate threshold out of `DashboardPage.tsx` into the domain,
-  alongside the existing budget-status thresholds in `SummaryService`.
-* Handle the degenerate cases explicitly: no budgets defined, month already
-  overspent (allowance is zero, not negative), and last day of the month.
+Scoped as a derivation and delivered as roughly two tickets more than that. The
+original scope is kept below each item, because the gap between the two is the
+useful part of the record.
+
+* Domain calculation for **Safe to Spend Today** in a new pure domain module,
+  `burnrate.domain.metrics`: `max(0, variable_budget_total −
+  variable_budgeted_spend − fixed_overrun) / days_remaining`, where the day
+  count includes today. The module holds every threshold the product judges a
+  month by — the allowance's pace bands, the savings bands, the per-category
+  budget band — as functions over primitives with no database session. See
+  ADR-0001 and ADR-0002.
+  *Originally scoped as "a derivation, not new accounting" computed in
+  `SummaryService`.*
+* **Pending spend became load-bearing**, which is the new accounting the
+  original scope said this phase did not need. A card payment settles one to
+  three days after it is made, so a daily allowance that counts only booked
+  spend is optimistic by exactly the amount most likely to matter, and
+  optimistic in the direction that causes overspending — the one failure the
+  product exists to prevent. ADR-0003 carries the reasoning. It brought with it:
+  * **Effective Date** — month membership resolves as booking date, then value
+    date, then import date, behind one shared helper used by every
+    month-windowed query. Required rather than optional: a pending row has no
+    booking date, so it failed `>= month_start` in SQL and was invisible to the
+    month window regardless of the status filter.
+  * **A reconciliation sweep** — pending rows the bank stops reporting are
+    deleted after a fully successful pending fetch, so a cancelled hold does not
+    shrink the allowance forever. Gated on a complete fetch, and it skips rows
+    the owner marked Ignored.
+  * **An asymmetry between the slices** — pending counts in the variable slice
+    only. The fixed step projection and the Fixed Overrun stay booked-only,
+    because the projection trusts actual spend over its estimate as soon as any
+    spend exists and a partial hold would wreck it. A pending charge in a fixed
+    category must land in neither slice, which is why the variable slice cannot
+    be computed as `monthly_spending − fixed_spent`.
+* **Fixed Overrun** — `Σ max(0, booked − budgeted)` per fixed category, deducted
+  from the allowance, so a rent increase does not quietly stay in the owner's
+  daily spending money.
+* Expose it through the summary API as a first-class field. Six fields added,
+  none removed: `safe_to_spend_today_amount`, `safe_to_spend_status`,
+  `pending_spend_amount`, `fixed_overrun_amount`, `savings_rate_percent`,
+  `savings_status`.
+* Make it the headline of the dashboard, above balance and budget, and the
+  figure `/summary` opens with on Telegram, above the balance.
+* Move the savings-rate threshold out of `DashboardPage.tsx` into the domain.
+  The budget-pacing verdict moved with it: the UI's rule compared spend against
+  85% of budget with no time term, so an on-plan month flipped to a warning
+  around day 26. The replacement bands against **On-Plan Remaining**, which puts
+  an on-plan month at a ratio of exactly 1.0 on every day of the month.
+* **`APP_TIMEZONE`** (IANA name, default `UTC`) added to settings and used
+  wherever a civil date is derived — the summary service, both call sites in the
+  budget service, and the Telegram notifier. "Today" means today where the owner
+  is, so the allowance does not jump back a day at 01:00 or report last month on
+  the 1st.
+* Handle the degenerate cases explicitly: no budgets defined (the amount is
+  null and the status says `no_budget`, because a zero would read as "you may
+  spend nothing"), a month already overspent (the amount clamps to zero while
+  the status bands the unclamped remainder, so an overspent month still reads
+  `over`), the last day of the month (the day count includes today, so it
+  resolves to 1 and needs no special case), and a month that is not the current
+  one (`not_current_month`, with the amount null).
+
+No migration: the Effective Date is resolved in query rather than stored, and
+the sweep deletes rows. The stored `effective_date` column is the better end
+state and was deferred because it needs a backfill.
 
 ### Definition of Done
 
 The owner can answer *"can I spend 40 EUR on dinner tonight?"* by glancing at one
 number, without reading a chart or doing arithmetic. No financial rule or
-threshold remains in the Web UI.
+threshold remains in the Web UI. A Pending charge reduces the allowance the day
+it appears, and a Pending row that later books is not counted twice.
+
+### Definition of Done: checked
+
+Checked against the implementation rather than assumed, because Phase 3 was
+recorded as complete while its headline metric was missing and the gap went
+unnoticed for six phases.
+
+| Clause | Result | Evidence |
+|---|---|---|
+| One number, glanceable, no arithmetic | Met | The allowance is the dashboard's 52px headline with the balance demoted to the line beneath it, and the figure `/summary` opens with. Seam 4 asserts it leads the output. |
+| No financial rule or threshold in the Web UI | Met | Every threshold lives in `burnrate.domain.metrics`. `DashboardPage` reads `safe_to_spend_status` and `savings_status` and computes only fractions that become an arc length or a bar width. The sign tests that remain (`remaining >= 0` choosing "left" or "over", `amount > 0` choosing whether to show a disclosure) pick wording, not a number. |
+| A Pending charge reduces the allowance the day it appears | Met | Seam 2: `test_summary_service_counts_a_pending_charge_as_spend_this_month`, and the worked example behind `safe_to_spend_today_amount == "7.19"` includes an unsettled 25.00. `test_summary_service_counts_an_undated_pending_charge_in_the_month_it_was_imported` covers the Effective Date fallback that makes a row with no booking date visible at all. |
+| A Pending row that later books is not counted twice | Met | Seam 3: `test_a_pending_hold_that_books_under_a_new_identifier_leaves_no_twin` and `test_a_hold_with_no_identifier_survives_resync_on_its_content_hash`. Both payload shapes are covered, because which one the bank produces was not knowable before it ran. |
+| Schema doc untouched | Met in substance, not literally | No migration and no table or column changed. The doc did gain two notes: that month placement reads the effective date rather than `booking_date`, and that this makes the window non-sargable so those queries plan as sequential scans. Both describe existing tables, which is why they belong there. |
+
+266 backend tests pass. `web/` has no test runner and installing one stayed out
+of scope, so the dashboard was verified by rendering it through
+`react-dom/server` against fixtures and reading the output — not by looking at
+the running app, which is what the spec assumed.
+
+### A threshold deliberately left alone
+
+The per-category budget band — `utilization_percent >= 85` reads `watch` —
+still has the time-decay that was just removed from the hero: an on-plan
+category flips to watch around day 26. Left alone knowingly, not overlooked.
+"86% of Food used" is a different and legitimate claim from "off pace", and the
+rows are a list the owner scans rather than the headline they act on. Redesigning
+it is available work, not a defect.
+
+### Known gaps
+
+Recorded explicitly, so that none of them is rediscovered as a surprise:
+
+* **The timezone work has almost no test coverage.** `APP_TIMEZONE` was applied
+  to four call sites and only one of them — the summary service — is exercised
+  off UTC. `BudgetService._budget_status` and `deactivate_budget` compare
+  `active_from >= today` against the owner's calendar day, the Telegram router's
+  `_civil_month` and the notifier's `civil_date` call are untested, and no test
+  anywhere references `civil_date`. This is not a one-line fix: `SummaryService`
+  got an injectable `clock` seam and `BudgetService` got only `timezone_name`,
+  so it cannot be tested without freezing the system clock. Closing it means
+  agreeing a seam, which is design work rather than a test to backfill. It is
+  also a straight miss against the TDD rule in `AGENTS.md`.
+* **The Web UI picks the month in UTC while the backend picks it in
+  `APP_TIMEZONE`.** `currentMonthValue()` is `new Date().toISOString().slice(0, 7)`.
+  For any non-UTC `APP_TIMEZONE` the two disagree at every month boundary: in
+  `Pacific/Auckland` at 00:30 on the 1st the UI requests last month, the backend
+  calls it not-current, and the owner's first screen of the month shows last
+  month's label where their allowance should be. The browser cannot know
+  `APP_TIMEZONE`, so the fix is either to drop the client-side default and let
+  the server choose the month it already defaults to, or to expose the timezone
+  in a settings payload.
+* **Three month-label defects in the dashboard**, all of the same kind — the
+  page states something about a month it does not actually know. `monthHasPassed`
+  reads a future month as a closed one when `APP_TIMEZONE` is behind UTC; a
+  stale summary paired with a failed refresh renders with no banner, because the
+  hook does not clear the payload on failure; and the future-month caption
+  asserts "Nothing is spent yet" while a scheduled payment filed into that month
+  by the Effective Date can already contradict it. The third needs no unusual
+  configuration.
+* **There is no month selector in the Web UI.** The headline handles a past and
+  a future month correctly and no owner can reach either by clicking:
+  `filters.month` is initialised to the current month and nothing ever changes
+  it, and the month in the top bar is a read-only label. The backend has
+  supported `GET /api/v1/summary?month=` all along. So those two states are
+  groundwork, reachable today only by editing the default and rebuilding.
+  Whether Phase 8 owes the picker or a later phase does is open; it changes
+  navigation across four pages that all read `filters.month`.
+* **An Ignored transaction does not stay Ignored across a re-import.**
+  Pre-existing and reachable in the owner's own configuration.
+  `RulesService.apply_rule_to_transaction` guards on `category_id is None` and
+  never reads `excluded_at`, so a row the owner excluded that matches an active
+  rule is handed its category back on the next sync — the ledger still shows it
+  excluded and the unknown queue stays quiet, while the money is back in
+  monthly spending and therefore back out of the allowance. This phase made it
+  matter more: the allowance is the figure that moves. The sweep already
+  respects the flag, so the precedent exists.
+
+All five are open tickets in this phase's own backlog. Two need no unusual
+configuration to fire — the Ignored defect, and a failed refresh leaving a stale
+month on screen — and those are the ones to close first. The timezone coverage
+is a prerequisite for trusting a civil date off UTC in any later phase, and the
+rest wait on an `APP_TIMEZONE` outside UTC or on a month the owner cannot
+currently navigate to.
 
 ---
 
@@ -307,10 +444,10 @@ Act I, complete:
 * **Data Stays Fresh** — automatic refresh through the sync worker.
 * **Access Anywhere** — summaries over Telegram.
 
-Act II, ahead:
+Act II, under way:
 
 * **Data Becomes a Decision** (Phase 8) — one number that changes what the owner
-  does today.
+  does today. Shipped, with the gaps listed under that phase still open.
 * **Data Gets a Memory** (Phase 9) — every figure has a baseline.
 * **Data Speaks First** (Phase 10) — BurnRate reaches out instead of waiting.
 * **Data Gets a Horizon** (Phase 11) — how long the cushion lasts.
@@ -340,13 +477,21 @@ Still off the table, and now for firmer reasons:
 
 ## Recommended Immediate Next Steps
 
-1. Implement Safe to Spend Today in the domain, test-first, deriving from the
-   existing fixed/variable split in `SummaryService`.
-2. Move the savings-rate threshold out of `DashboardPage.tsx` into the domain.
-3. Re-lead the dashboard with the daily allowance.
+Phase 8's original first three steps — the domain calculation, moving the
+savings-rate threshold out of `DashboardPage.tsx`, and re-leading the dashboard
+with the allowance — are done. What is left:
+
+1. Close Phase 8's open gaps, in this order: the Ignored-across-a-re-import
+   defect (reachable today, and it moves the allowance), the dashboard's
+   month-label defects, then the UI/backend month-selection mismatch.
+2. Give `BudgetService` and the Telegram notifier the same clock seam
+   `SummaryService` has, and cover the four `APP_TIMEZONE` call sites. Until
+   this is done, no later phase can trust a civil date off UTC.
+3. Decide whether Phase 8 owes a month selector, or whether the past- and
+   future-month headlines stay groundwork for a later phase.
 4. Add trailing per-category baselines, as the foundation for Phase 9.
 5. Decide whether to promote Phase 12's categorization copilot, based on whether
    the unknown queue is actually the daily friction.
 
-Steps 1 to 3 are a single coherent change and the fastest route to the product
-feeling different to use.
+Steps 1 and 2 finish Phase 8 honestly. Phase 3's lesson was that a phase closed
+over a known gap stays closed for six phases.

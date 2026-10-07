@@ -177,6 +177,15 @@ On the last day of the month on-plan remaining is zero, so there is no ratio to
 band and the rule is read directly: anything still left is `on_track`, and
 nothing left is `over`.
 
+The **per-category budget band is a different rule and deliberately keeps the
+time-decay this one removed.** A category reads `watch` at 85% of its budget used
+and `over` once it is exceeded, with no term for how far through the month it is,
+so a category being spent exactly on plan flips to `watch` around day 26. That is
+a choice, not an oversight: "86% of Food used" is a true and useful claim about a
+level, where the allowance's status is a claim about pace, and the category rows
+are a list the owner scans rather than the headline they act on. If the two are
+ever unified, the hero's on-plan comparison is the shape to unify on.
+
 ---
 
 ## Fixed Overrun
