@@ -1,32 +1,29 @@
 # 18: Leave a trace when a background refresh fails
 
-**What to build:** A background refresh that fails changes nothing on screen and
-reports nothing anywhere. Found by `/code-review` on ticket 11.
+**What to build:** A payload for the month already on screen that is known to be out
+of date looks exactly like a fresh one, on both the dashboard and the Categories page.
+Found by `/code-review` on ticket 11.
 
 **Blocked by:** None
 
 **Status:** recorded — a known defect, not scheduled
 
-- [ ] A failed background refresh reports itself, as the initial load already does
-- [ ] A refresh that resolves after the month has changed does not overwrite the newer month's state
-- [ ] A month left with no payload and no error has a way back that does not require a reload
 - [ ] A payload for the month already on screen that is known to be out of date is distinguishable from a fresh one, or the decision to leave them alike is recorded
 
-## The defects, which are three in one family
+## Scope was cut by ticket 14's grilling
 
-**`refreshLedgerViews` has no `catch`.** It awaits four requests, and on a rejection
-leaves `summaryLoading` false, `summaryError` null and the previous payload in place,
-with the rejection unhandled. The owner categorizes a transaction, the refresh fails,
-and nothing on the page acknowledges it. The initial `loadViews` effect does have the
-catch; this path was written without one.
+This file originally carried three defects. **The first two moved to ticket 14** and are
+fixed there, because a month selector is what makes them reachable and shipping the
+selector without them would have shipped a known defect: `refreshLedgerViews` had no
+`catch` and no `cancelled` guard, so a rejection was silent and a response arriving
+after a month change wrote the month the owner had left. Ticket 14 also settled how a
+failed refresh reports itself — a toast for "your change saved, the refresh did not",
+plus `summaryError` for "these figures are no longer trustworthy".
 
-**Neither it nor the three budget actions guard on `cancelled`.** The main load effect
-does. These do not, so a response that arrives after the month has changed calls
-`setSummary` with the month the owner has left, plus `setSummaryLoading(false)` and
-`setSummaryError(null)` — clobbering the newer load's state. Ticket 11's month gate then
-withholds that payload, so the dashboard shows "This month's figures are not available
-yet" with nothing to retry. Before ticket 11 the same race showed the wrong month's
-figures instead, which is worse but quieter.
+What is left is the third, below. It is the one that was always reachable and the one
+that may not be a defect at all.
+
+## The defect
 
 **A stale payload for the month already on screen is invisible on both pages.** The
 dashboard and the Categories page each render their banner only when there is no
@@ -38,15 +35,14 @@ and merely a few minutes old, which is a different claim from the wrong month's 
 
 ## Why this is recorded rather than scheduled
 
-The first two are only reachable once the month can change, and nothing writes
-`filters.month` until ticket 14 adds a selector. The third is pre-existing in both
-pages and arguably not a defect at all. So the honest order is ticket 14 first — and
-whoever takes 14 should read this file, because a month selector is exactly what makes
-the first two live.
+It is pre-existing in both pages and arguably not a defect at all: the figures are for
+the right month and merely a few minutes old, which is a different claim from the wrong
+month's figures. Deciding it needs a product call about what a few minutes of staleness
+is worth announcing, not a bug fix.
 
 ## Testing
 
-`web/` has no test runner, so verification is the type check plus rendering the
-affected states through `react-dom/server`, as tickets 07 and 11 did. The race is the
-part that rendering cannot reach; if it needs a real test, that is the argument for a
-runner, which is its own decision and not this ticket's to make.
+Ticket 14 brings Vitest, scoped to the hook with `lib/api` faked, so the runner exists
+by the time this is taken. Whether a staleness marker needs a test depends on where it
+lives: a banner is a rendering and goes through `react-dom/server` like the rest, while
+a "this payload is older than N" rule in the hook belongs at the new seam.

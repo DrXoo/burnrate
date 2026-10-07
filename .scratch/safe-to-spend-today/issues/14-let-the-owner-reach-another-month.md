@@ -9,11 +9,13 @@ claim, and this ticket is what makes those rules reachable)
 
 **Status:** ready-for-agent
 
-- [ ] The owner can move to another month from the dashboard and stay there
-- [ ] Every page that reads `filters.month` follows the selection, rather than each page keeping its own idea of the month
+- [ ] The owner can move to another month and stay there, and the selection survives a section change
 - [ ] The current month is reachable again in one action from any other month
-- [ ] The month the UI asks for is the one the backend calls current, with no UTC-derived default (shares its root with ticket 11's second criterion)
+- [ ] No month is derived from a clock in the Web UI: the first load asks the backend which month is current, and `currentMonthValue()` is deleted
+- [ ] A refresh that resolves after the month has changed cannot write the month the owner has left
+- [ ] A background refresh that fails says so, where today it fails silently
 - [ ] Nothing financial is computed in the Web UI: the selector changes a query parameter
+- [ ] `web/` has a test runner, and the race above is its first test
 
 ## Why Phase 8 owes this
 
@@ -35,38 +37,110 @@ The reason it was not in the original ten tickets is that it reads as navigation
 rather than as part of the metric, and it touches four pages. That makes it a ticket
 of its own, not a correction on ticket 07.
 
-## Worth settling while here
+## Settled by grilling
 
-Whether the selection belongs in the URL. Four pages share one month and the owner
-will want to send themselves a link or use the back button; putting it in the query
-string answers both and removes the question of what resets it. Not a requirement
-above, because it is a routing decision the rest of the app has not had to make yet.
+Thirteen decisions, taken before any code. Each is a branch somebody would otherwise
+re-derive — and three of them correct this ticket's own text, which was written when
+the month could not change.
 
-## What ticket 11 left here
+### Where the month lives
 
-Three things, all found by `/code-review` on ticket 11 and worth reading before the
-selector is written, because a selector is what makes the first two live:
+**Hook state, not the URL.** The argument above for the query string was written
+without the fact that **the section is not in the URL either**: `section` is
+`useState<Section>("dashboard")` in `App.tsx`, and there is no router or router
+dependency. The URL is used only transiently, for the bank-connect redirect, and wiped
+with `replaceState`. So a shared link would restore the month and always land on the
+dashboard, and the back button would step through months while the section stayed put.
+Putting the month in the URL is half of a routing decision and the half with less
+value. If deep links are ever wanted, that is a ticket that moves `section` there too.
 
-* **The backend now reports `current_month`.** The fourth criterion above — no
-  UTC-derived default — is a matter of reading that field instead of
-  `currentMonthValue()`, which means it needs no new API work. `currentMonthStart()` in
-  `web/src/lib/format.ts` is unused and can go with it.
-* **`applyFilters` now coerces an empty month to the current one.** `buildQuery` drops
-  an empty query value, so the backend would answer for its own current month and the
-  summary gate would then withhold every payload: a blank page with no error. A selector
-  that can produce `""` is the obvious way to hit that, hence the guard.
-* **`CategoriesPage`'s `month` prop no longer selects anything.** It keys the effect at
-  line 96, but the fetch that effect triggers — `listMonthTransactions` — reads
-  `filters.month` internally and ignores the prop. Since ticket 11 removed the page's own
-  month comparison, the prop is a cache key and half of a label pair. Either drop it or
-  give it a job while the four pages are being wired to one selection.
+**Arrows plus a native `<input type="month">`, unbounded.** Arrows cover the common
+move, the input covers the long jump. No bounds: bounding needs a new API for the
+earliest month with data, and a *future* month is worth visiting — that is where
+standing orders land, which tickets 15 and 17 just made honest.
 
-**Ticket 18 is the one to read alongside this.** Its first two defects are races between
-a background refresh and a month change, which cannot happen until this ticket ships.
+**The TopBar's month label becomes the reset to the current month**, which is the
+third criterion. The selector and the label render on the five month-scoped sections
+and are **hidden on Settings**, where a month means nothing — the label is already
+noise there, and a control would be worse because it implies Settings responds to it.
+
+**The review queue follows the selection**, which it already does since the hook
+fetches it with `filters`. This diverges from the Telegram `/unknown`, which pins
+itself to the current month on the reasoning that last month's leftovers are not
+actionable. The divergence is deliberate: in a chat an inaccessible list is noise
+pushed at the owner, on the web it is a table they asked to look at. Record it rather
+than "fixing" either side.
+
+### The client's clock goes away
+
+**The first load sends no month, and the backend's answer decides it.** This is the
+only option that removes the clock rather than correcting it afterwards.
+
+**It has to be a two-phase load, and this is the fact the original plan missed:**
+omitting the month only has a current-month default on `/summary`. On
+`/transactions`, `/transactions/uncategorized` and `.../count` it means **every month
+ever** — verified against the service, 3 rows against 1. So: fetch the summary, learn
+`current_month`, then fetch the three ledger views with it. Those views already have a
+loading state; this is that state for a moment longer, not a new blank screen.
+
+**Empty means "the month the backend calls current", always.** One rule, not two: a
+native month input can always be cleared from the keyboard, so the code answers `""`
+regardless, and after the first load the fallback is `summary.current_month` rather
+than a clock.
+
+**The redundant `/summary` is accepted.** Phase two re-fetches it, so a page load
+costs one extra GET. The alternative is a freshness rule in the one effect the whole
+screen depends on, and "I hold a summary for this month" is not the same claim as
+"this summary is current" — conflating those is the shape of ticket 18's third defect.
+
+**`currentMonthValue()` and `currentMonthStart()` both get deleted.** They are the
+frontend's last clock, and leaving either invites its reuse.
+
+### Concurrency, absorbed from ticket 18
+
+**This ticket fixes ticket 18's first two defects**, because the selector is what makes
+them reachable. `refreshLedgerViews` has no `catch` and no `cancelled` guard, and it
+closes over `filters` from the render that created it: categorize a transaction, change
+month, and the stale response writes the previous month's summary, which ticket 11's
+gate then withholds — "This month's figures are not available yet", with nothing to
+retry. `loadViews` is already guarded and needs nothing.
+
+**A failed background refresh reports itself twice, and both are needed.** A toast,
+because the action it followed *did* succeed and the owner needs to know that; and
+`summaryError`, because the figures on screen are no longer trustworthy. With only the
+banner the owner cannot tell whether their change saved; with only the toast it fades
+in 2.2 seconds and leaves stale figures unmarked.
+
+Ticket 18 keeps only its third defect — a stale payload for the month already on
+screen, invisible on both pages. Pre-existing, in two places, and that file itself
+doubts it is a defect.
+
+### What this corrects in the text above
+
+* **The second criterion is gone.** It described pages each keeping their own idea of
+  the month; they do not. The hook does every fetch, and the month reaches the UI in
+  three places: the TopBar label twice and one prop to `CategoriesPage`.
+* **`CategoriesPage`'s `month` prop is dormant, not dead.** It keys the effect at line
+  96 that reloads the month's transactions, and `loadMonthTransactions()` reads
+  `filters.month` internally. It becomes load-bearing the moment the month can change,
+  so dropping it — as the note below suggested — would leave that page showing the
+  previous month's per-category lists. **It stays.**
+* **`applyFilters`' coercion stays but changes target**, from `currentMonthValue()` to
+  `summary.current_month`. It also already resets both paging offsets, which a month
+  change wants; the account, category and status filters are orthogonal and survive.
 
 ## Testing
 
-`web/` has no test runner and installing one stays out of scope for this phase, so
-verification is the type check plus rendering the affected states through
-`react-dom/server`, as tickets 07 and 11 do. If the current-month default moves to
-the backend, that part is seam 2 and carries a real test there.
+**`web/` gains Vitest**, scoped as narrowly as it can be: the hook, with `lib/api`
+faked. The race is what is actually at stake — which state survives when two responses
+land out of order — and that is observable in the value the hook returns. Faking
+`fetch` instead would buy coverage of `buildQuery` at the cost of tests that break when
+a query parameter is renamed, which is the coupling `tdd` warns about.
+
+This is a **fifth seam**, and the spec says four with "no test is written anywhere
+else". Recorded in the spec's Testing Decisions rather than added quietly, and it is
+material for `/distill-decisions`.
+
+Page rendering stays ad-hoc for this ticket — type check plus `react-dom/server`, as
+tickets 07, 11 and 16 did. Page tests are the obvious next use of the runner, written
+down here so that next time it is a decision and not a discovery.

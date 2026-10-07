@@ -278,6 +278,21 @@ dashboard, because `web/` has no test runner and installing one is not this
 phase's work. The nullable amount is caught by the existing type check; the
 layout is verified by looking at it.
 
+**Amended by ticket 14: a fifth seam.** `useBurnRateData`, with `lib/api` faked,
+once `web/` gains Vitest. This contradicts "no test is written anywhere else"
+above, and is recorded rather than added quietly.
+
+The reason the original four held for six tickets is that everything in `web/` was
+rendering, and rendering is verifiable by eye and by `react-dom/server`. Ticket 14
+adds *concurrency*: a month selector makes a background refresh racing a month
+change reachable, and which state survives two responses landing out of order is
+not something a render can reach. The seam is the hook rather than `fetch`
+because what is at stake is the state the hook ends up holding, not the URLs it
+built to get there.
+
+Page rendering stays off the seam list. Page tests are the obvious next use of the
+runner and are deliberately not taken here, so that adding them stays a decision.
+
 ## Out of Scope
 
 * **Runway and Cushion.** Phase 11, and it needs the account-purpose migration.
