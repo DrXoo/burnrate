@@ -290,12 +290,13 @@ against the current branch:
   dashboard then prints its set-a-budget invitation over a month that closed weeks
   ago. Same family as ticket 11 — the page stating something about a month it does
   not know — and both branches are individually right, only their order is wrong.
-* **The Telegram summary has no tense** (ticket 17). `/summary <a future month>`
-  prints a used-budget bar, a daily pace over zero elapsed days and a month-end
-  projection for a month that has not begun, while the dashboard captions the same
-  payload "planned / Not started yet". Recorded rather than scheduled: the bot is the
-  secondary interface, the allowance line is already honest, and the owner reaches it
-  only by typing a month.
+* ~~**The Telegram summary has no tense**~~ **Closed by ticket 17.** `/summary <a future
+  month>` printed a used-budget bar, a daily pace over zero elapsed days and a month-end
+  projection for a month that had not begun, while the dashboard captioned the same
+  payload "Not started yet". The header now names the tense in the dashboard's own badge
+  words, read off `safe_to_spend_status`, and a month that has not started reports its
+  budget and what is committed to it without the three lines that describe progress. A
+  closed month keeps them, with a test so the suppression cannot widen.
 * **A failed background refresh leaves no trace** (ticket 18). `refreshLedgerViews`
   has no `catch` and neither it nor the budget actions guard on `cancelled`, so a
   rejection is silent and a response arriving after a month change clobbers the newer
@@ -539,19 +540,16 @@ Phase 8's original first three steps — the domain calculation, moving the
 savings-rate threshold out of `DashboardPage.tsx`, and re-leading the dashboard
 with the allowance — are done. What is left:
 
-1. Give the Telegram summary its month's tense: ticket 17, now small, because the
-   status it needs to branch on exists. Tickets 15 and 16 are done — the projection
-   floor for a month that has not started, and the tense split that closed 16 and
-   shrank 17.
-2. Give the Web UI a month selector and stop it choosing the month in UTC — one piece
+1. Give the Web UI a month selector and stop it choosing the month in UTC — one piece
    of work, not two, and ticket 14 owns it. Read ticket 18 alongside it: its first two
-   defects become reachable the moment a month can change.
-3. Add trailing per-category baselines, as the foundation for Phase 9.
-4. Decide whether to promote Phase 12's categorization copilot, based on whether
+   defects become reachable the moment a month can change, and nothing writes the month
+   until this ships.
+2. Add trailing per-category baselines, as the foundation for Phase 9.
+3. Decide whether to promote Phase 12's categorization copilot, based on whether
    the unknown queue is actually the daily friction.
 
-Steps 1 and 2 are what finish Phase 8 honestly; ticket 17 is the one open item that
-can be deferred on its merits, and only if the split in step 1 is declined. Phase 3's
+Step 1 is the last thing Phase 8 owes. Tickets 15, 16 and 17 are done, so what remains
+is the two user stories that shipped as code no owner can reach. Phase 3's
 lesson was that a phase closed over a known gap stays closed for six phases — and this
 section having grown twice after its own Definition of Done check is the same lesson
 arriving a second time.
