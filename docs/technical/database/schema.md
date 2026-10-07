@@ -167,6 +167,7 @@ Suggested columns:
 * `status` TEXT not null
 * `category_id` UUID
 * `matched_rule_id` UUID
+* `excluded_at` TIMESTAMPTZ
 * `raw_payload` JSONB
 * `imported_at` TIMESTAMPTZ not null
 * `created_at` TIMESTAMPTZ not null
@@ -191,6 +192,13 @@ Notes:
 
 * `raw_payload` is useful for traceability and future parser improvements.
 * `status` should support values such as `pending`, `booked`, `unknown`, and `ignored`.
+* `status = 'ignored'` and `excluded_at` are **different things that share a word**.
+  The status is the provider's: the import writes it from the Enable Banking codes
+  `CNCL` and `RJCT`, meaning the bank cancelled or rejected the payment. `excluded_at`
+  is the owner's decision to exclude a row from every metric -- the Ignored
+  disposition in `GLOSSARY.md`, which calls the status Cancelled to keep the two
+  apart. No query should test one to get the other; the predicates live in
+  `burnrate/db/dispositions.py`.
 * Month placement does **not** read `booking_date` directly. Every month-windowed
   query compares the effective date -- `coalesce(booking_date, value_date,
   date(imported_at))` -- so that a pending row with no booking date still belongs

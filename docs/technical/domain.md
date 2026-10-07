@@ -85,6 +85,32 @@ Suggested statuses:
 
 Pending and booked transactions should be stored in the same transaction model, differentiated by status.
 
+`Ignored` in that list is the *provider's* status, written from the Enable Banking
+codes `CNCL` and `RJCT` for a payment the bank cancelled or rejected. The owner's
+decision to exclude a transaction from every metric is a separate thing in a
+separate column, `excluded_at`, and the two share a word by accident. `GLOSSARY.md`
+resolves the clash in language -- the status is **Cancelled**, the disposition is
+**Ignored** -- rather than in the schema, which would need a migration and a
+backfill for no behavioural gain. Nothing should test one to get the other.
+
+The owner's exclusion is a decision, so it outlives the sync that re-imports the
+transaction. Two consequences, both stated in `burnrate/db/dispositions.py` rather
+than at each call site:
+
+* The categorization rules own a row only while it holds no category *and* carries
+  no exclusion. An Ignored row holds no category either, so a bare "has no
+  category" test reads the owner's decision as an absence of one and hands the
+  category back -- returning the money to every figure while the row still reads as
+  excluded.
+* Every spend and income figure states the exclusion. It used to come for free,
+  because excluding a row cleared its category too and rows with no category fell
+  out of those queries anyway -- by a join on the category table in two of them and
+  by an `IN` on category ids in the third. That made the definition a consequence of
+  how three queries happened to be shaped.
+
+Only the owner lifts it: by categorizing the transaction, by restoring it to the
+review queue, or by making a categorization rule from it.
+
 ---
 
 ### Category

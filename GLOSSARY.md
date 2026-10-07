@@ -34,8 +34,16 @@ A transaction with no category assigned, awaiting review.
 _Avoid_: Uncategorized, unclassified, orphan
 
 **Ignored**:
-The disposition of a transaction the owner has excluded from every metric.
+The disposition of a transaction the owner has excluded from every metric. A
+decision rather than a property of the data, so it survives a re-import and only
+the owner lifts it.
 _Avoid_: Hidden, deleted, archived
+
+**Cancelled**:
+The status of a transaction the bank cancelled or rejected. Not Ignored above and
+not the owner's decision at all, although the import stores it in `status` under
+that same word.
+_Avoid_: Ignored, rejected, void, reversed
 
 ### Budgets
 

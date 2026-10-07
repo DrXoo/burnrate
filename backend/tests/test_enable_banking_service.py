@@ -24,6 +24,7 @@ from burnrate.db.models import (
     Transaction,
 )
 from burnrate.integrations.enable_banking.client import EnableBankingAPIError
+from burnrate.services.categorization_service import CategorizationService
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.rules_service import RulesService
 
@@ -785,6 +786,45 @@ def test_enable_banking_service_applies_existing_rules_during_import() -> None:
     assert second_transaction is not None
     assert second_transaction.category_id == category.id
     assert second_transaction.matched_rule_id is not None
+
+
+def test_a_re_imported_transaction_the_owner_ignored_is_not_given_a_category_again() -> None:
+    """Ignored outlives a sync, so the rule engine must leave the row alone.
+
+    The rows most likely to be Ignored are the rows most likely to match a rule: a
+    rule is how a recurring charge gets its category, and a reimbursed or mis-posted
+    instance of one is exactly what the owner excludes. Handing the category back
+    returns the money to the figures while the row still reads as excluded, so
+    nothing on screen says it happened.
+    """
+    db = make_session()
+    client = FakeEnableBankingClient()
+    category = Category(name="Coffee", type="expense", active=True)
+    db.add(category)
+    db.commit()
+
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    charge = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-1"))
+    assert charge is not None
+
+    # The owner categorizes the charge, makes a rule of it, then decides this
+    # particular instance should not count -- it was refunded in cash.
+    charge.category_id = category.id
+    db.commit()
+    RulesService(db=db).create_rule_from_transaction(transaction_id=str(charge.id))
+    db.commit()
+    CategorizationService(db=db).exclude_transaction(transaction_id=str(charge.id))
+    db.commit()
+
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    ignored = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-1"))
+    assert ignored is not None
+    assert ignored.excluded_at is not None
+    assert ignored.category_id is None
+    assert ignored.matched_rule_id is None
 
 
 def owner_today() -> date:

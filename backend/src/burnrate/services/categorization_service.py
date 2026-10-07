@@ -93,6 +93,10 @@ class CategorizationService:
 
         transaction.category_id = None
         transaction.matched_rule_id = None
+        # The queue is "no category *and* not excluded", so clearing the category is
+        # only half of a return to it. Without this an Ignored row answered with
+        # "returned to unknown queue" and stayed out of that queue.
+        transaction.excluded_at = None
 
         return {
             "transaction_id": str(transaction.id),

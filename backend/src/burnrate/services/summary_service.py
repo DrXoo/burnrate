@@ -11,6 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
+from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.domain.metrics import (
@@ -350,8 +351,7 @@ class SummaryService:
             .where(
                 Account.included_in_calculations.is_(True),
                 within_month(month_start=month_start, month_end=month_end),
-                Transaction.category_id.is_(None),
-                Transaction.excluded_at.is_(None),
+                awaiting_categorization(),
             )
         )
         return self.db.scalar(count_query) or 0
@@ -371,6 +371,7 @@ class SummaryService:
                 within_month(month_start=month_start, month_end=month_end),
                 status.in_(COMMITTED_STATUSES),
                 Category.type == "expense",
+                not_ignored(),
             )
             .group_by(status)
         ).all()
@@ -395,6 +396,7 @@ class SummaryService:
                 within_month(month_start=month_start, month_end=month_end),
                 func.lower(Transaction.status) == "booked",
                 Category.type == "income",
+                not_ignored(),
             )
         ) or Decimal("0.00")
         # Income transactions are credits (positive amounts), so no sign flip.
@@ -470,6 +472,7 @@ class SummaryService:
                 within_month(month_start=month_start, month_end=month_end),
                 status.in_(COMMITTED_STATUSES),
                 Transaction.category_id.in_(category_ids),
+                not_ignored(),
             )
             .group_by(Transaction.category_id, status)
         ).all()

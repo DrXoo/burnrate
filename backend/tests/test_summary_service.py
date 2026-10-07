@@ -1203,3 +1203,123 @@ def test_summary_service_keeps_a_category_fixed_when_only_one_of_its_rows_says_s
     assert usage["Utilities"]["is_fixed"] is True
     assert usage["Utilities"]["budget_amount"] == "180.00"
     assert usage["Utilities"]["spent_amount"] == "120.00"
+
+
+def ignored_transaction(
+    db: Session,
+    *,
+    external_id: str,
+    amount: Decimal,
+    category_name: str,
+    description: str,
+    status: str = "booked",
+) -> None:
+    """A transaction the owner marked Ignored that still holds a category.
+
+    ``GLOSSARY.md`` defines Ignored as excluded from every metric, and the figures
+    used to get that for free: excluding a row cleared its category too, and rows
+    with no category fell out of the spend queries anyway. So any path that left a
+    category on an excluded row put the money back -- the rule engine was one, a
+    manual fix-up or a backfill is the next. See ``db/dispositions.py`` for why the
+    predicate is now stated. The state is seeded directly because what is under test
+    is the query, not how the row got this way.
+
+    A pending row carries no booking date, as a real hold does not, so its month
+    membership resolves through the Effective Date chain.
+    """
+    main_account = db.query(Account).filter(Account.display_name == "Main account").one()
+    category = db.query(Category).filter(Category.name == category_name).one()
+    db.add(
+        Transaction(
+            account_id=main_account.id,
+            enable_banking_transaction_id=external_id,
+            booking_date=None if status == "pending" else date(2026, 6, 13),
+            value_date=date(2026, 6, 13),
+            amount=amount,
+            currency="EUR",
+            description=description,
+            merchant_name="Ignored merchant",
+            counterparty_name=None,
+            direction="debit" if amount < 0 else "credit",
+            status=status,
+            category_id=category.id,
+            matched_rule_id=None,
+            raw_payload=None,
+            imported_at=datetime(2026, 6, 13, 8, 0, tzinfo=timezone.utc),
+            excluded_at=datetime(2026, 6, 13, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+
+
+def test_summary_service_keeps_an_ignored_charge_out_of_every_spend_figure() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    ignored_transaction(
+        db,
+        external_id="tx-ignored-food",
+        amount=Decimal("-60.00"),
+        category_name="Food",
+        description="Refunded in cash",
+    )
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # The seeded month's figures, unchanged: 140.00 groceries + 120.00 power bill +
+    # the 25.00 pending snack. The 60.00 the owner ignored reaches none of them.
+    assert summary["monthly_spending_amount"] == "285.00"
+    assert summary["budgeted_spending_amount"] == "285.00"
+    assert summary["average_daily_spend_amount"] == "19.00"
+    food_row = next(row for row in summary["budget_usage"] if row["category_name"] == "Food")
+    assert food_row["spent_amount"] == "165.00"
+    # The allowance is where the owner feels it: counting the 60.00 would drop it to
+    # 3.44 and flip the month to over, on money they had already set aside.
+    assert summary["safe_to_spend_today_amount"] == "7.19"
+    assert summary["safe_to_spend_status"] == "watch"
+
+
+def test_summary_service_keeps_an_ignored_hold_out_of_the_pending_slice() -> None:
+    """An Ignored row is still Ignored while the bank is only holding it.
+
+    Pending spend counts in the variable slice and is reported on its own (see
+    ``docs/adr/0003-pending-spend-is-load-bearing.md``), so it is a second way into
+    the allowance that a booked-only test would not reach.
+    """
+    db = make_session()
+    seed_summary_data(db)
+    ignored_transaction(
+        db,
+        external_id="tx-ignored-hold",
+        amount=Decimal("-45.00"),
+        category_name="Food",
+        description="Hold the merchant released",
+        status="pending",
+    )
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # The seeded month's only hold is the 25.00 snack.
+    assert summary["pending_spend_amount"] == "25.00"
+    assert summary["monthly_spending_amount"] == "285.00"
+    assert summary["safe_to_spend_today_amount"] == "7.19"
+    food_row = next(row for row in summary["budget_usage"] if row["category_name"] == "Food")
+    assert food_row["spent_amount"] == "165.00"
+
+
+def test_summary_service_keeps_an_ignored_credit_out_of_the_income_figure() -> None:
+    db = make_session()
+    seed_summary_data(db)
+    ignored_transaction(
+        db,
+        external_id="tx-ignored-income",
+        amount=Decimal("500.00"),
+        category_name="Salary",
+        description="Reimbursement the owner does not count as income",
+    )
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    # The seeded month's only income is the 2000.00 salary; net cash flow is that
+    # less the 285.00 spent. An ignored credit inflates both if the query lets it.
+    assert summary["monthly_income_amount"] == "2000.00"
+    assert summary["net_cash_flow_amount"] == "1715.00"

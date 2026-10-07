@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from burnrate.db.base import Base
 from burnrate.db.models import Account, Category, CategorizationRule, Transaction
+from burnrate.services.categorization_service import CategorizationService
 from burnrate.services.rules_service import RulesService
 
 
@@ -219,3 +220,62 @@ def test_rules_service_rejects_duplicate_rule_update() -> None:
         assert str(exc) == "An identical categorization rule already exists"
     else:
         raise AssertionError("Expected duplicate rule update to fail")
+
+
+def ignore(db: Session, transaction: Transaction) -> None:
+    """Mark a transaction Ignored the way the owner does, through the service."""
+    CategorizationService(db=db).exclude_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+
+def test_rules_service_creating_a_rule_from_an_ignored_transaction_lifts_the_exclusion() -> None:
+    """Making a rule of a row is deciding it, so it cannot stay Ignored.
+
+    The Transactions page offers "Create rule" on an Ignored row -- only the category
+    dropdown is replaced by the Ignored badge -- so this is a click away. Leaving the
+    exclusion stamped produced a row that showed a category and a rule while every
+    figure dropped it: the money disappeared with nothing on screen to explain it.
+    ``categorize_transaction`` has always cleared the flag for this reason.
+    """
+    db = make_session()
+    transaction, category = seed_rule_data(db)
+    ignore(db, transaction)
+
+    RulesService(db=db).create_rule_from_transaction(
+        transaction_id=str(transaction.id),
+        category_id=str(category.id),
+    )
+    db.commit()
+
+    decided = db.scalar(select(Transaction).where(Transaction.id == transaction.id))
+    assert decided is not None
+    assert decided.category_id == category.id
+    assert decided.matched_rule_id is not None
+    assert decided.excluded_at is None
+
+
+def test_rules_service_applying_a_rule_to_existing_rows_leaves_an_ignored_one_alone() -> None:
+    """The bulk apply is the path the web UI always takes, so it needs the guard too.
+
+    Every rule created or edited from the UI sends ``apply_to_existing_uncategorized``,
+    and this sweep reaches *every* matching Ignored row rather than only one the sync
+    happened to re-import. An Ignored row holds no category, so selecting on that
+    alone reads it as undecided.
+    """
+    db = make_session()
+    transaction, category = seed_rule_data(db)
+    target = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-2"))
+    assert target is not None
+    ignore(db, target)
+
+    RulesService(db=db).create_rule_from_transaction(
+        transaction_id=str(transaction.id),
+        apply_to_existing_uncategorized=True,
+    )
+    db.commit()
+
+    still_ignored = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "tx-2"))
+    assert still_ignored is not None
+    assert still_ignored.excluded_at is not None
+    assert still_ignored.category_id is None
+    assert still_ignored.matched_rule_id is None

@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from burnrate.db.dispositions import awaiting_categorization
 from burnrate.db.models import Category, CategorizationRule, Transaction
 
 
@@ -87,6 +88,12 @@ class RulesService:
 
         transaction.category_id = resolved_category.id
         transaction.matched_rule_id = rule.id
+        # Making a rule of a row is deciding it, so the row cannot stay Ignored --
+        # the same mutual exclusion ``CategorizationService.categorize_transaction``
+        # keeps. The Transactions page offers "Create rule" on an Ignored row, and
+        # leaving the stamp produced a row showing a category and a rule that every
+        # figure silently dropped.
+        transaction.excluded_at = None
 
         if apply_to_existing_uncategorized:
             self.apply_rule_to_existing_uncategorized(rule_id=str(rule.id))
@@ -186,7 +193,7 @@ class RulesService:
         return self._serialize_rule(rule=rule, category_name=category.name)
 
     def apply_rule_to_transaction(self, *, transaction: Transaction) -> bool:
-        if transaction.category_id is not None:
+        if not self._awaits_categorization(transaction=transaction):
             return False
 
         rules = self.db.scalars(
@@ -216,7 +223,7 @@ class RulesService:
             raise ValueError(f"Rule not found for id {rule_id}")
 
         transactions = self.db.scalars(
-            select(Transaction).where(Transaction.category_id.is_(None)).order_by(Transaction.created_at.asc())
+            select(Transaction).where(awaiting_categorization()).order_by(Transaction.created_at.asc())
         ).all()
 
         applied = 0
@@ -234,6 +241,19 @@ class RulesService:
                 applied += 1
 
         return applied
+
+    def _awaits_categorization(self, *, transaction: Transaction) -> bool:
+        """Whether this row is still the engine's to decide: the row-at-hand form.
+
+        The query form is ``db.dispositions.awaiting_categorization``, which the bulk
+        apply above uses; this one exists because the sync hands us a single ORM
+        object that is not in the database yet. The two must agree, so the reason for
+        the exclusion half lives in that module rather than being argued twice here.
+
+        Un-ignoring stays the owner's move, through ``categorize_transaction``,
+        ``restore_transaction`` or making a rule of the row.
+        """
+        return transaction.category_id is None and transaction.excluded_at is None
 
     def _serialize_rule(self, *, rule: CategorizationRule, category_name: str) -> dict[str, Any]:
         return {

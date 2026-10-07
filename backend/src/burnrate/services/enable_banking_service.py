@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from burnrate.api.schemas.enable_banking import StartAuthorizationRequest
 from burnrate.clock import civil_date
 from burnrate.config import Settings
+from burnrate.db.dispositions import not_ignored
 from burnrate.db.effective_date import effective_date
 from burnrate.services.connection_expiry import as_utc, expiry_status
 from burnrate.db.models import (
@@ -625,7 +626,7 @@ class EnableBankingService:
             select(Transaction).where(
                 Transaction.account_id == local_account.id,
                 Transaction.status == "pending",
-                Transaction.excluded_at.is_(None),
+                not_ignored(),
                 # Stated rather than left to three-valued logic: a row with no
                 # provider identifier is not the bank's to delete, and `NULL NOT IN
                 # (...)` would already never match it. Nothing writes such a row

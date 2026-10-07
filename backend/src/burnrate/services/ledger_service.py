@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
+from burnrate.db.dispositions import awaiting_categorization
 from burnrate.db.effective_date import effective_date, month_window, within_month
 from burnrate.db.models import (
     Account,
@@ -217,7 +218,7 @@ class LedgerService:
             # The review/unknown queue is "needs attention": uncategorized AND not
             # already resolved by exclusion. Excluded rows still show in the full
             # ledger (categorized is None) so they can be restored.
-            query = query.where(Transaction.category_id.is_(None), Transaction.excluded_at.is_(None))
+            query = query.where(awaiting_categorization())
 
         return query
 
