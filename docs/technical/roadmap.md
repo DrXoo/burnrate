@@ -203,7 +203,12 @@ it is available work, not a defect.
 
 ### Known gaps
 
-Recorded explicitly, so that none of them is rediscovered as a surprise:
+Recorded explicitly, so that none of them is rediscovered as a surprise. The list
+grew after it was written: the five below the line were the gaps this phase's
+Definition of Done check found, and the four under "Found later" came out of
+per-ticket reviews afterwards. Anything checking Phase 8 against this section has to
+read both halves — reading only the first would have called the phase closed with
+four tickets open and two verified defects live.
 
 * ~~**The timezone work has almost no test coverage.**~~ **Closed by ticket 13.**
   `APP_TIMEZONE` was applied to four call sites and only the summary service was
@@ -253,12 +258,57 @@ Recorded explicitly, so that none of them is rediscovered as a surprise:
   may decide, and the spend and income queries state the exclusion rather than
   inheriting it from a null category.
 
-Three of the five are closed: the Ignored defect by ticket 12, the month-label
+Three of those five are closed: the Ignored defect by ticket 12, the month-label
 defects by ticket 11, and the timezone coverage by ticket 13. The two that remain
 are the Web UI's month selection and the missing month selector, and they are the
 same piece of work seen from two sides — ticket 14 owns both. Neither can fire for
 an owner who cannot navigate away from the current month, which is exactly what
 makes them easy to leave and what Phase 3's lesson says about leaving them.
+
+#### Found later, by per-ticket reviews
+
+These four came out of `/code-review` after the Definition of Done check, so they are
+not among the five above. Two are verified live defects in the backend, reproduced
+against the current branch:
+
+* **A month that has not started projects below the spend already committed in it**
+  (ticket 15). `_days_elapsed_in_month` returns 0 before a month begins and
+  `_project_spend` then returns the budget reference unchanged — its "no signal yet,
+  assume spending tracks the budget" branch, which was true when a future month could
+  not hold spend. Effective Date and pending-spend counting made it false. Verified: a
+  500.00 standing order due in July, read in June against a 300.00 budget, reports
+  `budgeted_spending_amount` 500.00 beside `projected_month_end_spend_amount` 300.00
+  and `projected_overspend_amount` 0.00 — the projection says the month lands on
+  budget while the headline already shows it blown. `_extrapolate_spend` has the same
+  shape and
+  returns 0.00 with no budget set.
+* **A month that closed before the owner budgeted anything is told to set a budget**
+  (ticket 16). `safe_to_spend_today` decides `no_budget` before it considers whether
+  the month is the current one. Verified: May 2026 read on 15 June returns
+  `safe_to_spend_status: "no_budget"` with `current_month: "2026-06"`, and the
+  dashboard then prints its set-a-budget invitation over a month that closed weeks
+  ago. Same family as ticket 11 — the page stating something about a month it does
+  not know — and both branches are individually right, only their order is wrong.
+* **The Telegram summary has no tense** (ticket 17). `/summary <a future month>`
+  prints a used-budget bar, a daily pace over zero elapsed days and a month-end
+  projection for a month that has not begun, while the dashboard captions the same
+  payload "planned / Not started yet". Recorded rather than scheduled: the bot is the
+  secondary interface, the allowance line is already honest, and the owner reaches it
+  only by typing a month.
+* **A failed background refresh leaves no trace** (ticket 18). `refreshLedgerViews`
+  has no `catch` and neither it nor the budget actions guard on `cancelled`, so a
+  rejection is silent and a response arriving after a month change clobbers the newer
+  state. Recorded rather than scheduled because the first two halves cannot fire until
+  a month can change — which is exactly what ticket 14 adds, so whoever takes 14 has
+  to read 18.
+
+**Tickets 16 and 17 are one defect in two interfaces**, and both files record the same
+alternative: split `not_current_month` into a closed/not-started pair so the domain
+owns tense outright. Each ticket declined it for touching the status enum that
+`ADR-0002` fixes at five values. With two tense defects open rather than one — and
+ticket 17 being the "next client re-implements the comparison" that ticket 11's review
+predicted — that trade is worth re-deciding rather than inheriting. Taking the split
+would absorb both tickets and amend `ADR-0002`.
 
 ---
 
@@ -484,14 +534,20 @@ Phase 8's original first three steps — the domain calculation, moving the
 savings-rate threshold out of `DashboardPage.tsx`, and re-leading the dashboard
 with the allowance — are done. What is left:
 
-1. Close Phase 8's last open gap, which is one piece of work rather than two: give
-   the Web UI a month selector and stop it choosing the month in UTC. Three of the
-   five known gaps are already closed — the Ignored-across-a-re-import defect, the
-   dashboard's month-label defects, and the timezone coverage. Ticket 14 owns this
-   one.
-2. Add trailing per-category baselines, as the foundation for Phase 9.
-3. Decide whether to promote Phase 12's categorization copilot, based on whether
+1. Close the two live backend defects the later reviews found: tickets 15 and 16.
+   Both are small, both sit at seams this phase already agreed, and both are
+   reproduced against the current branch. Ticket 16 carries a decision first — whether
+   to move one line in the domain or to split `not_current_month` into a
+   closed/not-started pair, which would absorb ticket 17 and amend `ADR-0002`.
+2. Give the Web UI a month selector and stop it choosing the month in UTC — one piece
+   of work, not two, and ticket 14 owns it. Read ticket 18 alongside it: its first two
+   defects become reachable the moment a month can change.
+3. Add trailing per-category baselines, as the foundation for Phase 9.
+4. Decide whether to promote Phase 12's categorization copilot, based on whether
    the unknown queue is actually the daily friction.
 
-Step 1 is what finishes Phase 8 honestly. Phase 3's lesson was that a phase closed
-over a known gap stays closed for six phases.
+Steps 1 and 2 are what finish Phase 8 honestly; ticket 17 is the one open item that
+can be deferred on its merits, and only if the split in step 1 is declined. Phase 3's
+lesson was that a phase closed over a known gap stays closed for six phases — and this
+section having grown twice after its own Definition of Done check is the same lesson
+arriving a second time.
