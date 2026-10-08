@@ -18,9 +18,13 @@ feed the spending metrics.
 _Avoid_: Cleared, settled, confirmed
 
 **Pending**:
-The status of a transaction the bank has authorized but not yet settled. Real
-committed money: it counts as spend in the variable slice, while the fixed slice
-is judged by its estimate until settlement.
+The status of a transaction the bank has committed to but not yet settled —
+either a card authorization awaiting settlement, or a payment it has scheduled
+for a date still to come. Real committed money: it counts as spend in the
+variable slice, while the fixed slice is judged by its estimate until
+settlement. A scheduled payment is Pending from the moment the bank reports it
+and is filed by its Effective Date, so it can put spend in a month that has not
+started.
 _Avoid_: Held, unsettled, provisional, in-flight
 
 **Effective Date**:
@@ -79,6 +83,14 @@ every budget-basis figure, so it is always disclosed alongside them.
 _Avoid_: Untracked spend, other spend, miscellaneous
 
 ### Derived metrics
+
+**Month Tense**:
+Which side of today a month falls on: current, closed, or not started. Decided
+in the backend, because only it knows the owner's timezone, and named in the
+figures it qualifies rather than left for each interface to work out — it is what
+tells an outcome apart from a plan. A month that is not current has no daily
+allowance, and one that has not started has no progress to report.
+_Avoid_: Past month, future month, not current month
 
 **Safe to Spend Today**:
 BurnRate's headline metric: the amount the owner can spend today without

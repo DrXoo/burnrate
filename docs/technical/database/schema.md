@@ -314,7 +314,9 @@ Notes:
   1st would give the new month a budget the owner had just switched off. An open
   window (`active_to` NULL) is the normal state and rolls forward indefinitely, which
   is why nothing asks the owner to close a month; changing an amount from a given
-  month creates the next row and closes the previous one automatically.
+  month creates the next row and closes the previous one automatically. Proration is
+  the alternative and was weighed and deferred; see
+  `docs/adr/0005-budget-windows-are-month-granular.md`.
 
 ---
 

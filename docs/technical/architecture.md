@@ -208,7 +208,7 @@ Which month is current is the same kind of answer, and it comes from the same pl
 
 A payload is also only ever written for the month that is still selected. A background refresh closes over the filters of the render that started it, so it records the month it was started for and discards its own result if the owner has moved on; the loader keyed on the new month is already fetching that month's figures. A refresh that fails is reported twice, because the two facts are different: a toast says the edit it followed did land while the figures did not, and `summaryError` marks the figures left on screen once that toast has faded.
 
-`web/` carries one test seam, `useBurnRateData` with `lib/api` faked, run by Vitest. It exists for concurrency rather than coverage: which state survives two responses landing out of order is not observable in a render. Page rendering is verified through `react-dom/server` against fixtures, as it was before the runner existed.
+`web/` carries two test seams, both on Vitest. The first is `useBurnRateData` with `lib/api` faked, and it exists for concurrency rather than coverage: which state survives two responses landing out of order is not observable in a render. The second is page rendering through `renderToStaticMarkup`, with a page component's props supplied directly and assertions on the wording the owner would read — not a DOM-interaction seam, so there is no clicking and no effects, and a page that pulls data in an effect is exercised only through the states its props can reach. The two share one `SummaryDashboard` fixture via `fakeApi`'s `summaryFor`, rather than keeping two copies of a 22-field literal that would drift. Renderings outside a page component are still read by eye.
 
 The Telegram bot runs as its own long-polling worker (`burnrate.telegram_bot`). It is a read-only presentation client: it dispatches chat commands to the same application services the API uses and formats their output, without implementing any financial logic of its own. `/summary` leads with Safe to Spend Today and reads both its colour and the month's tense from `safe_to_spend_status`, the same field the dashboard's headline tone and badge come from, so the two interfaces cannot disagree about the owner's position or about which side of today the month falls on. A month that has not started reports its budget and what is already committed to it, and omits the lines that describe progress — a usage bar, a daily pace and a month-end projection have nothing to describe before the month begins. Access is restricted to an allow-list of chat ids (`TELEGRAM_ALLOWED_CHAT_IDS`), matching the single-owner model.
 
@@ -225,6 +225,8 @@ For an initial self-hosted deployment, BurnRate can be shipped as:
 * One PostgreSQL database
 
 This keeps the first deployment model simple while leaving room to split services later if needed.
+
+The Web UI service is also the only one published. Its nginx serves the SPA and proxies `/api/v1/` and `/enable_banking_items/` to the backend, so the browser only ever talks to the origin it loaded the page from and no request is cross-origin — which is why `APP_CORS_ORIGINS` is nearly inert and why the backend binds loopback. See `docs/adr/0004-the-web-origin-is-the-only-origin.md` for the trade-off and for the two headers that are load-bearing, and `docs/technical/deployment.md` for what a deployment has to get right.
 
 ---
 

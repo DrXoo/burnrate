@@ -92,7 +92,7 @@ If the target user ever changes, re-order Act II before writing any code.
 
 ---
 
-## Phase 8: "How much can I spend today?" — Shipped, with known gaps
+## Phase 8: "How much can I spend today?" — Shipped
 
 ### Objective
 
@@ -211,11 +211,18 @@ it is available work, not a defect.
 ### Known gaps
 
 Recorded explicitly, so that none of them is rediscovered as a surprise. The list
-grew after it was written: the five below the line were the gaps this phase's
-Definition of Done check found, and the four under "Found later" came out of
+grew twice after it was written: the five below the line were the gaps this phase's
+Definition of Done check found, and the five under "Found later" came out of
 per-ticket reviews afterwards. Anything checking Phase 8 against this section has to
 read both halves — reading only the first would have called the phase closed with
 four tickets open and two verified defects live.
+
+**All of them are closed but one**, and that one — a manual categorization lost when
+a hold books under a new identifier — is deliberately deferred to Phase 9, which is
+where the identity matching that would actually fix it belongs. It is also
+unreachable against the one bank restricted production has. The section is kept
+rather than deleted because the reasoning for *not* taking its obvious fix is the
+part worth having.
 
 * ~~**The timezone work has almost no test coverage.**~~ **Closed by ticket 13.**
   `APP_TIMEZONE` was applied to four call sites and only the summary service was
@@ -286,24 +293,32 @@ review of ticket 14. Two are verified live defects in the backend, reproduced ag
 the current branch; the fifth is traced through the code rather than reproduced,
 because it cannot fire against the one bank restricted production has:
 
-* **A month that has not started projects below the spend already committed in it**
-  (ticket 15). `_days_elapsed_in_month` returns 0 before a month begins and
-  `_project_spend` then returns the budget reference unchanged — its "no signal yet,
-  assume spending tracks the budget" branch, which was true when a future month could
-  not hold spend. Effective Date and pending-spend counting made it false. Verified: a
-  500.00 standing order due in July, read in June against a 300.00 budget, reports
-  `budgeted_spending_amount` 500.00 beside `projected_month_end_spend_amount` 300.00
-  and `projected_overspend_amount` 0.00 — the projection says the month lands on
-  budget while the headline already shows it blown. `_extrapolate_spend` has the same
-  shape and
-  returns 0.00 with no budget set.
-* **A month that closed before the owner budgeted anything is told to set a budget**
-  (ticket 16). `safe_to_spend_today` decides `no_budget` before it considers whether
-  the month is the current one. Verified: May 2026 read on 15 June returns
-  `safe_to_spend_status: "no_budget"` with `current_month: "2026-06"`, and the
-  dashboard then prints its set-a-budget invitation over a month that closed weeks
-  ago. Same family as ticket 11 — the page stating something about a month it does
-  not know — and both branches are individually right, only their order is wrong.
+* ~~**A month that has not started projects below the spend already committed in
+  it**~~ **Closed by ticket 15.** `_days_elapsed_in_month` returns 0 before a month
+  begins, and `_project_spend` then returned the budget reference unchanged — its "no
+  signal yet, assume spending tracks the budget" branch, which was true when a future
+  month could not hold spend. Effective Date and pending-spend counting made it false.
+  Verified: a 500.00 standing order due in July, read in June against a 300.00 budget,
+  reported `budgeted_spending_amount` 500.00 beside
+  `projected_month_end_spend_amount` 300.00 and `projected_overspend_amount` 0.00 —
+  the projection saying the month lands on budget while the headline already showed it
+  blown. `_extrapolate_spend` had the same shape and returned 0.00 with no budget set,
+  discarding the one figure such a month has. Both now carry a floor —
+  `max(spend_to_date, budget_reference)` and `spend_to_date` — and both branches fire
+  only when `days_elapsed <= 0`, so no current- or past-month figure moved.
+* ~~**A month that closed before the owner budgeted anything is told to set a
+  budget**~~ **Closed by ticket 16.** `safe_to_spend_today` decided `no_budget`
+  before it considered whether the month is the current one. Verified: May 2026 read
+  on 15 June returned `safe_to_spend_status: "no_budget"` with
+  `current_month: "2026-06"`, and the dashboard then printed its set-a-budget
+  invitation over a month that closed weeks ago. Same family as ticket 11 — the page
+  stating something about a month it does not know — and both branches were
+  individually right, only their order wrong. Tense now outranks `no_budget`, and
+  `not_current_month` is split into `month_closed` and `month_not_started`, so that
+  branch can no longer fire for a month the owner is not in: the backend never sends
+  `no_budget` for one. A month with no budget also got its own wording in both
+  tenses, because "what May finished with, of the €0.00 it had budgeted" is true and
+  reads as noise.
 * ~~**The Telegram summary has no tense**~~ **Closed by ticket 17.** `/summary <a future
   month>` printed a used-budget bar, a daily pace over zero elapsed days and a month-end
   projection for a month that had not begun, while the dashboard captioned the same
@@ -363,9 +378,8 @@ review predicted, that trade was re-decided rather than inherited.
 `safe_to_spend_status` now carries `month_closed` and `month_not_started` in place of
 `not_current_month`, tense outranks `no_budget`, and `ADR-0002` records the amendment.
 That closed ticket 16 and shrank ticket 17: the Telegram formatter reads the tense off
-the status instead of needing one of its own, so what is left there is the rendering —
-a used-budget bar, a pace over zero elapsed days and a projection, all still printed
-for a month that has not begun.
+the status instead of needing one of its own, so all that was left there was the
+rendering, which ticket 17 then took.
 
 ---
 
@@ -587,20 +601,22 @@ Still off the table, and now for firmer reasons:
 
 ## Recommended Immediate Next Steps
 
-Phase 8's original first three steps — the domain calculation, moving the
-savings-rate threshold out of `DashboardPage.tsx`, and re-leading the dashboard
-with the allowance — are done. What is left:
+Phase 8 is closed. All eighteen of its tickets are done, and of the ten gaps its
+Definition of Done check and the per-ticket reviews found, nine are fixed and the
+tenth is deferred to Phase 9 with its obvious-but-wrong fix written down. What is
+next:
 
-1. Give the Web UI a month selector and stop it choosing the month in UTC — one piece
-   of work, not two, and ticket 14 owns it. Read ticket 18 alongside it: its first two
-   defects become reachable the moment a month can change, and nothing writes the month
-   until this ships.
-2. Add trailing per-category baselines, as the foundation for Phase 9.
-3. Decide whether to promote Phase 12's categorization copilot, based on whether
-   the unknown queue is actually the daily friction.
+1. Add trailing per-category baselines, as the foundation for Phase 9.
+2. Decide whether to promote Phase 12's categorization copilot, based on whether
+   the unknown queue is actually the daily friction. Phase 8 sharpened the argument:
+   the allowance only counts *categorized* pending spend in budgeted categories, so
+   the headline's accuracy is a function of rule coverage.
+3. Carry a decision across the pending-to-booked transition, which needs the two rows
+   recognised as one transaction. It belongs with Phase 9's recurring-payment
+   matching, and it is the last Phase 8 gap left open.
 
-Step 1 is the last thing Phase 8 owes. Tickets 15, 16 and 17 are done, so what remains
-is the two user stories that shipped as code no owner can reach. Phase 3's
-lesson was that a phase closed over a known gap stays closed for six phases — and this
-section having grown twice after its own Definition of Done check is the same lesson
-arriving a second time.
+Phase 3's lesson was that a phase closed over a known gap stays closed for six
+phases. Phase 8's gap list having grown twice *after* its own Definition of Done
+check is that lesson arriving a second time — the check is what found the first five,
+and per-ticket `/code-review` is what found the rest, so neither alone would have
+been enough.
