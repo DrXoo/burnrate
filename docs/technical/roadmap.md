@@ -188,10 +188,16 @@ unnoticed for six phases.
 | A Pending row that later books is not counted twice | Met | Seam 3: `test_a_pending_hold_that_books_under_a_new_identifier_leaves_no_twin` and `test_a_hold_with_no_identifier_survives_resync_on_its_content_hash`. Both payload shapes are covered, because which one the bank produces was not knowable before it ran. |
 | Schema doc untouched | Met in substance, not literally | No migration and no table or column changed. The doc did gain two notes: that month placement reads the effective date rather than `booking_date`, and that this makes the window non-sargable so those queries plan as sequential scans. Both describe existing tables, which is why they belong there. |
 
-266 backend tests pass. `web/` has no test runner and installing one stayed out
-of scope, so the dashboard was verified by rendering it through
-`react-dom/server` against fixtures and reading the output — not by looking at
-the running app, which is what the spec assumed.
+266 backend tests passed at this check, 301 after the tickets that followed it.
+`web/` had no test runner when this was checked, so the
+dashboard was verified by rendering it through `react-dom/server` against fixtures and
+reading the output — not by looking at the running app, which is what the spec assumed.
+**Ticket 14 added Vitest**, scoped to one seam: `useBurnRateData` with `lib/api` faked.
+It was added for concurrency rather than for coverage — a month selector makes a
+background refresh racing a month change reachable, and which state survives two
+responses landing out of order is not something a render can reach. Page rendering
+stays on the `react-dom/server` route, so page tests remain a decision to take rather
+than a gap to fill.
 
 ### A threshold deliberately left alone
 
@@ -224,15 +230,19 @@ four tickets open and two verified defects live.
   notification counts, plus `civil_date` itself. The convention is in
   `burnrate/clock.py` and the two boundary instants in `tests/conftest.py`, so a
   fifth civil date has one shape to copy rather than a fourth to invent.
-* **The Web UI picks the month in UTC while the backend picks it in
-  `APP_TIMEZONE`.** `currentMonthValue()` is `new Date().toISOString().slice(0, 7)`.
-  For any non-UTC `APP_TIMEZONE` the two disagree at every month boundary: in
-  `Pacific/Auckland` at 00:30 on the 1st the UI requests last month, the backend
-  calls it not-current, and the owner's first screen of the month shows last
-  month's label where their allowance should be. The browser cannot know
-  `APP_TIMEZONE`, so the fix is either to drop the client-side default and let
-  the server choose the month it already defaults to, or to expose the timezone
-  in a settings payload.
+* ~~**The Web UI picks the month in UTC while the backend picks it in
+  `APP_TIMEZONE`.**~~ **Closed by ticket 14.** `currentMonthValue()` was
+  `new Date().toISOString().slice(0, 7)`, so for any non-UTC `APP_TIMEZONE` the two
+  disagreed at every month boundary: in `Pacific/Auckland` at 00:30 on the 1st the UI
+  requested last month, the backend called it not-current, and the owner's first screen
+  of the month showed last month's label where their allowance should be. Of the two
+  fixes offered, the first was taken: the client sends no month and the backend's answer
+  decides it, rather than a settings payload the browser would have had to re-derive a
+  month from. It costs a two-phase first load, because an omitted month means the
+  current month on `/summary` and *every month ever* on the three ledger views — so the
+  summary is fetched first, its `current_month` adopted, and the views then scoped to
+  it. Both `currentMonthValue()` and `currentMonthStart()` are deleted, and the only
+  clock left in `web/src` renders "8 min ago" on a sync label.
 * ~~**Three month-label defects in the dashboard**~~ **Closed by ticket 11.** All of
   the same kind — the page stated something about a month it did not actually know.
   `monthHasPassed` read a future month as a closed one when `APP_TIMEZONE` is behind
@@ -242,14 +252,16 @@ four tickets open and two verified defects live.
   now reports `current_month` so the comparison is exact in both offset directions,
   the hook withholds a payload for the wrong month, and the caption reads the figures
   beside it.
-* **There is no month selector in the Web UI.** The headline handles a past and
-  a future month correctly and no owner can reach either by clicking:
-  `filters.month` is initialised to the current month and nothing ever changes
-  it, and the month in the top bar is a read-only label. The backend has
-  supported `GET /api/v1/summary?month=` all along. So those two states are
-  groundwork, reachable today only by editing the default and rebuilding.
-  Whether Phase 8 owes the picker or a later phase does is open; it changes
-  navigation across four pages that all read `filters.month`.
+* ~~**There is no month selector in the Web UI.**~~ **Closed by ticket 14**, which
+  settled that Phase 8 owed it: user stories 22 and 23 shipped as code no owner could
+  run. Arrows plus a native `<input type="month">`, unbounded in both directions —
+  bounding the past needs an API for the earliest month with data, and a future month is
+  where standing orders land. The month stays in hook state rather than the URL, because
+  `section` is not in the URL either and there is no router: a shared link would restore
+  the month and always land on the dashboard. The top bar's month label became the way
+  back to the current month, and both it and the selector are hidden on Settings, where a
+  month means nothing. Fewer pages were touched than feared — the hook does every fetch,
+  so the month reaches the UI in three places.
 * ~~**An Ignored transaction does not stay Ignored across a re-import.**~~
   **Closed by ticket 12.** `RulesService` guarded on `category_id is None` and never
   read `excluded_at`, so a row the owner excluded that matched an active rule was
@@ -259,18 +271,20 @@ four tickets open and two verified defects live.
   may decide, and the spend and income queries state the exclusion rather than
   inheriting it from a null category.
 
-Three of those five are closed: the Ignored defect by ticket 12, the month-label
-defects by ticket 11, and the timezone coverage by ticket 13. The two that remain
-are the Web UI's month selection and the missing month selector, and they are the
-same piece of work seen from two sides — ticket 14 owns both. Neither can fire for
-an owner who cannot navigate away from the current month, which is exactly what
-makes them easy to leave and what Phase 3's lesson says about leaving them.
+All five are closed: the Ignored defect by ticket 12, the month-label defects by
+ticket 11, the timezone coverage by ticket 13, and the last two by ticket 14. Those
+last two were the same piece of work seen from two sides, which is why one ticket
+owned both: neither could fire for an owner who could not navigate away from the
+current month, and that is exactly what made them easy to leave and what Phase 3's
+lesson says about leaving them.
 
 #### Found later, by per-ticket reviews
 
-These four came out of `/code-review` after the Definition of Done check, so they are
-not among the five above. Two are verified live defects in the backend, reproduced
-against the current branch:
+These came out of `/code-review` after the Definition of Done check, so they are not
+among the five above. Four were found by the per-ticket reviews and a fifth by the
+review of ticket 14. Two are verified live defects in the backend, reproduced against
+the current branch; the fifth is traced through the code rather than reproduced,
+because it cannot fire against the one bank restricted production has:
 
 * **A month that has not started projects below the spend already committed in it**
   (ticket 15). `_days_elapsed_in_month` returns 0 before a month begins and
@@ -297,12 +311,44 @@ against the current branch:
   words, read off `safe_to_spend_status`, and a month that has not started reports its
   budget and what is committed to it without the three lines that describe progress. A
   closed month keeps them, with a test so the suppression cannot widen.
-* **A failed background refresh leaves no trace** (ticket 18). `refreshLedgerViews`
-  has no `catch` and neither it nor the budget actions guard on `cancelled`, so a
-  rejection is silent and a response arriving after a month change clobbers the newer
-  state. Recorded rather than scheduled because the first two halves cannot fire until
-  a month can change — which is exactly what ticket 14 adds, so whoever takes 14 has
-  to read 18.
+* **A failed background refresh leaves no trace** (ticket 18) — **two thirds closed by
+  ticket 14.** `refreshLedgerViews` had no `catch` and no `cancelled` guard, so a
+  rejection was silent and a response arriving after a month change clobbered the newer
+  state. Both were recorded rather than scheduled because neither could fire until a
+  month could change, so ticket 14 took them with the selector: the refresh now records
+  the month it was started for and discards a payload for a month the owner has left,
+  and a failure reports itself twice — a toast, because the edit it followed did land,
+  and `summaryError`, because the figures on screen are no longer trustworthy. What is
+  left in 18 is its third defect, now narrowed to one page: the Categories panel still
+  shows a stale payload for the month on screen with no signal, which is a parity call
+  about what a few minutes of staleness is worth announcing rather than an open defect.
+
+* **A manual categorization on a hold is lost when the hold books under a new
+  identifier**, for a bank that supplies no `transaction_id` or `entry_reference`.
+  `_transaction_external_id` then hashes booking date, value date, direction, amount,
+  currency and remittance; a pending row carries no booking date, so settling changes
+  the hash, the booked row arrives as a new row, and the sweep deletes the pending one.
+  Everything the owner decided about that row goes with it, and the booked twin lands
+  back in the review queue uncategorized.
+
+  **The obvious fix is wrong and should not be taken.** The sweep exempts Ignored rows
+  and the suggestion is to exempt categorized ones the same way, on the reasoning that
+  both record a decision the owner made. The reasoning does not carry, because the cost
+  of the exemption is not the same: `excluded_at IS NULL` keeps an Ignored row out of
+  every figure, so a surviving Ignored twin is clutter in the ledger and nothing more,
+  while `COMMITTED_STATUSES` is `("booked", "pending")` — a surviving *categorized*
+  pending twin counts, alongside its booked self, and the dinner is spent twice. That is
+  the defect the sweep exists to prevent, and it is worse than losing a category. So the
+  asymmetry is deliberate; `_sweep_stale_pending_transactions` should say so, since its
+  docstring currently gives the Ignored exemption a rationale that reads as general.
+
+  What would actually fix it is identity, not exemption: carrying a decision across the
+  pending-to-booked transition needs the two rows recognised as one transaction, which
+  the content hash cannot do by construction. That is a real piece of work — match on
+  amount, counterparty and a date window — and it belongs with the recurring-payment
+  matching in Phase 9 rather than bolted onto the sweep. Unreachable today in any case:
+  restricted production has one bank, and whether it supplies stable pending
+  identifiers is still unknown. If it does, this cannot fire at all.
 
 **Tickets 16 and 17 were one defect in two interfaces, and the split was taken.**
 Both files recorded the same alternative and both declined it for touching the status

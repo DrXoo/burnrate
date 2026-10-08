@@ -203,3 +203,19 @@ export function IconCard(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconChevronLeft(props: IconProps) {
+  return (
+    <Svg width={16} {...props}>
+      <path d="M14.5 5.5 8 12l6.5 6.5" />
+    </Svg>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <Svg width={16} {...props}>
+      <path d="M9.5 5.5 16 12l-6.5 6.5" />
+    </Svg>
+  );
+}

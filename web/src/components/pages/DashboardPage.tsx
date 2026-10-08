@@ -514,20 +514,7 @@ export function DashboardPage({ summary, loading, error, heroMode, includedAccou
     return <div style={{ padding: "40px 4px", color: "var(--text-2)", fontSize: 14 }}>Calculating your month…</div>;
   }
   if (error && !summary) {
-    return (
-      <div
-        style={{
-          padding: "16px 18px",
-          background: "var(--over-dim)",
-          border: "1px solid color-mix(in oklab, var(--over) 30%, transparent)",
-          borderRadius: 12,
-          color: "var(--over)",
-          fontSize: 13.5,
-        }}
-      >
-        {error}
-      </div>
-    );
+    return <FailureBanner>{error}</FailureBanner>;
   }
   // No payload for the month on screen, and neither loading nor failed. `useBurnRateData`
   // withholds a payload fetched for any other month, so this is what a month whose
@@ -542,7 +529,36 @@ export function DashboardPage({ summary, loading, error, heroMode, includedAccou
     );
   }
 
-  return <DashboardContent summary={summary} heroMode={heroMode} includedAccountCount={includedAccountCount} />;
+  // A failed background refresh leaves the previous payload on screen. It is still the
+  // last figures the owner had, so it is marked rather than withdrawn -- the toast that
+  // reported the failure has faded by the time they read the number.
+  return (
+    <div>
+      {error ? (
+        <div style={{ marginBottom: 18 }}>
+          <FailureBanner>These figures may be out of date — {error}</FailureBanner>
+        </div>
+      ) : null}
+      <DashboardContent summary={summary} heroMode={heroMode} includedAccountCount={includedAccountCount} />
+    </div>
+  );
+}
+
+function FailureBanner({ children }: { children: ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: "16px 18px",
+        background: "var(--over-dim)",
+        border: "1px solid color-mix(in oklab, var(--over) 30%, transparent)",
+        borderRadius: 12,
+        color: "var(--over)",
+        fontSize: 13.5,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function DashboardContent({

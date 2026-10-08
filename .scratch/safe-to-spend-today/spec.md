@@ -279,8 +279,8 @@ phase's work. The nullable amount is caught by the existing type check; the
 layout is verified by looking at it.
 
 **Amended by ticket 14: a fifth seam.** `useBurnRateData`, with `lib/api` faked,
-once `web/` gains Vitest. This contradicts "no test is written anywhere else"
-above, and is recorded rather than added quietly.
+on the Vitest runner ticket 14 added to `web/`. This contradicts "no test is written
+anywhere else" above, and is recorded rather than added quietly.
 
 The reason the original four held for six tickets is that everything in `web/` was
 rendering, and rendering is verifiable by eye and by `react-dom/server`. Ticket 14

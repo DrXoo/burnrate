@@ -2,10 +2,12 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 
-COPY package.json tsconfig.json tsconfig.node.json vite.config.ts index.html ./
+COPY package.json package-lock.json tsconfig.json tsconfig.node.json vite.config.ts index.html ./
 COPY src ./src
 
-RUN npm install
+# `npm ci` rather than `npm install`, so the image is built from the same resolved
+# versions the test runner uses locally.
+RUN npm ci
 RUN npm run build
 
 FROM nginx:1.27-alpine

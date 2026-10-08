@@ -589,6 +589,19 @@ class EnableBankingService:
         left alone: that flag records a decision they made, and deleting the row would
         hand the transaction back to the unknown queue on the next import.
 
+        **That exemption does not generalize to a categorized row, and must not be
+        widened to one.** A manual categorization records a decision too, and losing it
+        when a hold books under a new identifier is a real cost -- but the exemptions
+        are not priced alike. ``not_ignored`` is ``excluded_at IS NULL``, so an Ignored
+        row reaches no figure and a surviving Ignored twin is clutter and nothing more.
+        ``COMMITTED_STATUSES`` is ``("booked", "pending")``, so a surviving *categorized*
+        pending twin counts alongside its booked self and the money is spent twice --
+        which is the defect this sweep exists to prevent, and worse than losing a
+        category. Carrying a decision across the pending-to-booked transition needs the
+        two rows recognised as one transaction, which a content hash cannot do by
+        construction; the roadmap's Phase 8 gaps record why that belongs with Phase 9's
+        matching rather than here.
+
         ``reported_external_ids`` must span *every* fetch of the sync, not just the
         pending one. The test is whether the bank mentioned a row anywhere, because a
         pending row does not only arrive through the ``PDNG`` call: ``SCHD``

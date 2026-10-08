@@ -158,12 +158,20 @@ export function capitalize(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-export function currentMonthValue(): string {
-  return new Date().toISOString().slice(0, 7);
-}
-
-export function currentMonthStart(): string {
-  return `${currentMonthValue()}-01`;
+/** The month `delta` months away from a `YYYY-MM` value, rolling over the year.
+ *
+ *  Navigation, not a clock: which month the owner is in is the backend's answer, and
+ *  stepping away from it is plain calendar arithmetic on the month they are looking at.
+ *  An unparseable value is returned unchanged, which is what an unresolved month is. */
+export function shiftMonth(value: string, delta: number): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) {
+    return value;
+  }
+  const monthsFromYearZero = Number(match[1]) * 12 + (Number(match[2]) - 1) + delta;
+  const year = Math.floor(monthsFromYearZero / 12);
+  const month = monthsFromYearZero - year * 12 + 1;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
 }
 
 export function formatDateTime(value: string | null | undefined): string {

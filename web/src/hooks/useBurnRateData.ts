@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
 import {
   categorizeTransaction,
@@ -30,7 +30,6 @@ import {
   updateBudget,
   updateRule,
 } from "../lib/api";
-import { currentMonthValue } from "../lib/format";
 import type {
   Account,
   Budget,
@@ -56,7 +55,14 @@ interface TransactionBucket {
 
 type AuthStatus = "checking" | "authenticated" | "unauthenticated";
 
-export function useBurnRateData() {
+interface BurnRateDataOptions {
+  /** Reports a background refresh that failed after an edit of its own had already
+      succeeded. Kept as an injected reporter so the hook decides nothing about how
+      it is shown, and so the edit's own error path stays separate from it. */
+  onRefreshFailed?: (message: string) => void;
+}
+
+export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const [bootLoading, setBootLoading] = useState(true);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -72,13 +78,20 @@ export function useBurnRateData() {
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
+  // An empty month means "the month the backend calls current". The loader below
+  // resolves it; nothing here reads a clock, because a month derived in the browser
+  // disagrees with the backend's for part of every month-end.
   const [filters, setFilters] = useState<FiltersState>({
-    month: currentMonthValue(),
+    month: "",
     accountId: "",
     categoryId: "",
     status: "",
     categorized: "",
   });
+  // Bumped by every applyFilters, so asking for the same month again re-runs the loader.
+  // Without it the one month that cannot be re-asked for is "" -- an opening summary that
+  // failed leaves the month unresolved, and the deps below would never change again.
+  const [reloadToken, setReloadToken] = useState(0);
   const [transactionsPaging, setTransactionsPaging] = useState<PagingState>({
     limit: 25,
     offset: 0,
@@ -102,6 +115,16 @@ export function useBurnRateData() {
     loading: true,
     error: null,
   });
+
+  // The month a background refresh must still find selected when it resolves.
+  // Such a refresh closes over the filters of the render that started it, so
+  // without this a slow response can write the month the owner has already left.
+  // Synced from an effect rather than during render, so it only ever holds a month
+  // that was actually committed.
+  const selectedMonth = useRef(filters.month);
+  useEffect(() => {
+    selectedMonth.current = filters.month;
+  }, [filters.month]);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +210,19 @@ export function useBurnRateData() {
       setSummaryError(null);
 
       try {
+        // An omitted month means the current month only on /summary; on the three
+        // ledger views it means every month ever. So the first load asks the summary
+        // which month is current, adopts it, and lets this effect re-run with a month
+        // to scope the views to. Everything stays in the loading state it is already in.
+        if (!filters.month) {
+          const openingSummary = await getSummary(base, "");
+          if (cancelled) {
+            return;
+          }
+          setFilters((current) => ({ ...current, month: openingSummary.current_month }));
+          return;
+        }
+
         const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
           getTransactions(base, filters, transactionsPaging),
           getUncategorizedCount(base, filters),
@@ -264,6 +300,7 @@ export function useBurnRateData() {
     filters.categorized,
     filters.month,
     filters.status,
+    reloadToken,
     transactionsPaging.limit,
     transactionsPaging.offset,
     unknownPaging.limit,
@@ -316,61 +353,96 @@ export function useBurnRateData() {
     if (!apiBase) {
       return;
     }
-    const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
-      getTransactions(apiBase, filters, transactionsPaging),
-      getUncategorizedCount(apiBase, filters),
-      getUnknownQueue(apiBase, filters, unknownPaging),
-      getSummary(apiBase, filters.month),
-    ]);
-
-    startTransition(() => {
-      setSummary(summaryPayload);
-      setSummaryLoading(false);
-      setSummaryError(null);
-      setUncategorizedCount(countPayload);
-    });
-
-    let adjusted = false;
-    if (transactionsPaging.offset > 0 && transactionsPaging.offset >= transactionsPayload.total_count) {
-      adjusted = true;
-      setTransactionsPaging((current) => ({
-        ...current,
-        offset: Math.max(0, current.offset - current.limit),
-      }));
-    }
-    if (unknownPaging.offset > 0 && unknownPaging.offset >= unknownPayload.total_count) {
-      adjusted = true;
-      setUnknownPaging((current) => ({
-        ...current,
-        offset: Math.max(0, current.offset - current.limit),
-      }));
-    }
-    if (adjusted) {
+    if (!filters.month) {
+      // No month has been resolved yet, which an edit can still reach: Sync sits in the
+      // health strip on every section. Asking the three ledger views without a month
+      // gets every transaction ever, and the gate below would wave it through because
+      // the month it was requested for is the month still selected. The loader's second
+      // phase is already about to fetch this month's views, so declining is not a loss.
       return;
     }
+    const requestedMonth = filters.month;
+    try {
+      const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
+        getTransactions(apiBase, filters, transactionsPaging),
+        getUncategorizedCount(apiBase, filters),
+        getUnknownQueue(apiBase, filters, unknownPaging),
+        getSummary(apiBase, filters.month),
+      ]);
 
-    startTransition(() => {
-      setTransactions({
-        items: transactionsPayload.transactions,
-        total: transactionsPayload.total_count,
-        loading: false,
-        error: null,
+      // The owner reached another month while this was in flight. These payloads
+      // describe the month they left, and the loader keyed on the new month is already
+      // fetching its own, so writing them would put one month's rows and counts under
+      // another month's heading.
+      if (selectedMonth.current !== requestedMonth) {
+        return;
+      }
+
+      startTransition(() => {
+        setSummary(summaryPayload);
+        setSummaryLoading(false);
+        setSummaryError(null);
+        setUncategorizedCount(countPayload);
       });
-      setTransactionsPaging((current) => ({ ...current, total: transactionsPayload.total_count }));
-      setUnknownQueue({
-        items: unknownPayload.transactions,
-        total: unknownPayload.total_count,
-        loading: false,
-        error: null,
+
+      let adjusted = false;
+      if (transactionsPaging.offset > 0 && transactionsPaging.offset >= transactionsPayload.total_count) {
+        adjusted = true;
+        setTransactionsPaging((current) => ({
+          ...current,
+          offset: Math.max(0, current.offset - current.limit),
+        }));
+      }
+      if (unknownPaging.offset > 0 && unknownPaging.offset >= unknownPayload.total_count) {
+        adjusted = true;
+        setUnknownPaging((current) => ({
+          ...current,
+          offset: Math.max(0, current.offset - current.limit),
+        }));
+      }
+      if (adjusted) {
+        return;
+      }
+
+      startTransition(() => {
+        setTransactions({
+          items: transactionsPayload.transactions,
+          total: transactionsPayload.total_count,
+          loading: false,
+          error: null,
+        });
+        setTransactionsPaging((current) => ({ ...current, total: transactionsPayload.total_count }));
+        setUnknownQueue({
+          items: unknownPayload.transactions,
+          total: unknownPayload.total_count,
+          loading: false,
+          error: null,
+        });
+        setUnknownPaging((current) => ({ ...current, total: unknownPayload.total_count }));
       });
-      setUnknownPaging((current) => ({ ...current, total: unknownPayload.total_count }));
-    });
+    } catch (error) {
+      // The edit this followed did land, so rethrowing would tell the owner their
+      // change had failed when it had not. It is reported twice instead: the reporter
+      // says the refresh failed, and summaryError marks the figures still on screen as
+      // no longer trustworthy once that message has faded.
+      if (selectedMonth.current !== requestedMonth) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      startTransition(() => {
+        setSummaryLoading(false);
+        setSummaryError(message);
+      });
+      onRefreshFailed?.(message);
+    }
   }
 
   // Fetch every transaction for the working month (ignoring account/category/status
   // filters) so the Categories view can aggregate accurate counts and per-category lists.
+  // An unresolved month is not "no month filter" here either: it would answer with every
+  // transaction ever, which is what the two-phase load above exists to avoid.
   async function listMonthTransactions() {
-    if (!apiBase) {
+    if (!apiBase || !filters.month) {
       return [];
     }
     const payload = await getTransactions(
@@ -382,14 +454,13 @@ export function useBurnRateData() {
   }
 
   function applyFilters(nextFilters: FiltersState) {
-    // Every other filter uses "" for "unset", but a month must not: `buildQuery` drops
-    // an empty value, the backend then answers for its own current month, and a payload
-    // whose month nothing asked for is withheld by the gate below on every successful
-    // fetch -- a blank page with no error to explain it. A selection is a month or it is
-    // the month we are in.
-    const month = nextFilters.month || currentMonthValue();
+    // A cleared month is not "no month filter" the way a cleared account is "no account
+    // filter": the loader reads it as "the month the backend calls current" and resolves
+    // it over the wire. A native month input can always be emptied from the keyboard, so
+    // that is the one rule rather than two.
     startTransition(() => {
-      setFilters({ ...nextFilters, month });
+      setFilters(nextFilters);
+      setReloadToken((current) => current + 1);
       setTransactionsPaging((current) => ({ ...current, offset: 0 }));
       setUnknownPaging((current) => ({ ...current, offset: 0 }));
     });
@@ -558,6 +629,11 @@ export function useBurnRateData() {
   async function createBudgetAction(draft: BudgetDraft) {
     if (!apiBase) {
       throw new Error("API base not loaded");
+    }
+    if (!filters.month) {
+      // The month the budget starts in is the month on screen, and there is no month on
+      // screen until the backend has named one.
+      throw new Error("The month is still loading");
     }
     // Create the budget for the month the user is currently viewing, not always
     // the real current month, so a new budget shows up in the summary they see.

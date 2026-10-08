@@ -37,7 +37,12 @@ function CenteredNotice({ title, body, tone }: { title: string; body: string; to
 }
 
 export default function App() {
-  const data = useBurnRateData();
+  // A refresh that fails after an edit succeeded is reported here as well as on the
+  // dashboard: the toast tells the owner their change landed and the figures did not,
+  // which the banner alone cannot say.
+  const data = useBurnRateData({
+    onRefreshFailed: (message) => showToast(`Could not refresh the figures — ${message}`, "over"),
+  });
   const [section, setSection] = useState<Section>("dashboard");
   const [theme, setTheme] = useState<Theme>("dark");
   const [heroMode, setHeroMode] = useState<HeroMode>("dial");
@@ -84,7 +89,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const monthLabel = formatMonthLabel(data.filters.month);
+  // The month is unknown for a moment on the first load and after a reset, while the
+  // backend answers which one is current. Every month-scoped page is in its loading state
+  // then, so the label says as much rather than reading blank. If that answer failed the
+  // month stays unknown, and the label is the only control that can ask again -- the
+  // arrows are disabled without a month to step from -- so it says so.
+  const monthLabel = data.filters.month
+    ? formatMonthLabel(data.filters.month)
+    : data.summaryError
+      ? "Month unavailable — retry"
+      : "Loading month…";
   const includedAccountCount = data.accounts.filter((account) => account.included_in_calculations).length;
 
   function openConnect() {
@@ -219,7 +233,9 @@ export default function App() {
         <main className="br-scroll" style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: "auto" }}>
           <TopBar
             section={section}
+            month={data.filters.month}
             monthLabel={monthLabel}
+            onSelectMonth={(month) => data.applyFilters({ ...data.filters, month })}
             theme={theme}
             heroMode={heroMode}
             onToggleTheme={() => setTheme((value) => (value === "dark" ? "light" : "dark"))}

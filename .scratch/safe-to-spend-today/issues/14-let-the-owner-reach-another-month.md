@@ -7,15 +7,15 @@ default and rebuilding.
 **Blocked by:** 11 (its month-label rules decide what a reached month is allowed to
 claim, and this ticket is what makes those rules reachable)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The owner can move to another month and stay there, and the selection survives a section change
-- [ ] The current month is reachable again in one action from any other month
-- [ ] No month is derived from a clock in the Web UI: the first load asks the backend which month is current, and `currentMonthValue()` is deleted
-- [ ] A refresh that resolves after the month has changed cannot write the month the owner has left
-- [ ] A background refresh that fails says so, where today it fails silently
-- [ ] Nothing financial is computed in the Web UI: the selector changes a query parameter
-- [ ] `web/` has a test runner, and the race above is its first test
+- [x] The owner can move to another month and stay there, and the selection survives a section change
+- [x] The current month is reachable again in one action from any other month
+- [x] No month is derived from a clock in the Web UI: the first load asks the backend which month is current, and `currentMonthValue()` is deleted
+- [x] A refresh that resolves after the month has changed cannot write the month the owner has left
+- [x] A background refresh that fails says so, where today it fails silently
+- [x] Nothing financial is computed in the Web UI: the selector changes a query parameter
+- [x] `web/` has a test runner, and the race above is its first test
 
 ## Why Phase 8 owes this
 
@@ -144,3 +144,35 @@ material for `/distill-decisions`.
 Page rendering stays ad-hoc for this ticket — type check plus `react-dom/server`, as
 tickets 07, 11 and 16 did. Page tests are the obvious next use of the runner, written
 down here so that next time it is a decision and not a discovery.
+
+## Absorbed from `/code-review`
+
+Two defects in this ticket's own code, both found after the first green run and both
+fixed here rather than handed on. Each has a test at the fifth seam.
+
+**A refresh with no month resolved asked for every month ever.** `refreshLedgerViews`
+did not get the `!filters.month` guard its two siblings did, so an edit landing inside
+the two-phase load's window fetched the three ledger views unscoped — every transaction
+ever, plus the all-time uncategorized count — and committed them. The stale-month gate
+waved it through, because `""` was both the month requested and the month still
+selected. Sync sits in the health strip on every section, so the window is reachable
+after boot and again after every reset of the month. Now it declines to ask: the
+loader's second phase is about to fetch the month's views, so nothing is lost.
+Covered by `will not ask the ledger views for every month ever while no month is
+resolved`, which counts the unscoped reads at the faked boundary — the answer such a
+read gets is correct and useless, so the only observable mistake is the question.
+
+**A first load whose opening summary failed could not be retried.** The catch recorded
+the error and left the month `""`, and no dep of the loader changed again, so the month
+was never resolved: the label read "Loading month…" for ever, the arrows were disabled
+for want of a month to step from, and on Settings the selector is not rendered at all.
+Recovery meant the native month input or a reload. The loader now takes a
+`reloadToken` that every `applyFilters` bumps, so asking for the same month again
+re-runs it — and the one month that could not be re-asked for was exactly `""`. The
+label is the control that asks, so when the month is unresolved *and* errored it reads
+"Month unavailable — retry" instead of claiming to be loading. Covered by `can be asked
+again for the current month after the opening summary failed`.
+
+The side effect of the token is that re-selecting an unchanged filter now refetches
+rather than doing nothing. That is wanted: "ask again" is the only thing the owner can
+mean by re-picking the month they are already on.
