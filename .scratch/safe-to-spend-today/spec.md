@@ -290,8 +290,23 @@ not something a render can reach. The seam is the hook rather than `fetch`
 because what is at stake is the state the hook ends up holding, not the URLs it
 built to get there.
 
-Page rendering stays off the seam list. Page tests are the obvious next use of the
-runner and are deliberately not taken here, so that adding them stays a decision.
+**Amended by ticket 18: a sixth seam.** Page rendering, through
+`react-dom/server`, on the same runner. Ticket 14 left page tests off the list and said
+adding them should stay a decision; this is that decision, taken because ticket 18's
+whole subject is one branch of one render -- whether a notice appears above the
+Categories list -- and nothing below a render can observe it.
+
+The seam is `renderToStaticMarkup` of a page component with its props supplied
+directly, asserting on the text the owner would read. It is not a DOM-interaction
+seam: no clicking, no effects. `CategoriesPage` pulls its month's transactions in an
+effect, which `renderToStaticMarkup` never runs, so the three budget-figure states are
+reachable from props alone. Assertions are on owner-facing wording rather than on
+markup structure, so restyling the notice does not break them.
+
+`vitest.config.ts` now collects `tests/**/*.test.ts?(x)`, and `fakeApi`'s
+`summaryFor` is exported so the page tests and the hook tests share one
+`SummaryDashboard` fixture rather than keeping two copies of a 22-field literal that
+would drift.
 
 ## Out of Scope
 

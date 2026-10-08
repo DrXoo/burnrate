@@ -59,6 +59,32 @@ const statCard: CSSProperties = {
   padding: "13px 14px",
 };
 
+interface BudgetNotice {
+  text: string;
+  /** "alert" when the figures on screen cannot be trusted; "info" when the page is
+      merely reporting what it does not know yet. */
+  severity: "alert" | "info";
+}
+
+/** The one line above the list that says what state the month's budget figures are in,
+    or null when they need no explaining. */
+function budgetNotice(budgetsKnown: boolean, loading: boolean, error: string | null, monthLabel: string): BudgetNotice | null {
+  // The month's rows are on screen. A refresh that failed for this same month leaves
+  // them in place, so they are the right month's figures and merely old -- marked
+  // rather than withdrawn, because they are still the last figures the owner had and
+  // the toast that reported the failure has faded by the time they are read.
+  if (budgetsKnown) {
+    return error ? { text: `These budget figures may be out of date \u2014 ${error}`, severity: "alert" } : null;
+  }
+  if (loading) {
+    return { text: `Loading budgets for ${monthLabel}\u2026`, severity: "info" };
+  }
+  if (error) {
+    return { text: `Budget figures unavailable: ${error}`, severity: "alert" };
+  }
+  return { text: "Budget figures are unavailable for this month.", severity: "info" };
+}
+
 function num(value: string | null | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -101,6 +127,8 @@ export function CategoriesPage({
   // third state, distinct from "this category has no budget this month", which is a
   // payload that carries no row for it.
   const budgetsKnown = summary !== null;
+
+  const notice = budgetNotice(budgetsKnown, loading, error, monthLabel);
 
   const stats = useMemo<CategoryStat[]>(() => {
     const usageById = new Map((summary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
@@ -175,25 +203,21 @@ export function CategoriesPage({
           </span>
         </div>
 
-        {budgetsKnown ? null : (
+        {notice ? (
           <div
             style={{
               marginBottom: 12,
               padding: "9px 11px",
               borderRadius: 10,
-              background: error ? "var(--over-dim)" : "var(--bg-3)",
-              border: `1px solid ${error ? "color-mix(in oklab, var(--over) 30%, transparent)" : "var(--line)"}`,
-              color: error ? "var(--over)" : "var(--text-3)",
+              background: notice.severity === "alert" ? "var(--over-dim)" : "var(--bg-3)",
+              border: `1px solid ${notice.severity === "alert" ? "color-mix(in oklab, var(--over) 30%, transparent)" : "var(--line)"}`,
+              color: notice.severity === "alert" ? "var(--over)" : "var(--text-3)",
               fontSize: 11.5,
             }}
           >
-            {loading
-              ? `Loading budgets for ${monthLabel}…`
-              : error
-                ? `Budget figures unavailable: ${error}`
-                : "Budget figures are unavailable for this month."}
+            {notice.text}
           </div>
-        )}
+        ) : null}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {GROUPS.map((group) => {

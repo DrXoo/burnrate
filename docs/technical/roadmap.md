@@ -311,17 +311,22 @@ because it cannot fire against the one bank restricted production has:
   words, read off `safe_to_spend_status`, and a month that has not started reports its
   budget and what is committed to it without the three lines that describe progress. A
   closed month keeps them, with a test so the suppression cannot widen.
-* **A failed background refresh leaves no trace** (ticket 18) — **two thirds closed by
-  ticket 14.** `refreshLedgerViews` had no `catch` and no `cancelled` guard, so a
+* ~~**A failed background refresh leaves no trace**~~ **Closed by tickets 14 and 18.**
+  `refreshLedgerViews` had no `catch` and no `cancelled` guard, so a
   rejection was silent and a response arriving after a month change clobbered the newer
   state. Both were recorded rather than scheduled because neither could fire until a
   month could change, so ticket 14 took them with the selector: the refresh now records
   the month it was started for and discards a payload for a month the owner has left,
   and a failure reports itself twice — a toast, because the edit it followed did land,
   and `summaryError`, because the figures on screen are no longer trustworthy. What is
-  left in 18 is its third defect, now narrowed to one page: the Categories panel still
-  shows a stale payload for the month on screen with no signal, which is a parity call
-  about what a few minutes of staleness is worth announcing rather than an open defect.
+  left in 18 was its third defect, narrowed to one page: the Categories panel showed a
+  stale payload for the month on screen with no signal. Ticket 18 settled that parity
+  call in favour of marking it — the page prints each category's budget, spend and
+  remaining, and prints them again at hero size in the detail panel, so they are figures
+  the owner acts on and the dashboard's reasoning carries over. A month with no rows at
+  all still makes the stronger claim, because nothing on screen could be out of date.
+  Ticket 18 also added the sixth testing seam, page rendering through `react-dom/server`,
+  which ticket 14 had deliberately left as a decision for whoever needed it first.
 
 * **A manual categorization on a hold is lost when the hold books under a new
   identifier**, for a bank that supplies no `transaction_id` or `entry_reference`.

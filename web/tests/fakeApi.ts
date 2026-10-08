@@ -129,7 +129,7 @@ function page(rows: Transaction[], paging: PagingState) {
   };
 }
 
-function summaryFor(month: string): SummaryDashboard {
+export function summaryFor(month: string): SummaryDashboard {
   const resolved = month || currentMonth;
   return {
     month: resolved,
