@@ -18,6 +18,11 @@ dependencies = [
   "psycopg[binary]>=3.2.9,<4.0.0",
   "pydantic-settings>=2.10.1,<3.0.0",
   "sqlalchemy>=2.0.42,<3.0.0",
+  # ZoneInfo reads the system tz database, which the slim base image happens to
+  # ship. Declared because every civil date depends on it: a missing database makes
+  # Settings reject any non-UTC APP_TIMEZONE at boot, so the owner's "today" would
+  # be inherited from the base image rather than from this file.
+  "tzdata>=2025.1",
   "uvicorn[standard]>=0.35.0,<1.0.0",
 ]
 

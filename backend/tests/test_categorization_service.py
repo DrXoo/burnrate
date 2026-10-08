@@ -160,6 +160,32 @@ def test_categorization_service_restores_excluded_transaction() -> None:
     assert queue["total_count"] == 1
 
 
+def test_categorization_service_uncategorizing_an_ignored_transaction_returns_it_to_the_queue() -> None:
+    """The response says the row is back in the queue, so it has to be there.
+
+    Ignored and uncategorized are both "no category", and only ``excluded_at`` tells
+    the queue which one it is looking at. Clearing the category alone left the row
+    excluded, so the call reported a return to a queue the row never reached.
+    """
+    db = make_session()
+    transaction, _ = seed_review_data(db)
+    service = CategorizationService(db=db)
+    service.exclude_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+    response = service.uncategorize_transaction(transaction_id=str(transaction.id))
+    db.commit()
+
+    stored = db.scalar(select(Transaction).where(Transaction.id == transaction.id))
+    queue = service.list_uncategorized_transactions(month="2026-06", limit=50, offset=0)
+
+    assert response["message"] == "Transaction returned to unknown queue"
+    assert stored is not None
+    assert stored.category_id is None
+    assert stored.excluded_at is None
+    assert queue["total_count"] == 1
+
+
 def test_categorization_service_categorizing_clears_exclusion() -> None:
     db = make_session()
     transaction, category = seed_review_data(db)

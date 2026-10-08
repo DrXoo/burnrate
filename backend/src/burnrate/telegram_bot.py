@@ -116,7 +116,10 @@ def main(settings: Settings | None = None) -> None:
         )
 
     client = TelegramClient(settings=settings)
-    router = TelegramCommandRouter(session_factory=SessionLocal)
+    router = TelegramCommandRouter(
+        session_factory=SessionLocal,
+        timezone_name=settings.app_timezone,
+    )
     logger.info("Starting telegram bot (authorized chats: %s)", len(allowed_chat_ids))
     try:
         run_polling(

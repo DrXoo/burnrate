@@ -9,6 +9,8 @@ from uuid import UUID
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
+from burnrate.db.dispositions import awaiting_categorization
+from burnrate.db.effective_date import effective_date, month_window, within_month
 from burnrate.db.models import (
     Account,
     CategorizationRule,
@@ -23,8 +25,10 @@ from burnrate.db.models import (
 class TransactionFilters:
     account_id: UUID | None = None
     category_id: UUID | None = None
-    month_start: date | None = None
-    month_end: date | None = None
+    # The half-open window as one value, so a half-specified month cannot be
+    # expressed. Two independent bounds let a caller set only the start and get an
+    # unfiltered query over all history instead of an error.
+    month: tuple[date, date] | None = None
     status: str | None = None
     categorized: bool | None = None
 
@@ -113,10 +117,9 @@ class LedgerService:
         base_query = self._transactions_query(filters=filters)
         total_count = self.db.scalar(select(func.count()).select_from(base_query.subquery())) or 0
 
-        effective_date = func.coalesce(Transaction.booking_date, Transaction.value_date)
         rows = self.db.execute(
             base_query
-            .order_by(effective_date.is_(None), effective_date.desc(), Transaction.created_at.desc())
+            .order_by(effective_date().desc(), Transaction.created_at.desc())
             .limit(limit)
             .offset(offset)
         ).all()
@@ -184,12 +187,10 @@ class LedgerService:
             parsed_category_id = UUID(category_id) if category_id else None
         except ValueError as exc:
             raise ValueError("Category id must be a valid UUID") from exc
-        month_start, month_end = self._parse_month(month) if month else (None, None)
         return TransactionFilters(
             account_id=parsed_account_id,
             category_id=parsed_category_id,
-            month_start=month_start,
-            month_end=month_end,
+            month=month_window(month) if month else None,
             status=status.strip().lower() if status else None,
             categorized=categorized,
         )
@@ -206,11 +207,9 @@ class LedgerService:
             query = query.where(Transaction.account_id == filters.account_id)
         if filters.category_id is not None:
             query = query.where(Transaction.category_id == filters.category_id)
-        effective_date = func.coalesce(Transaction.booking_date, Transaction.value_date)
-        if filters.month_start is not None:
-            query = query.where(effective_date >= filters.month_start)
-        if filters.month_end is not None:
-            query = query.where(effective_date < filters.month_end)
+        if filters.month is not None:
+            month_start, month_end = filters.month
+            query = query.where(within_month(month_start=month_start, month_end=month_end))
         if filters.status is not None:
             query = query.where(func.lower(Transaction.status) == filters.status)
         if filters.categorized is True:
@@ -219,20 +218,9 @@ class LedgerService:
             # The review/unknown queue is "needs attention": uncategorized AND not
             # already resolved by exclusion. Excluded rows still show in the full
             # ledger (categorized is None) so they can be restored.
-            query = query.where(Transaction.category_id.is_(None), Transaction.excluded_at.is_(None))
+            query = query.where(awaiting_categorization())
 
         return query
-
-    def _parse_month(self, value: str) -> tuple[date, date]:
-        try:
-            year_text, month_text = value.split("-", maxsplit=1)
-            month_start = date(int(year_text), int(month_text), 1)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Month must use YYYY-MM format") from exc
-
-        if month_start.month == 12:
-            return month_start, date(month_start.year + 1, 1, 1)
-        return month_start, date(month_start.year, month_start.month + 1, 1)
 
     def _serialize_account(
         self,

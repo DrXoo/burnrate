@@ -78,6 +78,19 @@ export async function detectApiBase(): Promise<string> {
     candidates.push(window.BURNRATE_API_BASE);
   }
 
+  // Same-origin first: in every deployed setup nginx proxies /api/v1 to the
+  // backend, so this needs no knowledge of the host's IP or port and is never
+  // subject to CORS. The :8000 candidates below are the `vite dev` fallback,
+  // where nothing is proxying — they only work if the origin is listed in
+  // APP_CORS_ORIGINS, so keep them last.
+  //
+  // There is deliberately no candidate for a non-local hostname on :8000. The
+  // backend port is published on 127.0.0.1 only, so such a candidate could never
+  // connect, and a firewall that drops rather than refuses would have stalled
+  // startup on the browser's full TCP timeout: this loop awaits each candidate
+  // with no deadline of its own.
+  candidates.push(`${window.location.origin}/api/v1`);
+
   const hostname = window.location.hostname;
   const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
   if (localHosts.has(hostname)) {
@@ -86,12 +99,6 @@ export async function detectApiBase(): Promise<string> {
       candidates.push("http://127.0.0.1:8000/api/v1");
     }
   }
-
-  if (window.location.port === "3000") {
-    candidates.push(`${window.location.protocol}//${hostname}:8000/api/v1`);
-  }
-
-  candidates.push(`${window.location.origin}/api/v1`);
 
   const errors: string[] = [];
   for (const candidate of dedupe(candidates)) {

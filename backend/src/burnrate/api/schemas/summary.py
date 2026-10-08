@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel
+
+from burnrate.domain.metrics import MetricStatus, SafeToSpendStatus
 
 
 class BudgetUsageResponse(BaseModel):
@@ -13,17 +13,28 @@ class BudgetUsageResponse(BaseModel):
     remaining_amount: str
     currency: str
     utilization_percent: float
-    status: Literal["on_track", "watch", "over"]
+    status: MetricStatus
     is_fixed: bool = False
 
 
 class SummaryResponse(BaseModel):
     month: str
+    # The month the owner is in, on the owner's own clock. A client compares the month
+    # it asked for against this to decide tense, rather than against a month of its own.
+    current_month: str
+    # Null when there is no allowance to report, which the status distinguishes from
+    # an allowance of zero: budgets exist, the month is current, they are used up.
+    safe_to_spend_today_amount: str | None
+    safe_to_spend_status: SafeToSpendStatus
+    fixed_overrun_amount: str
     current_balance_amount: str
     current_balance_currency: str | None
     monthly_spending_amount: str
+    pending_spend_amount: str
     monthly_income_amount: str
     net_cash_flow_amount: str
+    savings_rate_percent: float
+    savings_status: MetricStatus
     monthly_budget_amount: str
     budgeted_spending_amount: str
     unbudgeted_spending_amount: str

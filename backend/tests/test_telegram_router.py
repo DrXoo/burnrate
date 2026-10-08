@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -11,6 +12,7 @@ from burnrate.db.base import Base
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.telegram.formatters import UNKNOWN_COMMAND_TEXT
 from burnrate.telegram.router import TelegramCommandRouter
+from conftest import AHEAD_OF_UTC, BEHIND_UTC
 
 
 def make_session_factory() -> sessionmaker:
@@ -83,13 +85,17 @@ def seed(session_factory: sessionmaker) -> None:
     session.close()
 
 
-def make_router(*, now: datetime | None = None) -> TelegramCommandRouter:
+def make_router(*, now: datetime | None = None, timezone_name: str = "UTC") -> TelegramCommandRouter:
     factory = make_session_factory()
     seed(factory)
     # The seeded uncategorized transaction is dated June 2026, so default the test
     # clock there to keep the current-month /unknown default deterministic.
     clock = (lambda: now) if now is not None else (lambda: datetime(2026, 6, 15, tzinfo=timezone.utc))
-    return TelegramCommandRouter(session_factory=factory, clock=clock)
+    return TelegramCommandRouter(
+        session_factory=factory,
+        timezone_name=timezone_name,
+        clock=clock,
+    )
 
 
 def test_help_lists_commands() -> None:
@@ -155,3 +161,44 @@ def test_command_strips_bot_mention() -> None:
     text = make_router().handle("/summary@BurnRateBot 2026-06")
 
     assert "Summary for 2026-06" in text
+
+
+AHEAD_TZ, AHEAD_INSTANT, _ = AHEAD_OF_UTC
+BEHIND_TZ, BEHIND_INSTANT, _ = BEHIND_UTC
+
+# Which month a bare /unknown scopes to, as the owner's clock reads it. The only
+# uncategorized transaction the fixture seeds is dated June 2026, so each row below
+# flips if the month is derived from UTC instead -- the owner is shown last month's
+# leftovers, or told their queue is empty while it is not.
+#
+# timezone, instant, whether the June leftover is listed, what the owner is doing
+UNKNOWN_MONTH_EXAMPLES = [
+    (
+        AHEAD_TZ,
+        AHEAD_INSTANT,
+        False,
+        "asking in July, just after midnight, while UTC is still in June",
+    ),
+    (
+        BEHIND_TZ,
+        BEHIND_INSTANT,
+        True,
+        "asking on the last evening of June, while UTC has already turned",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("timezone_name", "instant", "lists_the_leftover", "_what_the_owner_is_doing"),
+    UNKNOWN_MONTH_EXAMPLES,
+)
+def test_unknown_scopes_to_the_month_the_owner_is_in(
+    timezone_name: str,
+    instant: datetime,
+    lists_the_leftover: bool,
+    _what_the_owner_is_doing: str,
+) -> None:
+    text = make_router(now=instant, timezone_name=timezone_name).handle("/unknown")
+
+    assert ("Coffee Shop" in text) is lists_the_leftover
+    assert ("No unknown transactions" in text) is not lists_the_leftover

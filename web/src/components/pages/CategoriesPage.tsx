@@ -13,12 +13,13 @@ import {
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
-import type { Budget, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
+import type { BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
 
 interface CategoriesPageProps {
   categories: Category[];
-  budgets: Budget[];
   summary: SummaryDashboard | null;
+  loading: boolean;
+  error: string | null;
   month: string;
   monthLabel: string;
   loadMonthTransactions: () => Promise<Transaction[]>;
@@ -27,6 +28,10 @@ interface CategoriesPageProps {
 
 interface CategoryStat {
   category: Category;
+  /** The month's budget row from the backend, when this category has one. Every
+      budget figure and the verdict are read off it, so this page and the dashboard
+      cannot disagree about the same category. */
+  usage: BudgetUsage | undefined;
   budget: number | null;
   spent: number;
   tone: Tone;
@@ -54,6 +59,32 @@ const statCard: CSSProperties = {
   padding: "13px 14px",
 };
 
+interface BudgetNotice {
+  text: string;
+  /** "alert" when the figures on screen cannot be trusted; "info" when the page is
+      merely reporting what it does not know yet. */
+  severity: "alert" | "info";
+}
+
+/** The one line above the list that says what state the month's budget figures are in,
+    or null when they need no explaining. */
+function budgetNotice(budgetsKnown: boolean, loading: boolean, error: string | null, monthLabel: string): BudgetNotice | null {
+  // The month's rows are on screen. A refresh that failed for this same month leaves
+  // them in place, so they are the right month's figures and merely old -- marked
+  // rather than withdrawn, because they are still the last figures the owner had and
+  // the toast that reported the failure has faded by the time they are read.
+  if (budgetsKnown) {
+    return error ? { text: `These budget figures may be out of date \u2014 ${error}`, severity: "alert" } : null;
+  }
+  if (loading) {
+    return { text: `Loading budgets for ${monthLabel}\u2026`, severity: "info" };
+  }
+  if (error) {
+    return { text: `Budget figures unavailable: ${error}`, severity: "alert" };
+  }
+  return { text: "Budget figures are unavailable for this month.", severity: "info" };
+}
+
 function num(value: string | null | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -61,8 +92,9 @@ function num(value: string | null | undefined): number {
 
 export function CategoriesPage({
   categories,
-  budgets,
   summary,
+  loading,
+  error,
   month,
   monthLabel,
   loadMonthTransactions,
@@ -89,9 +121,17 @@ export function CategoriesPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month]);
 
+  // The month's budget rows only exist in a summary *for that month*, and
+  // `useBurnRateData` withholds a payload fetched for any other month, so a null
+  // summary here means the month's budgets are unknown -- loading or failed. That is a
+  // third state, distinct from "this category has no budget this month", which is a
+  // payload that carries no row for it.
+  const budgetsKnown = summary !== null;
+
+  const notice = budgetNotice(budgetsKnown, loading, error, monthLabel);
+
   const stats = useMemo<CategoryStat[]>(() => {
     const usageById = new Map((summary?.budget_usage ?? []).map((usage) => [usage.category_id, usage]));
-    const budgetById = new Map(budgets.filter((budget) => budget.active).map((budget) => [budget.category_id, budget]));
     const ledgerCount: Record<string, number> = {};
     const ledgerTotal: Record<string, number> = {};
     for (const transaction of monthTxns) {
@@ -104,24 +144,22 @@ export function CategoriesPage({
 
     return categories.map((category) => {
       const usage = usageById.get(category.category_id);
-      const budgetRecord = budgetById.get(category.category_id);
-      const budget = usage ? num(usage.budget_amount) : budgetRecord ? num(budgetRecord.amount) : null;
       const ledgerSpent = ledgerTotal[category.category_id] ?? 0;
+      // Every budget active in the month being viewed has a usage row, spend or no
+      // spend, so no row means no budget for that month. A budget record that is
+      // active *now* says nothing about the month on screen, which is why it is not
+      // a fallback: it would print next month's amount beside this month's spend.
+      const budget = usage ? num(usage.budget_amount) : null;
       const spent = usage ? num(usage.spent_amount) : ledgerSpent;
 
-      let tone: Tone = "neutral";
-      if (category.type === "expense") {
-        if (usage) {
-          tone = usageTone(usage.status);
-        } else if (budget && budget > 0) {
-          tone = spent / budget > 1 ? "over" : spent / budget >= 0.85 ? "watch" : "good";
-        } else {
-          tone = "good";
-        }
-      }
+      // Only the backend bands a budget. With no budget row for the month being
+      // viewed there is no verdict to show, so the category reads neutral rather
+      // than this page inventing a threshold of its own.
+      const tone: Tone = category.type === "expense" && usage ? usageTone(usage.status) : "neutral";
 
       return {
         category,
+        usage,
         budget,
         spent,
         tone,
@@ -130,7 +168,7 @@ export function CategoriesPage({
         total: ledgerTotal[category.category_id] ?? 0,
       };
     });
-  }, [categories, budgets, summary, monthTxns]);
+  }, [categories, summary, monthTxns]);
 
   const selected = stats.find((stat) => stat.category.category_id === selectedId) ?? stats[0];
 
@@ -165,6 +203,22 @@ export function CategoriesPage({
           </span>
         </div>
 
+        {notice ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: "9px 11px",
+              borderRadius: 10,
+              background: notice.severity === "alert" ? "var(--over-dim)" : "var(--bg-3)",
+              border: `1px solid ${notice.severity === "alert" ? "color-mix(in oklab, var(--over) 30%, transparent)" : "var(--line)"}`,
+              color: notice.severity === "alert" ? "var(--over)" : "var(--text-3)",
+              fontSize: 11.5,
+            }}
+          >
+            {notice.text}
+          </div>
+        ) : null}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {GROUPS.map((group) => {
             const groupStats = stats.filter((stat) => stat.category.type === group.type);
@@ -189,8 +243,8 @@ export function CategoriesPage({
                   {groupStats.map((stat) => {
                     const isSelected = selected?.category.category_id === stat.category.category_id;
                     const isExpense = stat.category.type === "expense";
-                    const barPct = stat.budget && stat.budget > 0 ? `${Math.min(100, (stat.spent / stat.budget) * 100).toFixed(0)}%` : "0%";
-                    const pctStr = stat.budget && stat.budget > 0 ? `${Math.round((stat.spent / stat.budget) * 100)}%` : "—";
+                    const barPct = stat.usage ? `${Math.min(100, Math.max(0, stat.usage.utilization_percent)).toFixed(0)}%` : "0%";
+                    const pctStr = stat.usage ? `${Math.round(stat.usage.utilization_percent)}%` : "—";
                     return (
                       <button
                         key={stat.category.category_id}
@@ -222,7 +276,7 @@ export function CategoriesPage({
                             </div>
                             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
                               <span className="num" style={{ fontSize: 11, color: "var(--text-3)" }}>
-                                {eurPlain(stat.spent)} / {stat.budget != null ? eurPlain(stat.budget) : "no budget"}
+                                {eurPlain(stat.spent)} / {stat.budget != null ? eurPlain(stat.budget) : budgetsKnown ? "no budget" : "—"}
                               </span>
                               <span style={{ fontSize: 11, fontWeight: 600, color: stat.color }}>{pctStr}</span>
                             </div>
@@ -306,7 +360,13 @@ export function CategoriesPage({
         }}
       >
         {selected ? (
-          <CategoryDetail selected={selected} monthLabel={monthLabel} count={selectedTxns.length} txns={selectedTxns} />
+          <CategoryDetail
+            selected={selected}
+            monthLabel={monthLabel}
+            budgetsKnown={budgetsKnown}
+            count={selectedTxns.length}
+            txns={selectedTxns}
+          />
         ) : (
           <div style={{ padding: 26, textAlign: "center", color: "var(--text-3)", fontSize: 13 }}>No categories yet.</div>
         )}
@@ -318,23 +378,27 @@ export function CategoriesPage({
 function CategoryDetail({
   selected,
   monthLabel,
+  budgetsKnown,
   count,
   txns,
 }: {
   selected: CategoryStat;
   monthLabel: string;
+  /** False while the month's budget rows are loading or failed: the panel then says
+      it does not know rather than reporting that no budget exists. */
+  budgetsKnown: boolean;
   count: number;
   txns: Transaction[];
 }) {
-  const { category, budget, spent, tone, color } = selected;
+  const { category, tone, color, usage } = selected;
   const isExpense = category.type === "expense";
-  const hasBudget = isExpense && budget != null && budget > 0;
-  const remaining = budget != null ? budget - spent : 0;
+  // A budget panel needs the month's budget row: that is where the figures come from.
+  const hasBudget = isExpense && usage != null;
   const badgeLabel = hasBudget ? TONE_LABEL[tone] : capitalize(category.type);
   const badgeColor = hasBudget ? color : "var(--text-2)";
   const badgeDim = hasBudget ? TONE_DIM[tone] : "var(--bg-4)";
-  const barPct = hasBudget ? `${Math.min(100, (spent / (budget as number)) * 100).toFixed(0)}%` : "0%";
-  const pctStr = hasBudget ? `${Math.round((spent / (budget as number)) * 100)}%` : "—";
+  const barPct = usage ? `${Math.min(100, Math.max(0, usage.utilization_percent)).toFixed(0)}%` : "0%";
+  const pctStr = usage ? `${Math.round(usage.utilization_percent)}%` : "—";
 
   return (
     <>
@@ -349,21 +413,21 @@ function CategoryDetail({
         {capitalize(category.type)} · {monthLabel} · <span className="num">{count}</span> transactions
       </div>
 
-      {hasBudget ? (
+      {hasBudget && usage ? (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Spent</div>
-              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(spent)}</div>
+              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(usage.spent_amount)}</div>
             </div>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Budget</div>
-              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(budget as number)}</div>
+              <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2 }}>{eurPlain(usage.budget_amount)}</div>
             </div>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 600 }}>Remaining</div>
               <div className="num" style={{ fontSize: 21, fontWeight: 600, marginTop: 2, color }}>
-                {remaining >= 0 ? eurPlain(remaining) : `−${eurPlain(-remaining)}`}
+                {eur(usage.remaining_amount)}
               </div>
             </div>
           </div>
@@ -394,7 +458,11 @@ function CategoryDetail({
             <div className="num" style={{ fontSize: 24, fontWeight: 600, marginTop: 2 }}>{eurPlain(selected.total)}</div>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text-3)", textAlign: "right" }}>
-            {isExpense ? "No budget set yet" : `${capitalize(category.type)} categories aren't budgeted`}
+            {!isExpense
+              ? `${capitalize(category.type)} categories aren't budgeted`
+              : budgetsKnown
+                ? "No budget set yet"
+                : "Budget status unavailable"}
           </div>
         </div>
       )}

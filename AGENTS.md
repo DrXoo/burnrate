@@ -132,6 +132,24 @@ Avoid:
 * Heavy mocking that hides broken behavior
 * Brittle tests tied to internal implementation details
 
+### Two failure modes worth naming
+
+**A test double that agrees with the code cannot disagree with it.** Phase 8 hit
+this four times. A fake bank client that returns its payload whatever window was
+requested makes a wrong fetch window unobservable — three review passes found that
+defect by reading and none by running it. A fake that only ever puts pending rows
+where the implementation expects them encodes the same assumption as the code, so
+no amount of mutation testing reaches the case. When a double answers a question
+the code never asked, make it answer the request instead: a second double that is
+strict about one dimension is cheaper than the bug.
+
+**Mutation-check every test that passes on arrival.** A test written after the
+code it covers, or one that goes green without a red step, has not been shown to
+have teeth. Break the implementation deliberately and confirm the test fails.
+Phase 8 found a real gap this way that no natural fixture could reach, and found
+one test that passed *under* its own mutation because the fixture's dates happened
+to work out against the month the suite ran in.
+
 If TDD is not practical for a specific change, explain why in the final summary and still add the highest-value tests possible.
 
 ---
@@ -248,3 +266,19 @@ A good BurnRate implementation change should feel:
 * Well-tested
 * Aligned with the documented architecture
 * Easy for the next person or agent to extend
+
+---
+
+## Agent skills
+
+### Development pipeline
+
+Features move from a roadmap phase through `/grill-with-docs` → `/to-spec` → `/to-tickets`, then `tdd` + `/code-review` per ticket, then a Definition-of-Done check, then `/distill-decisions`. See `docs/agents/pipeline.md`.
+
+### Issue tracker
+
+Issues and specs live as markdown files under `.scratch/<feature-slug>/`, versioned with the repo. They are scaffolding: once a feature ships, its durable decisions are promoted to `docs/adr/` and the directory is deleted. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` at the root plus `docs/adr/`, both created lazily by `/domain-modeling`. See `docs/agents/domain.md`.

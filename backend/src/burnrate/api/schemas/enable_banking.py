@@ -20,9 +20,12 @@ class StartAuthorizationResponse(BaseModel):
     valid_until: str
 
 
+# The bank session token is never exposed to clients: it is a live credential
+# for the bank API, the UI has no use for it, and shipping it would undo the
+# point of encrypting it at rest. `sync_session_id` below is our own sync-run id,
+# not a bank token.
 class AuthorizationCallbackResponse(BaseModel):
     connection_id: str
-    session_id: str
     session_status: str
     accounts_returned: int
     accounts_imported: int
@@ -33,7 +36,6 @@ class AuthorizationCallbackResponse(BaseModel):
 class ManualSyncResponse(BaseModel):
     connection_id: str
     sync_session_id: str
-    session_id: str | None = None
     session_status: str
     accounts_synced: int
     transactions_imported: int
@@ -49,7 +51,6 @@ class EnableBankingConnectionSummary(BaseModel):
     aspsp_name: str
     aspsp_country: str
     psu_type: str
-    session_id: str | None = None
     session_status: str | None = None
     active: bool
     authorized_at: str | None = None

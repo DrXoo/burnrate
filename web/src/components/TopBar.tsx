@@ -1,10 +1,13 @@
+import { MonthSelector } from "./MonthSelector";
 import { IconLogout, IconMenu, IconMoon } from "./icons";
 import type { HeroMode, Section, Theme } from "../lib/viewTypes";
 import { SECTION_TITLES } from "../lib/viewTypes";
 
 interface TopBarProps {
   section: Section;
+  month: string;
   monthLabel: string;
+  onSelectMonth: (month: string) => void;
   theme: Theme;
   heroMode: HeroMode;
   onToggleTheme: () => void;
@@ -13,7 +16,22 @@ interface TopBarProps {
   onLogout: () => void;
 }
 
-export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, onSetHeroMode, onToggleMenu, onLogout }: TopBarProps) {
+export function TopBar({
+  section,
+  month,
+  monthLabel,
+  onSelectMonth,
+  theme,
+  heroMode,
+  onToggleTheme,
+  onSetHeroMode,
+  onToggleMenu,
+  onLogout,
+}: TopBarProps) {
+  // A month means nothing on Settings, so neither the label nor the selector appears
+  // there: a control would imply the page responds to it.
+  const monthScoped = section !== "settings";
+
   return (
     <div
       className="br-topbar"
@@ -54,8 +72,30 @@ export function TopBar({ section, monthLabel, theme, heroMode, onToggleTheme, on
         <div className="num" style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}>
           {SECTION_TITLES[section]}
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-3)" }}>{monthLabel}</div>
+        {monthScoped ? (
+          // The label is the way back to the current month, which keeps that one action
+          // away from any month the owner has reached. "" is what asks for it, so the
+          // month comes from the backend rather than from a clock here.
+          <button
+            type="button"
+            title="Back to the current month"
+            onClick={() => onSelectMonth("")}
+            style={{
+              border: "none",
+              background: "none",
+              padding: 0,
+              font: "500 12.5px 'Hanken Grotesque', sans-serif",
+              color: "var(--text-3)",
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            {monthLabel}
+          </button>
+        ) : null}
       </div>
+
+      {monthScoped ? <MonthSelector month={month} onSelectMonth={onSelectMonth} /> : null}
 
       {section === "dashboard" ? (
         <div

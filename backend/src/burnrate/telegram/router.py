@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
 from burnrate.services.ledger_service import LedgerService
 from burnrate.services.summary_service import SummaryService
 from burnrate.telegram.formatters import (
@@ -32,9 +33,11 @@ class TelegramCommandRouter:
         self,
         *,
         session_factory: Callable[[], Session],
+        timezone_name: str = "UTC",
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._session_factory = session_factory
+        self._timezone_name = timezone_name
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def handle(self, text: str) -> str:
@@ -72,17 +75,30 @@ class TelegramCommandRouter:
         return HELP_TEXT
 
     def _summary(self, session: Session, argument: str | None) -> str:
-        payload = SummaryService(db=session).get_summary(month=argument)
+        payload = self._summary_service(session).get_summary(month=argument)
         return format_summary(payload)
 
     def _budgets(self, session: Session, argument: str | None) -> str:
-        payload = SummaryService(db=session).get_summary(month=argument)
+        payload = self._summary_service(session).get_summary(month=argument)
         return format_budgets(payload)
+
+    def _civil_month(self) -> str:
+        return civil_date(
+            timezone_name=self._timezone_name,
+            instant=self._clock(),
+        ).strftime("%Y-%m")
+
+    def _summary_service(self, session: Session) -> SummaryService:
+        return SummaryService(
+            db=session,
+            timezone_name=self._timezone_name,
+            clock=self._clock,
+        )
 
     def _unknown(self, session: Session, argument: str | None) -> str:
         # Scope to the current month by default -- last month's leftovers are no
         # longer actionable for the running month. An explicit YYYY-MM still works.
-        month = argument or self._clock().strftime("%Y-%m")
+        month = argument or self._civil_month()
         result = LedgerService(db=session).list_transactions(
             categorized=False,
             month=month,

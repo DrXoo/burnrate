@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -9,11 +10,58 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
+from burnrate.db.dispositions import awaiting_categorization, not_ignored
+from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
+from burnrate.domain.metrics import (
+    FixedCommitment,
+    MetricStatus,
+    MonthTense,
+    budget_usage_status,
+    fixed_overrun,
+    safe_to_spend_today,
+    savings_verdict,
+)
+
+
+COMMITTED_STATUSES = ("booked", "pending")
+"""The statuses that count as spend: the bank has settled it, or the owner committed it."""
+
+
+@dataclass(frozen=True)
+class SpendByStatus:
+    """Month-to-date spend, split by whether the bank has settled it.
+
+    The two halves stay separable from the query to the figure because pending
+    spend counts in the variable slice and nowhere else: a fixed commitment is
+    judged by its estimate until it settles, so a partial hold on a bill must not
+    reach the step projection, the fixed overrun or a fixed category's row. See
+    ``docs/adr/0003-pending-spend-is-load-bearing.md``.
+    """
+
+    booked: Decimal = Decimal("0.00")
+    pending: Decimal = Decimal("0.00")
+
+    @property
+    def total(self) -> Decimal:
+        """Everything committed, settled or not."""
+        return (self.booked + self.pending).quantize(Decimal("0.01"))
+
+
+NO_SPEND = SpendByStatus()
 
 
 @dataclass(frozen=True)
 class ActiveBudgetWindow:
+    """What one *category* has budgeted for the month being reported.
+
+    One per category, not one per ``Budget`` row: every figure derived from these
+    reads spend that is grouped by category, so a category holding two rows in one
+    month would have its commitment counted once per row. ``amount`` is therefore
+    the sum of that category's active estimates.
+    """
+
     category_id: UUID
     category_name: str
     amount: Decimal
@@ -22,8 +70,16 @@ class ActiveBudgetWindow:
 
 
 class SummaryService:
-    def __init__(self, *, db: Session) -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        timezone_name: str = "UTC",
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.db = db
+        self._timezone_name = timezone_name
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     def get_summary(
         self,
@@ -31,8 +87,12 @@ class SummaryService:
         month: str | None = None,
         today: date | None = None,
     ) -> dict[str, Any]:
-        reference_day = today or datetime.now(UTC).date()
-        month_start, month_end, month_value = self._resolve_month(month=month, reference_day=reference_day)
+        reference_day = today or civil_date(
+            timezone_name=self._timezone_name,
+            instant=self._clock(),
+        )
+        current_month = reference_day.strftime("%Y-%m")
+        month_start, month_end, month_value = self._resolve_month(month=month, current_month=current_month)
         days_in_month = (month_end - month_start).days
         days_elapsed = self._days_elapsed_in_month(
             month_start=month_start,
@@ -49,18 +109,56 @@ class SummaryService:
         active_budgets = self._get_active_budgets(month_start=month_start, month_end=month_end)
         monthly_budget = sum((budget.amount for budget in active_budgets), start=Decimal("0.00"))
 
-        monthly_spending = self._get_monthly_spending(month_start=month_start, month_end=month_end)
-        monthly_income = self._get_monthly_income(month_start=month_start, month_end=month_end)
-        # Net cash flow this month: what landed in income categories minus what left
-        # in expense categories. Transfers are excluded on both sides. Pure reporting
-        # of booked transactions -- it does not feed the projections.
-        net_cash_flow = (monthly_income - monthly_spending).quantize(Decimal("0.01"))
         spent_by_budget_category = self._get_budget_category_spend(
             month_start=month_start,
             month_end=month_end,
             category_ids=[budget.category_id for budget in active_budgets],
         )
-        budgeted_spending = sum(spent_by_budget_category.values(), start=Decimal("0.00"))
+        # One rule, two readers: the budgeted total and the per-category rows must
+        # count the same money, or the dashboard prints a figure its own rows
+        # contradict. A category is fixed when an active budget of its own says so.
+        fixed_category_ids = {budget.category_id for budget in active_budgets if budget.is_fixed}
+        fixed_spend_by_category = {
+            category_id: spent_by_budget_category.get(category_id, NO_SPEND)
+            for category_id in fixed_category_ids
+        }
+        fixed_booked_spend = sum(
+            (spend.booked for spend in fixed_spend_by_category.values()),
+            start=Decimal("0.00"),
+        )
+        fixed_pending_spend = sum(
+            (spend.pending for spend in fixed_spend_by_category.values()),
+            start=Decimal("0.00"),
+        )
+
+        # A hold on a fixed bill counts towards nothing until it books: the budgeted
+        # estimate already stands for the whole commitment, so counting a partial
+        # authorization on top would charge the owner for the same rent twice. It is
+        # taken out here, once, rather than at each figure that would otherwise have
+        # to remember to exclude it -- and taking it out of the month total is what
+        # keeps it from resurfacing as unbudgeted spend.
+        monthly_spend = self._get_monthly_spend(month_start=month_start, month_end=month_end)
+        monthly_spending = (monthly_spend.total - fixed_pending_spend).quantize(Decimal("0.01"))
+        # What the figures above counted but the bank has not settled, so a movement
+        # in them has a cause the owner can read. It discloses the pending spend that
+        # counted, which is why the hold removed from the month total is removed here
+        # too: monthly spending less this is what the bank has actually settled.
+        pending_spending = (monthly_spend.pending - fixed_pending_spend).quantize(Decimal("0.01"))
+        monthly_income = self._get_monthly_income(month_start=month_start, month_end=month_end)
+        # Net cash flow this month: what landed in income categories minus what left
+        # in expense categories. Transfers are excluded on both sides, and it feeds no
+        # projection. Spending counts committed money, pending included, while income
+        # stays booked-only -- a credit the bank has not settled is not money kept,
+        # and both halves of that asymmetry read in the cautious direction.
+        net_cash_flow = (monthly_income - monthly_spending).quantize(Decimal("0.01"))
+        savings = savings_verdict(net_cash_flow=net_cash_flow, income=monthly_income)
+        budgeted_spending = sum(
+            (
+                self._counted_spend(spend=spend, is_fixed=category_id in fixed_category_ids)
+                for category_id, spend in spent_by_budget_category.items()
+            ),
+            start=Decimal("0.00"),
+        )
         # Spend in categorized expense categories that have no budget. Together with
         # budgeted_spending this reconciles monthly_spending (= budgeted + unbudgeted),
         # so the dashboard's two spend figures no longer look like they disagree.
@@ -74,15 +172,14 @@ class SummaryService:
         # rent charge from inflating the burn rate and the projection.
         fixed_budgets = [budget for budget in active_budgets if budget.is_fixed]
         fixed_budget_total = sum((budget.amount for budget in fixed_budgets), start=Decimal("0.00"))
-        fixed_spent = sum(
-            (spent_by_budget_category.get(budget.category_id, Decimal("0.00")) for budget in fixed_budgets),
-            start=Decimal("0.00"),
-        )
+        # Booked fixed spend alone feeds the step projection, because the projection
+        # trusts actual spend over the estimate as soon as any spend exists and a
+        # partial hold would wreck it.
         fixed_projected = sum(
             (
                 self._project_fixed(
                     budget=budget,
-                    spent=spent_by_budget_category.get(budget.category_id, Decimal("0.00")),
+                    spent=fixed_spend_by_category[budget.category_id].booked,
                 )
                 for budget in fixed_budgets
             ),
@@ -90,9 +187,36 @@ class SummaryService:
         )
 
         # Everything else accrues day by day, so it keeps the pace-based projection.
+        # Both figures it is taken from already exclude a hold on a fixed bill, so
+        # only booked fixed spend is left to remove -- which is what keeps such a
+        # hold out of the variable slice, the one place it must never land.
         variable_budget_total = monthly_budget - fixed_budget_total
-        variable_spend = (monthly_spending - fixed_spent).quantize(Decimal("0.01"))
-        variable_budgeted_spend = (budgeted_spending - fixed_spent).quantize(Decimal("0.01"))
+        variable_spend = (monthly_spending - fixed_booked_spend).quantize(Decimal("0.01"))
+        variable_budgeted_spend = (budgeted_spending - fixed_booked_spend).quantize(Decimal("0.01"))
+
+        # What the owner may spend today. The overrun reads each fixed budget's booked
+        # spend, which is the same figure the step projection above trusts, so the two
+        # cannot disagree about what a fixed commitment has actually cost.
+        overrun = fixed_overrun(
+            commitments=[
+                FixedCommitment(
+                    budgeted=budget.amount,
+                    booked=fixed_spend_by_category[budget.category_id].booked,
+                )
+                for budget in fixed_budgets
+            ]
+        )
+        allowance = safe_to_spend_today(
+            variable_budget_total=variable_budget_total,
+            variable_budgeted_spend=variable_budgeted_spend,
+            fixed_overrun=overrun,
+            days_in_month=days_in_month,
+            days_elapsed=days_elapsed,
+            month_tense=self._month_tense(
+                month_start=month_start,
+                reference_day=reference_day,
+            ),
+        )
 
         # Burn rate reflects the *variable* daily pace only -- fixed lumps are excluded
         # so it captures controllable day-to-day spend. Expected burn is the planned
@@ -137,30 +261,40 @@ class SummaryService:
 
         projected_overspend = max(projected_budgeted_spend - monthly_budget, Decimal("0.00"))
 
-        budget_usage = [
-            self._serialize_budget_usage(
-                budget=budget,
-                spent_amount=spent_by_budget_category.get(budget.category_id, Decimal("0.00")),
-            )
-            for budget in sorted(
-                active_budgets,
-                key=lambda item: (
-                    self._budget_usage_sort_key(
-                        budget_amount=item.amount,
-                        spent_amount=spent_by_budget_category.get(item.category_id, Decimal("0.00")),
-                    ),
-                    item.category_name.lower(),
-                ),
-            )
-        ]
+        # Worst first, so the rows the owner must act on lead the list. Sorting the
+        # serialized rows rather than the budgets means the order is read off the
+        # same status and utilization the badges show, instead of deriving them twice.
+        budget_usage = sorted(
+            (
+                self._serialize_budget_usage(
+                    budget=budget,
+                    spend=spent_by_budget_category.get(budget.category_id, NO_SPEND),
+                )
+                for budget in active_budgets
+            ),
+            key=self._budget_usage_sort_key,
+        )
 
         return {
             "month": month_value,
+            # The month the owner is actually in, resolved through APP_TIMEZONE like
+            # every other civil date here. Reported so a client can tell a past month
+            # from a future one without a clock of its own: a browser deriving it from
+            # UTC disagrees with this for part of every month-end. It is the same value
+            # the month defaults to, so what is reported and what is served cannot
+            # disagree about which month is current.
+            "current_month": current_month,
+            "safe_to_spend_today_amount": self._format_optional_decimal(allowance.amount),
+            "safe_to_spend_status": allowance.status,
+            "fixed_overrun_amount": self._format_decimal(overrun),
             "current_balance_amount": self._format_decimal(calculation_balance),
             "current_balance_currency": calculation_currency,
             "monthly_spending_amount": self._format_decimal(monthly_spending),
+            "pending_spend_amount": self._format_decimal(pending_spending),
             "monthly_income_amount": self._format_decimal(monthly_income),
             "net_cash_flow_amount": self._format_decimal(net_cash_flow),
+            "savings_rate_percent": float(savings.rate_percent),
+            "savings_status": savings.status,
             "monthly_budget_amount": self._format_decimal(monthly_budget),
             "budgeted_spending_amount": self._format_decimal(budgeted_spending),
             "unbudgeted_spending_amount": self._format_decimal(unbudgeted_spending),
@@ -175,29 +309,24 @@ class SummaryService:
             "budget_usage": budget_usage,
         }
 
-    def _resolve_month(self, *, month: str | None, reference_day: date) -> tuple[date, date, str]:
-        if month is None:
-            month_value = reference_day.strftime("%Y-%m")
-            month_start = date(reference_day.year, reference_day.month, 1)
-        else:
-            month_start = self._parse_month(month)
-            month_value = month
-
-        if month_start.month == 12:
-            month_end = date(month_start.year + 1, 1, 1)
-        else:
-            month_end = date(month_start.year, month_start.month + 1, 1)
-
+    def _resolve_month(self, *, month: str | None, current_month: str) -> tuple[date, date, str]:
+        """Resolve the requested month, defaulting to the one the owner is in."""
+        month_value = month if month is not None else current_month
+        month_start, month_end = month_window(month_value)
         return month_start, month_end, month_value
 
-    def _parse_month(self, value: str) -> date:
-        try:
-            year_text, month_text = value.split("-", maxsplit=1)
-            month_start = date(int(year_text), int(month_text), 1)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Month must use YYYY-MM format") from exc
+    def _month_tense(self, *, month_start: date, reference_day: date) -> MonthTense:
+        """Where the month being reported sits relative to the owner's day.
 
-        return month_start
+        The comparison lives here because ``reference_day`` is resolved through
+        ``APP_TIMEZONE`` and only this side knows it. Every client reads the tense off
+        the status field instead of repeating this, which is the point of the split.
+        """
+        month_key = (month_start.year, month_start.month)
+        reference_key = (reference_day.year, reference_day.month)
+        if month_key == reference_key:
+            return "current"
+        return "closed" if month_key < reference_key else "not_started"
 
     def _days_elapsed_in_month(self, *, month_start: date, reference_day: date, days_in_month: int) -> int:
         month_key = (month_start.year, month_start.month)
@@ -231,29 +360,40 @@ class SummaryService:
             .join(Account, Account.id == Transaction.account_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
-                Transaction.category_id.is_(None),
-                Transaction.excluded_at.is_(None),
+                within_month(month_start=month_start, month_end=month_end),
+                awaiting_categorization(),
             )
         )
         return self.db.scalar(count_query) or 0
 
-    def _get_monthly_spending(self, *, month_start: date, month_end: date) -> Decimal:
-        total_amount = self.db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), Decimal("0.00")))
+    def _get_monthly_spend(self, *, month_start: date, month_end: date) -> SpendByStatus:
+        status = func.lower(Transaction.status)
+        rows = self.db.execute(
+            select(
+                status,
+                func.coalesce(func.sum(Transaction.amount), Decimal("0.00")),
+            )
             .select_from(Transaction)
             .join(Account, Account.id == Transaction.account_id)
             .join(Category, Category.id == Transaction.category_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
-                func.lower(Transaction.status) == "booked",
+                within_month(month_start=month_start, month_end=month_end),
+                status.in_(COMMITTED_STATUSES),
                 Category.type == "expense",
+                not_ignored(),
             )
-        ) or Decimal("0.00")
-        return (-Decimal(total_amount)).quantize(Decimal("0.01"))
+            .group_by(status)
+        ).all()
+
+        totals = {
+            row_status: (-Decimal(total_amount)).quantize(Decimal("0.01"))
+            for row_status, total_amount in rows
+        }
+        return SpendByStatus(
+            booked=totals.get("booked", Decimal("0.00")),
+            pending=totals.get("pending", Decimal("0.00")),
+        )
 
     def _get_monthly_income(self, *, month_start: date, month_end: date) -> Decimal:
         total_amount = self.db.scalar(
@@ -263,16 +403,31 @@ class SummaryService:
             .join(Category, Category.id == Transaction.category_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
+                within_month(month_start=month_start, month_end=month_end),
                 func.lower(Transaction.status) == "booked",
                 Category.type == "income",
+                not_ignored(),
             )
         ) or Decimal("0.00")
         # Income transactions are credits (positive amounts), so no sign flip.
         return Decimal(total_amount).quantize(Decimal("0.01"))
 
     def _get_active_budgets(self, *, month_start: date, month_end: date) -> list[ActiveBudgetWindow]:
+        """One budget window per category, with the month's estimates folded together.
+
+        A category can hold more than one ``Budget`` row overlapping a month, and the
+        spend every derived figure reads is grouped by category. Pairing each row with
+        it counted the whole commitment once per row: a Rent category budgeted 500.00
+        then 600.00 and charged exactly 1100.00 invented 1100.00 of fixed overrun,
+        which zeroed Safe to Spend Today and flagged the month ``over`` for an owner
+        on budget, added the step projection a second time, and printed two Rent rows
+        each claiming all of the spend.
+
+        Summing the estimates is the reading ``monthly_budget`` already takes of the
+        same rows, so the total and the rows beneath it cannot disagree. A category
+        with any fixed row counts as fixed, which is how the spend side has always
+        read it -- so which slice a category belongs to is decided once.
+        """
         rows = self.db.execute(
             select(Budget, Category.name)
             .join(Category, Category.id == Budget.category_id)
@@ -283,16 +438,25 @@ class SummaryService:
             .order_by(Category.name.asc(), Budget.active_from.desc(), Budget.created_at.desc())
         ).all()
 
-        return [
-            ActiveBudgetWindow(
-                category_id=budget.category_id,
-                category_name=category_name,
-                amount=budget.amount.quantize(Decimal("0.01")),
-                currency=budget.currency,
-                is_fixed=budget.is_fixed,
+        folded: dict[UUID, ActiveBudgetWindow] = {}
+        for budget, category_name in rows:
+            amount = budget.amount.quantize(Decimal("0.01"))
+            existing = folded.get(budget.category_id)
+            if existing is None:
+                folded[budget.category_id] = ActiveBudgetWindow(
+                    category_id=budget.category_id,
+                    category_name=category_name,
+                    amount=amount,
+                    currency=budget.currency,
+                    is_fixed=budget.is_fixed,
+                )
+                continue
+            folded[budget.category_id] = replace(
+                existing,
+                amount=(existing.amount + amount).quantize(Decimal("0.01")),
+                is_fixed=existing.is_fixed or budget.is_fixed,
             )
-            for budget, category_name in rows
-        ]
+        return list(folded.values())
 
     def _get_budget_category_spend(
         self,
@@ -300,42 +464,55 @@ class SummaryService:
         month_start: date,
         month_end: date,
         category_ids: list[UUID],
-    ) -> dict[UUID, Decimal]:
+    ) -> dict[UUID, SpendByStatus]:
         if not category_ids:
             return {}
 
+        status = func.lower(Transaction.status)
         rows = self.db.execute(
             select(
                 Transaction.category_id,
+                status,
                 func.coalesce(func.sum(Transaction.amount), Decimal("0.00")),
             )
             .select_from(Transaction)
             .join(Account, Account.id == Transaction.account_id)
             .where(
                 Account.included_in_calculations.is_(True),
-                Transaction.booking_date >= month_start,
-                Transaction.booking_date < month_end,
-                func.lower(Transaction.status) == "booked",
+                within_month(month_start=month_start, month_end=month_end),
+                status.in_(COMMITTED_STATUSES),
                 Transaction.category_id.in_(category_ids),
+                not_ignored(),
             )
-            .group_by(Transaction.category_id)
+            .group_by(Transaction.category_id, status)
         ).all()
 
+        booked: dict[UUID, Decimal] = {}
+        pending: dict[UUID, Decimal] = {}
+        for category_id, row_status, total_amount in rows:
+            if category_id is None:
+                continue
+            bucket = booked if row_status == "booked" else pending
+            bucket[category_id] = (-Decimal(total_amount)).quantize(Decimal("0.01"))
+
         return {
-            category_id: (-Decimal(total_amount)).quantize(Decimal("0.01"))
-            for category_id, total_amount in rows
-            if category_id is not None
+            category_id: SpendByStatus(
+                booked=booked.get(category_id, Decimal("0.00")),
+                pending=pending.get(category_id, Decimal("0.00")),
+            )
+            for category_id in booked.keys() | pending.keys()
         }
 
     def _serialize_budget_usage(
         self,
         *,
         budget: ActiveBudgetWindow,
-        spent_amount: Decimal,
+        spend: SpendByStatus,
     ) -> dict[str, Any]:
+        spent_amount = self._counted_spend(spend=spend, is_fixed=budget.is_fixed)
         remaining_amount = (budget.amount - spent_amount).quantize(Decimal("0.01"))
         utilization = (spent_amount / budget.amount * Decimal("100.0")).quantize(Decimal("0.1"))
-        status = self._budget_usage_status(remaining_amount=remaining_amount, utilization=utilization)
+        status = budget_usage_status(remaining_amount=remaining_amount, utilization_percent=utilization)
 
         return {
             "category_id": str(budget.category_id),
@@ -349,19 +526,19 @@ class SummaryService:
             "is_fixed": budget.is_fixed,
         }
 
-    def _budget_usage_sort_key(self, *, budget_amount: Decimal, spent_amount: Decimal) -> tuple[int, Decimal]:
-        remaining_amount = budget_amount - spent_amount
-        utilization = (spent_amount / budget_amount * Decimal("100.0")).quantize(Decimal("0.1"))
-        status = self._budget_usage_status(remaining_amount=remaining_amount, utilization=utilization)
-        priority = {"over": 0, "watch": 1, "on_track": 2}[status]
-        return priority, -utilization
+    def _counted_spend(self, *, spend: SpendByStatus, is_fixed: bool) -> Decimal:
+        """How much of a category's spend a budget-basis figure counts.
 
-    def _budget_usage_status(self, *, remaining_amount: Decimal, utilization: Decimal) -> str:
-        if remaining_amount < 0:
-            return "over"
-        if utilization >= Decimal("85.0"):
-            return "watch"
-        return "on_track"
+        A variable category counts pending spend; a fixed one does not, because a
+        hold on a bill is not the bill being paid and its row has to keep reading as
+        not yet paid. Both the rows and the totals beside them read this, so the two
+        cannot drift apart.
+        """
+        return spend.booked if is_fixed else spend.total
+
+    def _budget_usage_sort_key(self, row: dict[str, Any]) -> tuple[int, float, str]:
+        priority: dict[MetricStatus, int] = {"over": 0, "watch": 1, "on_track": 2}
+        return priority[row["status"]], -row["utilization_percent"], row["category_name"].lower()
 
     def _project_fixed(self, *, budget: ActiveBudgetWindow, spent: Decimal) -> Decimal:
         """Step projection for a fixed/lump budget (rent, utilities).
@@ -369,6 +546,10 @@ class SummaryService:
         Once any spend has booked in the category we trust the actual amount -- it can
         land over or under the budgeted estimate. Until the charge appears we assume it
         will cost the budgeted amount. Never rate-extrapolated.
+
+        ``spent`` must be the category's *booked* spend. A pending pre-authorization
+        is not the bill being paid, and passing it here would project a 900.00 rent as
+        the 1.00 the bank is holding.
         """
         if spent > 0:
             return spent.quantize(Decimal("0.01"))
@@ -379,7 +560,10 @@ class SummaryService:
     ) -> Decimal:
         """Straight linear extrapolation of spend to the full month (no budget prior)."""
         if days_elapsed <= 0:
-            return Decimal("0.00")
+            # Before the month begins there is no pace to extrapolate, so the committed
+            # spend is the whole of what can be said. Returning zero discarded it, which
+            # with no budget set leaves the owner nothing at all for that month.
+            return spend_to_date.quantize(Decimal("0.01"))
         if days_elapsed >= days_in_month:
             return spend_to_date.quantize(Decimal("0.01"))
         daily = spend_to_date / Decimal(days_elapsed)
@@ -400,8 +584,16 @@ class SummaryService:
         budget dominates (little signal); late in the month the observed pace does.
         """
         if days_elapsed <= 0:
-            # No signal yet: assume spending simply tracks the budget.
-            return budget_reference.quantize(Decimal("0.01"))
+            # No signal yet, so assume spending tracks the budget -- but never project
+            # below what the month already holds. That assumption was safe while a month
+            # that had not started could hold nothing; the Effective Date files a hold
+            # carrying a future value date in the month it falls due, so a future month
+            # can arrive already committed. Returning the budget reference alone claimed
+            # such a month landed on budget while the headline beside it showed the
+            # budget blown. A floor rather than a model: there is no pace to extrapolate
+            # from before the month begins, so refusing to go below the committed figure
+            # is the most that can honestly be said.
+            return max(spend_to_date, budget_reference).quantize(Decimal("0.01"))
         if days_elapsed >= days_in_month:
             return spend_to_date.quantize(Decimal("0.01"))
 
@@ -414,3 +606,9 @@ class SummaryService:
 
     def _format_decimal(self, value: Decimal) -> str:
         return format(value.quantize(Decimal("0.01")), ".2f")
+
+    def _format_optional_decimal(self, value: Decimal | None) -> str | None:
+        """A figure the owner may not have, kept distinct from one that is zero."""
+        if value is None:
+            return None
+        return self._format_decimal(value)

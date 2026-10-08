@@ -73,6 +73,7 @@ Notes:
 
 * PostgreSQL should use a named volume
 * Backups should be considered part of operational hardening later
+* **The session `TimeZone` must stay UTC**, which is PostgreSQL's default. Do not set `TZ` or `PGTZ` on this container. A transaction the bank dated neither way falls back to `date(imported_at)` for its month placement, and `date(timestamptz)` converts through the session timezone — so the same instant is 30 June under `UTC` and 1 July under `Europe/Madrid`, and undated charges would move between months silently. The test suite cannot catch this: SQLite has no timezone database and its `date()` reads the stored naive UTC wall clock, so the expression the tests exercise would not be the one that ships. See `docs/technical/domain.md` on Effective Date, and the docstring in `burnrate/db/effective_date.py`
 
 ---
 
@@ -89,6 +90,7 @@ Notes:
 
 * This service hosts the main application runtime
 * It should not depend on Telegram being present
+* It binds loopback and is reached only through `web`'s nginx, including for the Enable Banking callback. It runs with `--forwarded-allow-ips "*"`, which is safe *only* because that nginx overwrites `X-Forwarded-For`; see the Networking Model below and `docs/adr/0004-the-web-origin-is-the-only-origin.md`
 
 ---
 
@@ -99,11 +101,15 @@ Responsibilities:
 * Provide the primary user interface
 * Consume backend APIs
 * Guide the owner through bank linking, transaction review, budgeting, and summary views
+* Serve the SPA *and* proxy the backend under the same origin
 
 Notes:
 
-* This can be a separate frontend container
-* If the chosen stack allows it, it may later be served behind a reverse proxy
+* This is a separate frontend container, and it is the only service published
+* Its nginx proxies `/api/v1/` and `/enable_banking_items/` to `backend`, so the browser only ever talks to the origin it loaded the page from. This is not optional decoration: it is what keeps requests off the cross-origin path, and the Enable Banking callback reaches the handler only because the second location is proxied. See `docs/adr/0004-the-web-origin-is-the-only-origin.md`
+* `web/nginx.conf` is `COPY`ed into the image at build time, so a change to it needs an image rebuild, not a container restart
+* The config uses a variable `proxy_pass` with Docker's embedded resolver, so it requires a runtime that provides `127.0.0.11`. On anything other than Compose, every proxied request fails
+* An external TLS-terminating proxy in front of this one is still reasonable, and would route to `web` alone — see `reverse-proxy` below
 
 ---
 
@@ -143,13 +149,15 @@ Notes:
 Responsibilities:
 
 * Terminate HTTPS
-* Route traffic to `web` and `backend`
+* Route traffic to `web`
 * Optionally handle public exposure and hostnames
 
 Notes:
 
 * `Caddy` or `Nginx` would both be reasonable options
 * This may be omitted in local development
+* It routes to `web` only. `backend` is reached through `web`'s own nginx, and publishing it separately would reopen the cross-origin arrangement ADR-0004 closed
+* If one is added, its forwarded client address has to be trusted in `web/nginx.conf` explicitly. That file overwrites `X-Forwarded-For` rather than appending to it, so an upstream proxy's value is discarded by design
 
 ---
 
@@ -159,10 +167,9 @@ The logical service topology should look like this:
 
 ```mermaid
 flowchart TD
-    User[Browser User] --> Proxy[Reverse Proxy or Direct Access]
-    Proxy --> Web[Web Service]
-    Proxy --> Backend[Backend API]
-    Web --> Backend
+    User[Browser User] --> Proxy[Optional TLS Proxy or Direct Access]
+    Proxy --> Web[Web Service: SPA + API proxy]
+    Web --> Backend[Backend API]
     Backend --> Postgres[(PostgreSQL)]
     Worker[Sync Worker] --> Backend
     Worker --> Postgres
@@ -183,11 +190,22 @@ The Compose setup should use one internal application network by default.
 Recommended behavior:
 
 * `postgres` should not be publicly exposed by default
-* `backend` may expose an internal port and optionally a host port in development
-* `web` may expose a host port in development
+* `backend` binds loopback and must not be published on any interface
+* `web` publishes a host port, and is the only service that does
 * `sync-worker` should not expose any public port
 
-If a reverse proxy is used, it should be the only service directly exposed publicly.
+If an external reverse proxy is used, it should be the only service directly exposed publicly.
+
+Two of these are load-bearing for more than tidiness, and they cover different
+attacks. `backend`'s loopback bind is what stops the proxy being bypassed.
+`web/nginx.conf` overwriting `X-Forwarded-For` from `$remote_addr` is what stops
+it being spoofed *through* the proxy: uvicorn runs with
+`--forwarded-allow-ips "*"` and trusts the leftmost entry, so with the appending
+form a request supplied its own client address — and the login lockout and the
+Enable Banking rate limiter both key on it, which made unlimited password guesses
+and unlimited bank syncs available to anyone who could reach the published port.
+Publishing `backend` to get at the API directly removes the first guard and
+leaves the second doing nothing, because the request never passes through nginx.
 
 ---
 

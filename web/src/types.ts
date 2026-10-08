@@ -3,6 +3,16 @@ export type MatchField = "description" | "merchant_name" | "counterparty_name";
 export type MatchOperator = "contains" | "equals" | "starts_with" | "ends_with" | "regex";
 export type BudgetStatus = "active" | "scheduled" | "inactive";
 export type BudgetUsageStatus = "on_track" | "watch" | "over";
+/** Why the allowance reads as it does. The amount is null for the first three.
+
+    The two tenses are separate values because a caption needs to tell them apart, and
+    with one value this client derived the comparison itself off a UTC-derived month --
+    which read a month that had not started as a closed one. Read the tense off here. */
+export type SafeToSpendStatus =
+  | "no_budget"
+  | "month_closed"
+  | "month_not_started"
+  | BudgetUsageStatus;
 
 export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
 
@@ -11,7 +21,6 @@ export interface Connection {
   aspsp_name: string;
   aspsp_country: string;
   psu_type: string;
-  session_id: string | null;
   session_status: string | null;
   active: boolean;
   authorized_at: string | null;
@@ -45,7 +54,6 @@ export interface StartAuthorizationResult {
 export interface ManualSyncResult {
   connection_id: string;
   sync_session_id: string;
-  session_id: string | null;
   session_status: string;
   accounts_synced: number;
   transactions_imported: number;
@@ -136,11 +144,23 @@ export interface BudgetUsage {
 
 export interface SummaryDashboard {
   month: string;
+  // The month the owner is in, on the owner's own clock. Compared against `month` to
+  // decide a month's tense, because a month derived here from UTC disagrees with the
+  // backend's for part of every month-end.
+  current_month: string;
+  // Null when there is no allowance to report, which the status distinguishes from
+  // an allowance of zero: budgets exist, the month is current, they are used up.
+  safe_to_spend_today_amount: string | null;
+  safe_to_spend_status: SafeToSpendStatus;
+  fixed_overrun_amount: string;
+  pending_spend_amount: string;
   current_balance_amount: string;
   current_balance_currency: string | null;
   monthly_spending_amount: string;
   monthly_income_amount: string;
   net_cash_flow_amount: string;
+  savings_rate_percent: number;
+  savings_status: BudgetUsageStatus;
   monthly_budget_amount: string;
   budgeted_spending_amount: string;
   unbudgeted_spending_amount: string;

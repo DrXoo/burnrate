@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -8,12 +9,28 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
 from burnrate.db.models import Budget, Category
 
 
 class BudgetService:
-    def __init__(self, *, db: Session) -> None:
+    def __init__(
+        self,
+        *,
+        db: Session,
+        timezone_name: str = "UTC",
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self.db = db
+        self._timezone_name = timezone_name
+        self._clock = clock or (lambda: datetime.now(UTC))
+
+    def _civil_today(self) -> date:
+        """The owner's calendar day, which decides every budget's status.
+
+        The clock is injectable for the reason given in ``burnrate.clock``.
+        """
+        return civil_date(timezone_name=self._timezone_name, instant=self._clock())
 
     def list_budgets(self) -> list[dict[str, Any]]:
         rows = self.db.execute(
@@ -21,11 +38,13 @@ class BudgetService:
             .join(Category, Category.id == Budget.category_id)
             .order_by(Category.name.asc(), Budget.active_from.desc(), Budget.created_at.desc())
         ).all()
+        today = self._civil_today()
         return [
             self._serialize_budget(
                 budget=budget,
                 category_name=category_name,
                 category_type=category_type,
+                today=today,
             )
             for budget, category_name, category_type in rows
         ]
@@ -69,6 +88,7 @@ class BudgetService:
             budget=budget,
             category_name=category.name,
             category_type=category.type,
+            today=self._civil_today(),
         )
 
     def update_budget(
@@ -95,6 +115,7 @@ class BudgetService:
             budget=budget,
             category_name=category.name,
             category_type=category.type,
+            today=self._civil_today(),
         )
 
     def deactivate_budget(self, *, budget_id: str) -> dict[str, Any]:
@@ -105,18 +126,26 @@ class BudgetService:
         category = self.db.get(Category, budget.category_id)
         assert category is not None
 
-        today = datetime.now(UTC).date()
+        today = self._civil_today()
         if budget.active_from >= today:
             # A budget that has not actually started yet (starts today or later)
             # becomes inactive immediately rather than staying active for today.
             budget.active_to = budget.active_from - timedelta(days=1)
         else:
-            budget.active_to = today
+            # Yesterday, not today: cancelling means the budget stops, and a budget
+            # is month-granular on the way out as well as in. ``active_from`` must be
+            # a 1st, and ``_get_active_budgets`` counts a budget in full for any month
+            # it touches at all -- so recording *today* on the 1st of a month handed
+            # the whole amount to a month the owner had just cancelled in, while the
+            # budget list already read it as inactive. Ending it yesterday keeps the
+            # months the budget actually covered and gives away none that it did not.
+            budget.active_to = today - timedelta(days=1)
 
         return self._serialize_budget(
             budget=budget,
             category_name=category.name,
             category_type=category.type,
+            today=today,
         )
 
     def _serialize_budget(
@@ -125,8 +154,9 @@ class BudgetService:
         budget: Budget,
         category_name: str,
         category_type: str,
+        today: date,
     ) -> dict[str, Any]:
-        status = self._budget_status(budget)
+        status = self._budget_status(budget, today=today)
         return {
             "budget_id": str(budget.id),
             "category_id": str(budget.category_id),
@@ -175,8 +205,7 @@ class BudgetService:
             if budget.active_from <= new_end and active_from <= budget_end:
                 raise ValueError("Budget periods must not overlap for the same category")
 
-    def _budget_status(self, budget: Budget) -> str:
-        today = datetime.now(UTC).date()
+    def _budget_status(self, budget: Budget, *, today: date) -> str:
         if budget.active_to is not None and budget.active_to < budget.active_from:
             return "inactive"
         if today < budget.active_from:

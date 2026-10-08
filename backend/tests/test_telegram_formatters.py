@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from burnrate.telegram.formatters import (
+    HELP_TEXT,
     format_budgets,
     format_expiry_alert,
     format_reconnect_alert,
@@ -15,6 +18,8 @@ from burnrate.telegram.formatters import (
 def make_summary(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "month": "2026-06",
+        "safe_to_spend_today_amount": "80.00",
+        "safe_to_spend_status": "on_track",
         "current_balance_amount": "500.00",
         "current_balance_currency": "EUR",
         "monthly_spending_amount": "120.00",
@@ -31,6 +36,80 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+def first_money_line(text: str) -> str:
+    """The first line of the summary carrying a figure, whatever header precedes it."""
+    return next(line for line in text.splitlines() if "EUR" in line)
+
+
+def allowance_line(text: str) -> str:
+    return next(line for line in text.splitlines() if "Safe to spend today" in line)
+
+
+def test_format_summary_opens_with_the_allowance() -> None:
+    text = format_summary(
+        make_summary(safe_to_spend_today_amount="7.19", safe_to_spend_status="on_track")
+    )
+
+    assert first_money_line(text) == "🟢 Safe to spend today: 7.19 EUR"
+
+
+def test_format_summary_prompts_for_a_budget_when_there_is_no_allowance() -> None:
+    text = format_summary(
+        make_summary(
+            safe_to_spend_today_amount=None,
+            safe_to_spend_status="no_budget",
+            monthly_budget_amount="0.00",
+        )
+    )
+
+    assert allowance_line(text) == "⚪ Safe to spend today: set a monthly budget to get a daily number"
+    assert "None" not in text
+    assert "0.00" not in allowance_line(text)
+
+
+@pytest.mark.parametrize(
+    ("month", "status"),
+    [("2026-05", "month_closed"), ("2026-07", "month_not_started")],
+)
+def test_format_summary_marks_the_allowance_undefined_outside_the_current_month(
+    month: str,
+    status: str,
+) -> None:
+    # Both tenses say the same thing here: the header carries which one it is, and this
+    # line only says why there is no number. The month and the status are paired
+    # coherently -- May cannot be the month that has not started yet.
+    text = format_summary(
+        make_summary(
+            month=month,
+            safe_to_spend_today_amount=None,
+            safe_to_spend_status=status,
+        )
+    )
+
+    assert allowance_line(text) == "⚪ Safe to spend today: only for the current month"
+    assert "None" not in text
+    assert "Budget left: 80.00 EUR" in text
+
+
+def test_format_summary_colours_the_allowance_by_its_status() -> None:
+    def line(status: str) -> str:
+        return allowance_line(
+            format_summary(
+                make_summary(safe_to_spend_today_amount="12.00", safe_to_spend_status=status)
+            )
+        )
+
+    assert line("on_track") == "🟢 Safe to spend today: 12.00 EUR"
+    assert line("watch") == "🟡 Safe to spend today: 12.00 EUR"
+    assert line("over") == "🔴 Safe to spend today: 12.00 EUR"
+
+
+def test_help_text_describes_what_the_summary_leads_with() -> None:
+    summary_line = next(line for line in HELP_TEXT.splitlines() if line.startswith("/summary"))
+
+    assert summary_line == "/summary [YYYY-MM] — what you can spend today, plus the month so far"
 
 
 def test_format_summary_includes_core_metrics_and_budget() -> None:
@@ -245,3 +324,105 @@ def test_format_unknown_handles_empty_queue() -> None:
     text = format_unknown({"total_count": 0, "transactions": []})
 
     assert "No unknown transactions" in text
+
+
+def header(text: str) -> str:
+    return text.splitlines()[0]
+
+
+# The month's tense, named in the first line, in the same words the dashboard's badge
+# uses -- "Month closed" and "Not started yet". The bot and the page describe the same
+# payload, so an owner who reads both should not have to reconcile two vocabularies.
+#
+# status, the header it earns, what the owner typed
+TENSE_HEADER_EXAMPLES = [
+    ("month_closed", "📊 Summary for 2026-05 · month closed", "/summary 2026-05 in June"),
+    ("month_not_started", "📊 Summary for 2026-07 · not started yet", "/summary 2026-07 in June"),
+]
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_header", "_what_the_owner_typed"),
+    TENSE_HEADER_EXAMPLES,
+)
+def test_format_summary_names_the_months_tense_in_its_first_line(
+    status: str,
+    expected_header: str,
+    _what_the_owner_typed: str,
+) -> None:
+    month = "2026-05" if status == "month_closed" else "2026-07"
+    text = format_summary(
+        make_summary(
+            month=month,
+            safe_to_spend_today_amount=None,
+            safe_to_spend_status=status,
+        )
+    )
+
+    assert header(text) == expected_header
+
+
+def test_format_summary_leaves_the_current_months_header_alone() -> None:
+    text = format_summary(make_summary())
+
+    assert header(text) == "📊 Summary for 2026-06"
+
+
+def future_month_summary() -> dict[str, Any]:
+    """July asked for in June: an 80.00 standing order due, against a 400.00 budget.
+
+    Nothing has elapsed, so the figures that describe progress have nothing to describe.
+    What the month does have is a plan and the spend already committed to it.
+    """
+    return make_summary(
+        month="2026-07",
+        safe_to_spend_today_amount=None,
+        safe_to_spend_status="month_not_started",
+        monthly_spending_amount="80.00",
+        monthly_budget_amount="400.00",
+        money_left_amount="320.00",
+        average_daily_spend_amount="0.00",
+        expected_daily_spend_amount="12.90",
+        projected_month_end_spend_amount="400.00",
+        days_elapsed=0,
+        days_in_month=31,
+    )
+
+
+def test_format_summary_does_not_report_progress_for_a_month_that_has_not_started() -> None:
+    """A month with no elapsed days has no pace, no usage and no outcome to project.
+
+    It printed all three: a used-budget bar, an average over 0/31 days with a planned
+    pace beside it, and a month-end projection -- while the dashboard captioned the
+    identical payload "Not started yet". The plan and what is already committed to it
+    stay, because those are the two things the month really has.
+    """
+    text = format_summary(future_month_summary())
+
+    assert "% used" not in text
+    assert "Avg/day" not in text
+    assert "days)" not in text
+    assert "Projected" not in text
+    # What the month does have.
+    assert "🎯 Budget: 400.00 EUR" in text
+    assert "✅ Budget left: 320.00 EUR" in text
+    assert "💸 Spent: 80.00 EUR" in text
+
+
+def test_format_summary_still_reports_progress_for_a_month_that_has_closed() -> None:
+    """A closed month elapsed in full, so its pace and usage are an outcome.
+
+    Only the not-started case loses them. Asserted so the suppression cannot quietly
+    widen to every month the owner is not in.
+    """
+    text = format_summary(
+        make_summary(
+            month="2026-05",
+            safe_to_spend_today_amount=None,
+            safe_to_spend_status="month_closed",
+        )
+    )
+
+    assert "% used" in text
+    assert "⏱ Avg/day: 4.00 EUR (30/30 days)" in text
+    assert "🔮 Projected: 120.00 EUR" in text

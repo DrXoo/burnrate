@@ -270,3 +270,51 @@ def test_ledger_service_rejects_invalid_month_format() -> None:
         assert str(exc) == "Month must use YYYY-MM format"
     else:
         raise AssertionError("Expected invalid month format to raise ValueError")
+
+
+def test_ledger_service_puts_an_undated_pending_charge_in_the_review_queue() -> None:
+    db = make_session()
+    primary_account, _ = seed_ledger_data(db)
+    # Neither date supplied, so the month filter has nothing but the import day to
+    # go on. Without it the charge sits in no month and the owner is never told
+    # there is anything to review.
+    db.add(
+        Transaction(
+            account_id=primary_account.id,
+            enable_banking_transaction_id="tx-undated-pending",
+            booking_date=None,
+            value_date=None,
+            amount=Decimal("-18.50"),
+            currency="EUR",
+            description="Card authorization",
+            merchant_name="Bar",
+            counterparty_name=None,
+            direction="debit",
+            status="pending",
+            category_id=None,
+            matched_rule_id=None,
+            raw_payload={"source": "test"},
+            imported_at=datetime(2026, 6, 19, 21, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.commit()
+    service = LedgerService(db=db)
+
+    queue = service.list_transactions(
+        account_id=str(primary_account.id),
+        month="2026-06",
+        categorized=False,
+        limit=10,
+        offset=0,
+    )
+    count = service.get_uncategorized_transaction_count(
+        account_id=str(primary_account.id),
+        month="2026-06",
+    )
+
+    # Beside the seeded Coffee shop, which the queue already surfaced.
+    assert sorted(row["description"] for row in queue["transactions"]) == [
+        "Card authorization",
+        "Coffee shop",
+    ]
+    assert count == 2

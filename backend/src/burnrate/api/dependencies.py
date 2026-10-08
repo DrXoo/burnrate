@@ -159,11 +159,13 @@ def get_rules_service(
 
 def get_budget_service(
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> BudgetService:
-    return BudgetService(db=db)
+    return BudgetService(db=db, timezone_name=settings.app_timezone)
 
 
 def get_summary_service(
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> SummaryService:
-    return SummaryService(db=db)
+    return SummaryService(db=db, timezone_name=settings.app_timezone)

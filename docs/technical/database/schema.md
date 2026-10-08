@@ -167,6 +167,7 @@ Suggested columns:
 * `status` TEXT not null
 * `category_id` UUID
 * `matched_rule_id` UUID
+* `excluded_at` TIMESTAMPTZ
 * `raw_payload` JSONB
 * `imported_at` TIMESTAMPTZ not null
 * `created_at` TIMESTAMPTZ not null
@@ -191,6 +192,25 @@ Notes:
 
 * `raw_payload` is useful for traceability and future parser improvements.
 * `status` should support values such as `pending`, `booked`, `unknown`, and `ignored`.
+* `status = 'ignored'` and `excluded_at` are **different things that share a word**.
+  The status is the provider's: the import writes it from the Enable Banking codes
+  `CNCL` and `RJCT`, meaning the bank cancelled or rejected the payment. `excluded_at`
+  is the owner's decision to exclude a row from every metric -- the Ignored
+  disposition in `GLOSSARY.md`, which calls the status Cancelled to keep the two
+  apart. No query should test one to get the other; the predicates live in
+  `burnrate/db/dispositions.py`.
+* Month placement does **not** read `booking_date` directly. Every month-windowed
+  query compares the effective date -- `coalesce(booking_date, value_date,
+  date(imported_at))` -- so that a pending row with no booking date still belongs
+  to a month. See `burnrate/db/effective_date.py` and the Transaction section of
+  `docs/technical/domain.md`.
+* That makes the window non-sargable, so the `booking_date` indexes above no
+  longer serve it and those queries plan as sequential scans. Deliberate for now:
+  single-owner volumes make the difference immeasurable (cost 38 to 84 over 487
+  rows), and `AGENTS.md` ranks performance last. The fix when it is needed is an
+  expression index on the coalesce, or the stored `effective_date` column that
+  Phase 8 deferred because it needs a backfill -- the latter restores plain
+  indexing and is the better end state.
 * The first version can stay coupled to Enable Banking transaction identifiers.
 
 ---
@@ -285,6 +305,18 @@ Notes:
 
 * For the first version, `period_type` is expected to be `monthly`.
 * The total monthly budget is derived by summing active category budgets.
+* **The window is month-granular at both ends, and the counting rule is why.** A
+  budget is counted in full for any month its `[active_from, active_to]` window
+  touches at all — there is no proration — so a window edge landing one day inside a
+  month hands that month the whole amount. `active_from` is therefore required to be
+  a 1st, and `active_to` must be written as the last day a month the budget really
+  covered: cancelling a budget records *yesterday*, not today, or cancelling on the
+  1st would give the new month a budget the owner had just switched off. An open
+  window (`active_to` NULL) is the normal state and rolls forward indefinitely, which
+  is why nothing asks the owner to close a month; changing an amount from a given
+  month creates the next row and closes the previous one automatically. Proration is
+  the alternative and was weighed and deferred; see
+  `docs/adr/0005-budget-windows-are-month-granular.md`.
 
 ---
 

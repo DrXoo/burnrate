@@ -54,10 +54,10 @@ The initial implementation scaffold uses:
 * Backend: `FastAPI`
 * Database: `PostgreSQL`
 * Migrations: `Alembic`
-* Tests: `pytest`
+* Tests: `pytest` for the backend, `Vitest` for `web/` (`npm test`)
 * Runtime: `Docker Compose`
 
-The `web` service is currently a lightweight placeholder so the deployment shape stays aligned with the architecture while the backend and integration work are built first.
+The `web` service is a React single-page app served by nginx, which proxies `/api/v1` to the backend. It is a presentation client with no financial logic of its own: every threshold, verdict and month is read from a backend field.
 
 ## Access & Login
 
@@ -136,7 +136,7 @@ To enable it:
 
 Messages from any chat id not on the allow-list are ignored. Available commands:
 
-* `/summary [YYYY-MM]` — money left, spending, burn rate, and runway
+* `/summary [YYYY-MM]` — what you can spend today, then balance, spending, budget, and burn rate
 * `/budgets [YYYY-MM]` — budget status per category
 * `/unknown` — transactions still waiting to be categorized
 * `/help` — list commands

@@ -7,7 +7,7 @@ HELP_TEXT = "\n".join(
     [
         "BurnRate bot — read-only spending visibility.",
         "",
-        "/summary [YYYY-MM] — budget left, spending, and burn rate",
+        "/summary [YYYY-MM] — what you can spend today, plus the month so far",
         "/budgets [YYYY-MM] — budget status per category",
         "/unknown [YYYY-MM] — transactions still waiting to be categorized (this month)",
         "/help — show this message",
@@ -26,11 +26,53 @@ def _money(amount: str, currency: str | None) -> str:
     return f"{amount}{suffix}"
 
 
+def _allowance_line(payload: dict[str, Any], currency: str | None) -> str:
+    """The headline: what the owner may spend today, read off the backend's status.
+
+    The icon is the same status vocabulary the budget rows use, so a colour means
+    the same thing everywhere the bot prints one.
+    """
+    status = payload["safe_to_spend_status"]
+    if status == "no_budget":
+        # No zero here: "0.00" would claim the owner may spend nothing, which is a
+        # different and untrue thing to say. Tell them what to do instead.
+        return "⚪ Safe to spend today: set a monthly budget to get a daily number"
+    if status in {"month_closed", "month_not_started"}:
+        # "Today" is not in the month being asked about. The budget-left line below
+        # already reports how that month stands, so this line only says why the
+        # allowance is absent.
+        #
+        # The two tenses are deliberately rendered alike *here* and are available to be
+        # told apart: the lines under this one still describe a month that has not begun
+        # as if it were in progress -- a used-budget bar, a pace over zero elapsed days,
+        # a projection. Fixing that is ticket 17, and it now reads this status rather
+        # than deriving the tense from a clock of the bot's own.
+        return "⚪ Safe to spend today: only for the current month"
+    icon = _BUDGET_STATUS_ICONS[status]
+    return f"{icon} Safe to spend today: {_money(payload['safe_to_spend_today_amount'], currency)}"
+
+
+_TENSE_SUFFIXES = {
+    "month_closed": " · month closed",
+    "month_not_started": " · not started yet",
+}
+"""The month's tense, in the words the dashboard's badge uses.
+
+Taken from the status rather than from a clock of the bot's own, which is why the status
+names the tense at all -- see ``docs/adr/0002-safe-to-spend-today-definition.md``. The
+wording matches the page deliberately: an owner who reads both should not have to
+reconcile two vocabularies for the same payload.
+"""
+
+
 def format_summary(payload: dict[str, Any]) -> str:
     currency = payload["current_balance_currency"]
+    tense = _TENSE_SUFFIXES.get(payload["safe_to_spend_status"], "")
     lines = [
-        f"📊 Summary for {payload['month']}",
+        f"📊 Summary for {payload['month']}{tense}",
         "━━━━━━━━━━━━━━━━━━",
+        "",
+        _allowance_line(payload, currency),
         "",
         f"💰 Balance: {_money(payload['current_balance_amount'], currency)}",
         "",
@@ -45,11 +87,23 @@ def format_summary(payload: dict[str, Any]) -> str:
         lines.append(f"💵 Income: {_money(payload['monthly_income_amount'], currency)}")
         lines.append(f"{net_icon} Net: {_money(payload['net_cash_flow_amount'], currency)}")
 
+    # A month that has not started has no elapsed day, so every figure that describes
+    # progress has nothing to describe: the usage bar reads 20% used of a month nobody
+    # has lived, the average divides by zero days, and the projection presents a plan as
+    # an expected outcome. The budget and what is already committed to it survive,
+    # because those are the two things such a month really has -- a standing order
+    # carrying a future value date is filed there by its Effective Date.
+    reports_progress = payload["safe_to_spend_status"] != "month_not_started"
+
     if Decimal(payload["monthly_budget_amount"]) > 0:
         lines.append("")
         lines.append(f"🎯 Budget: {_money(payload['monthly_budget_amount'], currency)}")
         lines.append(f"✅ Budget left: {_money(payload['money_left_amount'], currency)}")
-        lines.append(f"   {_budget_bar(payload)}")
+        if reports_progress:
+            lines.append(f"   {_budget_bar(payload)}")
+
+    if not reports_progress:
+        return "\n".join(lines)
 
     lines.append("")
     # Burn rate is the variable daily pace (fixed lump payments excluded). When a

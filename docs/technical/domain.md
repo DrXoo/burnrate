@@ -54,6 +54,26 @@ Suggested attributes:
 
 `Booking date` and `value date` should remain distinct when the provider supplies both.
 
+`Effective date` is the date that places a transaction in a month: its booking
+date, or its value date, or the day it was imported, in that order. It is
+resolved in query rather than stored, so every month-windowed figure asks one
+shared expression (`burnrate/db/effective_date.py`) instead of reading a date
+column directly.
+
+Booking date stays first in that chain so no figure already reported to the
+owner is restated; the fallbacks only reach rows a window on booking date could
+not see at all. Pending transactions are the reason the chain exists: the
+provider has no booking date for them yet, and a null booking date satisfies no
+month comparison in SQL, so such a row belonged to no month and reached no
+review queue. The import date is a last resort for a row the provider dated not
+at all, and it resolves on the *database session's* calendar day rather than the
+owner's -- SQL has no portable timezone conversion, so a charge imported within
+hours of a month boundary can land in the adjacent month until it books. That the
+day is UTC is a deployment precondition, not a property of the expression:
+PostgreSQL defaults the session to UTC, and setting `TZ` or `PGTZ` on the database
+container would silently move undated charges between months with no test able to
+catch it. See the docstring in `db/effective_date.py`.
+
 `Provider transaction id` should be unique per provider when reliably available.
 
 Suggested statuses:
@@ -64,6 +84,32 @@ Suggested statuses:
 * Ignored
 
 Pending and booked transactions should be stored in the same transaction model, differentiated by status.
+
+`Ignored` in that list is the *provider's* status, written from the Enable Banking
+codes `CNCL` and `RJCT` for a payment the bank cancelled or rejected. The owner's
+decision to exclude a transaction from every metric is a separate thing in a
+separate column, `excluded_at`, and the two share a word by accident. `GLOSSARY.md`
+resolves the clash in language -- the status is **Cancelled**, the disposition is
+**Ignored** -- rather than in the schema, which would need a migration and a
+backfill for no behavioural gain. Nothing should test one to get the other.
+
+The owner's exclusion is a decision, so it outlives the sync that re-imports the
+transaction. Two consequences, both stated in `burnrate/db/dispositions.py` rather
+than at each call site:
+
+* The categorization rules own a row only while it holds no category *and* carries
+  no exclusion. An Ignored row holds no category either, so a bare "has no
+  category" test reads the owner's decision as an absence of one and hands the
+  category back -- returning the money to every figure while the row still reads as
+  excluded.
+* Every spend and income figure states the exclusion. It used to come for free,
+  because excluding a row cleared its category too and rows with no category fell
+  out of those queries anyway -- by a join on the category table in two of them and
+  by an `IN` on category ids in the third. That made the definition a consequence of
+  how three queries happened to be shaped.
+
+Only the owner lifts it: by categorizing the transaction, by restoring it to the
+review queue, or by making a categorization rule from it.
 
 ---
 
@@ -134,6 +180,8 @@ For the first version, monthly budgets are sufficient.
 
 Budgets should be defined per category.
 
+A category can hold more than one budget row overlapping a single month, so a month's commitment for a category is the sum of its active rows, and the category counts as fixed if any of them is. Every budget-basis figure is derived from that per-category fold rather than from the rows themselves, because the spend it is compared against is grouped per category: pairing each row with it counts the commitment once per row — inventing a fixed overrun for an owner who is exactly on budget, adding the step projection twice, and printing the same category twice with each row claiming all of its spend.
+
 There is no need for a separate global monthly budget entity in the first version, because the overall budget can be derived as the sum of all active category budgets.
 
 ---
@@ -172,6 +220,35 @@ The sum of expense transactions within the current calendar month.
 
 Income transactions should not be mixed into this metric.
 
+Both booked and pending transactions count, because a pending charge is money
+already committed. The pending share is reported alongside as its own figure, so
+a movement in the metrics has a cause the owner can point at even before the
+charge appears as a settled transaction.
+
+---
+
+### Pending Spend
+
+The share of the month's spending the provider has authorized but not settled.
+
+It counts in the variable slice only: the daily pace, the variable projection,
+and the allowance that draws on them. A fixed category is judged by its budgeted
+estimate until a charge books, so a partial hold on a scheduled bill counts
+towards no figure at all -- not the step projection, not the fixed overrun, not
+monthly spending, and not the month's budget -- and the category's row keeps
+reading as not yet paid.
+
+The derivation order is what makes that hold stay out, and the obvious order gets
+it wrong: a hold on a fixed bill has to leave the month total *before* the
+variable slice is taken out of it, because the variable slice removes only booked
+fixed spend. Subtracting booked fixed spend from a total that still counted the
+hold would route it straight into the variable slice -- the one place it must
+never land. Each budget-basis figure then counts what the per-category rows
+count, so the total and the rows beside it cannot disagree.
+
+The asymmetry is deliberate and should not be reconciled into consistency. See
+`docs/adr/0003-pending-spend-is-load-bearing.md`.
+
 ---
 
 ### Money Left
@@ -201,7 +278,10 @@ BurnRate should preserve the following invariants:
 * A transaction must belong to exactly one account
 * A transaction may have zero or one assigned category
 * Unknown transactions are uncategorized transactions that require review
+* Every transaction belongs to exactly one month, resolved by its effective date
 * Transfer categories should not inflate spending metrics
+* Budget-basis figures are derived per category, never per budget row: a category's monthly commitment is the sum of its active budget rows
+* Pending transactions count as spend in the variable slice only, while the fixed slice is judged by its budgeted estimate until a charge books
 * Income should remain a minimal classification concern and should not drive budget reporting in the first version
 * Runway should only use balances from accounts explicitly included for runway calculations
 * Imported provider identifiers should support idempotent re-sync behavior
