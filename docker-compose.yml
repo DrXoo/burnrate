@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: burnrate-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -24,6 +25,7 @@ services:
     build:
       context: ./backend
     container_name: burnrate-backend
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -46,6 +48,7 @@ services:
     build:
       context: ./backend
     container_name: burnrate-sync-worker
+    restart: unless-stopped
     command: ["python", "-m", "burnrate.worker"]
     env_file:
       - .env
@@ -61,6 +64,12 @@ services:
     build:
       context: ./backend
     container_name: burnrate-telegram-bot
+    # The bot polls a third-party API forever, so it is the service most likely
+    # to be killed by something transient -- a 429 on getUpdates ended it once,
+    # and it stayed dead for 21 hours because nothing brought it back. The
+    # polling loop now survives that class of rejection; this is the backstop
+    # for the crash we have not thought of yet.
+    restart: unless-stopped
     command: ["python", "-m", "burnrate.telegram_bot"]
     env_file:
       - .env
@@ -76,6 +85,7 @@ services:
     build:
       context: ./web
     container_name: burnrate-web
+    restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:80"
     depends_on:

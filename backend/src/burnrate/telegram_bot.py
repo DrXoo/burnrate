@@ -9,13 +9,32 @@ import httpx
 
 from burnrate.config import Settings, get_settings
 from burnrate.db.session import SessionLocal
-from burnrate.integrations.telegram.client import TelegramClient
+from burnrate.integrations.telegram.client import TelegramAPIError, TelegramClient
 from burnrate.logging_config import configure_logging
 from burnrate.telegram.router import TelegramCommandRouter
 
 logger = logging.getLogger("burnrate.telegram_bot")
 
 ERROR_BACKOFF_SECONDS = 5.0
+
+
+def retry_after_seconds(detail: Any) -> float | None:
+    """Read the cooldown Telegram asked for out of a rejected response body.
+
+    A 429 carries ``{"parameters": {"retry_after": N}}``. Anything else -- a
+    plain-text body, a rejection that names no cooldown, a non-numeric or
+    non-positive value -- yields ``None`` so the caller falls back to its own
+    backoff rather than trusting a number it cannot read.
+    """
+    if not isinstance(detail, dict):
+        return None
+    parameters = detail.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    retry_after = parameters.get("retry_after")
+    if isinstance(retry_after, bool) or not isinstance(retry_after, (int, float)):
+        return None
+    return float(retry_after) if retry_after > 0 else None
 
 
 def process_update(
@@ -95,6 +114,21 @@ def run_polling(
                 offset=offset,
                 poll_timeout=poll_timeout,
             )
+        except TelegramAPIError as error:
+            # Telegram answered and refused: a 429 flood limit, a 409 from a
+            # second poller, a 5xx on their side. Every one of those is
+            # transient, but none is an httpx error, so before this clause
+            # existed a single 429 on getUpdates propagated out of main() and
+            # ended the process -- which is exactly how the bot died in
+            # production after fifteen hours of healthy polling. The detail is
+            # logged because the crash that taught us this recorded no
+            # retry_after, leaving nothing to diagnose.
+            logger.warning(
+                "Telegram rejected getUpdates (%s): %s, backing off",
+                error.status_code,
+                error.detail,
+            )
+            sleep(retry_after_seconds(error.detail) or ERROR_BACKOFF_SECONDS)
         except httpx.HTTPError:
             logger.exception("Telegram polling request failed, backing off")
             sleep(ERROR_BACKOFF_SECONDS)
