@@ -26,7 +26,12 @@ import type {
 
 interface TransactionsPageProps {
   accounts: Account[];
+  /** Every category, archived ones included -- the month's filter offers them, because
+      looking at what a retired category used to cost is the reason it was kept. */
   categories: Category[];
+  /** The categories new spend may be filed against. Every assignment on this page
+      reads this one: the per-row picker, the rule form and its default target. */
+  assignableCategories: Category[];
   rules: Rule[];
   filters: FiltersState;
   applyFilters: (filters: FiltersState) => void;
@@ -194,6 +199,7 @@ function RuleForm({
         <span style={{ fontSize: 13, color: "var(--text-3)" }}>→ assign to</span>
         <select
           className="br-sel"
+          aria-label="Rule target category"
           style={{ flex: 1 }}
           value={form.category_id}
           onChange={(event) => onChange({ ...form, category_id: event.target.value })}
@@ -233,6 +239,7 @@ function RuleForm({
 export function TransactionsPage({
   accounts,
   categories,
+  assignableCategories,
   rules,
   filters,
   applyFilters,
@@ -292,7 +299,7 @@ export function TransactionsPage({
       match_field: field,
       match_operator: "contains",
       match_value: suggestRuleValue(transaction, field),
-      category_id: transaction.category_id ?? categories[0]?.category_id ?? "",
+      category_id: defaultRuleTarget(transaction),
     });
   }
 
@@ -371,19 +378,45 @@ export function TransactionsPage({
         type="button"
         title="Create a categorization rule from this transaction"
         onClick={() => openCreate(transaction)}
-        disabled={categories.length === 0}
+        disabled={assignableCategories.length === 0}
         style={{
           ...ruleButtonStyle(isActive, false),
           width: fullWidth ? "100%" : undefined,
           justifyContent: fullWidth ? "center" : undefined,
-          cursor: categories.length === 0 ? "not-allowed" : "pointer",
-          opacity: categories.length === 0 ? 0.5 : 1,
+          cursor: assignableCategories.length === 0 ? "not-allowed" : "pointer",
+          opacity: assignableCategories.length === 0 ? 0.5 : 1,
         }}
       >
         <IconSliders size={12} />
         Create rule
       </button>
     );
+  }
+
+  /** The category a rule created from this transaction should start on.
+   *
+   *  Its own, when that is still assignable. An archived one is not in the picker, so
+   *  preselecting it would render the select blank and have the backend refuse the
+   *  rule on submit. */
+  function defaultRuleTarget(transaction: Transaction): string {
+    const own = assignableCategories.find((category) => category.category_id === transaction.category_id);
+    return own?.category_id ?? assignableCategories[0]?.category_id ?? "";
+  }
+
+  /** The options one row's picker offers.
+   *
+   *  The assignable ones, plus this row's own category when that has been archived.
+   *  Archiving leaves the transactions already filed under a category alone, so the
+   *  row is still categorized -- and a controlled select whose value matches no
+   *  option falls back to its first, reading as unassigned and refiling the row
+   *  elsewhere on the next pick. Carried by the row that is in it, never offered as
+   *  a destination to any other. */
+  function rowCategoryOptions(transaction: Transaction): Category[] {
+    const own = categories.find((category) => category.category_id === transaction.category_id);
+    if (own === undefined || own.active) {
+      return assignableCategories;
+    }
+    return [...assignableCategories, own];
   }
 
   function categorySelect(transaction: Transaction, fullWidth: boolean) {
@@ -433,9 +466,9 @@ export function TransactionsPage({
         }}
       >
         <option value="uncat">— Assign —</option>
-        {categories.map((category) => (
+        {rowCategoryOptions(transaction).map((category) => (
           <option key={category.category_id} value={category.category_id}>
-            {category.name}
+            {category.active ? category.name : `${category.name} · archived`}
           </option>
         ))}
         <option value="ignore">Ignore (not a budget item)</option>
@@ -542,7 +575,7 @@ export function TransactionsPage({
                       <RuleForm
                         form={ruleForm}
                         heading={heading}
-                        categories={categories}
+                        categories={assignableCategories}
                         onChange={setRuleForm}
                         onSubmit={() => void submitRule()}
                         onDelete={() => void removeRule()}
@@ -630,7 +663,7 @@ export function TransactionsPage({
                           <RuleForm
                             form={ruleForm}
                             heading={heading}
-                            categories={categories}
+                            categories={assignableCategories}
                             onChange={setRuleForm}
                             onSubmit={() => void submitRule()}
                             onDelete={() => void removeRule()}

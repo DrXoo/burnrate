@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
+import { IconPencil } from "../icons";
+
 import {
   TONE_COLOR,
   TONE_DIM,
@@ -24,6 +26,15 @@ interface CategoriesPageProps {
   monthLabel: string;
   loadMonthTransactions: () => Promise<Transaction[]>;
   onCreateCategory: (name: string, type: CategoryType) => Promise<void>;
+  /** Renames a category by id. The name is the label every other surface reads, so
+      this panel edits it rather than keeping a display name of its own. */
+  onRenameCategory: (categoryId: string, name: string) => Promise<void>;
+  /** Removes the category outright. Refused by the backend unless nothing points at
+      it, and the refusal names what does. */
+  onDeleteCategory: (categoryId: string) => Promise<void>;
+  /** Closes the category to new spend while keeping what it already recorded. */
+  onArchiveCategory: (categoryId: string) => Promise<void>;
+  onUnarchiveCategory: (categoryId: string) => Promise<void>;
 }
 
 interface CategoryStat {
@@ -51,6 +62,42 @@ const GROUPS: Array<{ label: string; type: CategoryType }> = [
   { label: "Income", type: "income" },
   { label: "Transfers", type: "transfer" },
 ];
+
+// Local like the other pages' copies of these. Extracting a shared set is a
+// refactor of three pages, not part of renaming a category.
+const accentButton: CSSProperties = {
+  border: "none",
+  background: "var(--accent)",
+  color: "#0a0d10",
+  borderRadius: 8,
+  padding: "7px 16px",
+  font: "600 12px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
+};
+
+const ghostButton: CSSProperties = {
+  border: "1px solid var(--line-2)",
+  background: "transparent",
+  color: "var(--text-2)",
+  borderRadius: 8,
+  padding: "7px 14px",
+  font: "500 12px 'Hanken Grotesque', sans-serif",
+  cursor: "pointer",
+};
+
+const iconButton: CSSProperties = {
+  flex: "none",
+  width: 28,
+  height: 28,
+  borderRadius: 7,
+  border: "1px solid var(--line-2)",
+  background: "var(--bg-2)",
+  color: "var(--text-2)",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
 
 const statCard: CSSProperties = {
   background: "var(--bg-3)",
@@ -99,6 +146,10 @@ export function CategoriesPage({
   monthLabel,
   loadMonthTransactions,
   onCreateCategory,
+  onRenameCategory,
+  onDeleteCategory,
+  onArchiveCategory,
+  onUnarchiveCategory,
 }: CategoriesPageProps) {
   const [selectedId, setSelectedId] = useState<string>("");
   const [showNew, setShowNew] = useState(false);
@@ -261,9 +312,12 @@ export function CategoriesPage({
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 2, background: stat.color }} />
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 2, background: stat.color, flex: "none" }} />
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, color: stat.category.active ? "var(--text)" : "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {stat.category.name}
+                            {!stat.category.active ? (
+                              <span style={{ fontSize: 11, color: "var(--text-3)", fontWeight: 500 }}> · archived</span>
+                            ) : null}
                           </span>
                           <span className="num" style={{ fontSize: 11.5, color: "var(--text-3)" }}>
                             {stat.count} txns
@@ -366,6 +420,10 @@ export function CategoriesPage({
             budgetsKnown={budgetsKnown}
             count={selectedTxns.length}
             txns={selectedTxns}
+            onRenameCategory={onRenameCategory}
+            onDeleteCategory={onDeleteCategory}
+            onArchiveCategory={onArchiveCategory}
+            onUnarchiveCategory={onUnarchiveCategory}
           />
         ) : (
           <div style={{ padding: 26, textAlign: "center", color: "var(--text-3)", fontSize: 13 }}>No categories yet.</div>
@@ -381,6 +439,10 @@ function CategoryDetail({
   budgetsKnown,
   count,
   txns,
+  onRenameCategory,
+  onDeleteCategory,
+  onArchiveCategory,
+  onUnarchiveCategory,
 }: {
   selected: CategoryStat;
   monthLabel: string;
@@ -389,8 +451,66 @@ function CategoryDetail({
   budgetsKnown: boolean;
   count: number;
   txns: Transaction[];
+  onRenameCategory: (categoryId: string, name: string) => Promise<void>;
+  onDeleteCategory: (categoryId: string) => Promise<void>;
+  onArchiveCategory: (categoryId: string) => Promise<void>;
+  onUnarchiveCategory: (categoryId: string) => Promise<void>;
 }) {
   const { category, tone, color, usage } = selected;
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(category.name);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  // Selecting another category drops a rename left half-typed on the previous one:
+  // the open field belongs to the row it was opened on, not to the panel.
+  useEffect(() => {
+    setRenaming(false);
+    setDraftName(category.name);
+    setRenameError(null);
+  }, [category.category_id, category.name]);
+
+  // Delete is armed by a first click. It is the only act on this panel with no way
+  // back, and it sits beside Archive, which has one.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setConfirmingDelete(false);
+    setLifecycleError(null);
+  }, [category.category_id]);
+
+  /** Runs one lifecycle act, keeping its refusal on screen.
+   *
+   *  The refusal is the useful part: it names the budgets, transactions or rules
+   *  still pointing at the category, which is what the owner has to clear first. */
+  async function runLifecycle(act: () => Promise<void>) {
+    setLifecycleError(null);
+    try {
+      await act();
+    } catch (error) {
+      setLifecycleError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function saveName() {
+    const name = draftName.trim();
+    if (!name) {
+      return;
+    }
+    if (name === category.name) {
+      setRenaming(false);
+      return;
+    }
+    setRenameError(null);
+    try {
+      await onRenameCategory(category.category_id, name);
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    setRenaming(false);
+  }
+
   const isExpense = category.type === "expense";
   // A budget panel needs the month's budget row: that is where the figures come from.
   const hasBudget = isExpense && usage != null;
@@ -403,15 +523,116 @@ function CategoryDetail({
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <span style={{ width: 12, height: 12, borderRadius: 3, background: color }} />
-        <div style={{ fontSize: 19, fontWeight: 600 }}>{category.name}</div>
-        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 99, background: badgeDim, color: badgeColor }}>
-          {badgeLabel}
-        </span>
+        <span style={{ width: 12, height: 12, borderRadius: 3, background: color, flex: "none" }} />
+        {renaming ? (
+          <>
+            <input
+              className="br-input"
+              title="Category name"
+              aria-label="Category name"
+              style={{ flex: 1, minWidth: 0, fontSize: 17, fontWeight: 600 }}
+              value={draftName}
+              onChange={(event) => setDraftName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void saveName();
+                }
+                if (event.key === "Escape") {
+                  setRenaming(false);
+                  setDraftName(category.name);
+                  setRenameError(null);
+                }
+              }}
+            />
+            <button type="button" style={accentButton} onClick={() => void saveName()}>
+              Save
+            </button>
+            <button
+              type="button"
+              style={ghostButton}
+              onClick={() => {
+                setRenaming(false);
+                setDraftName(category.name);
+                setRenameError(null);
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 19, fontWeight: 600 }}>{category.name}</div>
+            <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 99, background: badgeDim, color: badgeColor }}>
+              {badgeLabel}
+            </span>
+            {!category.active ? (
+              <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 99, background: "var(--bg-4)", color: "var(--text-3)" }}>
+                Archived
+              </span>
+            ) : null}
+            <button
+              type="button"
+              title="Rename category"
+              aria-label="Rename category"
+              style={iconButton}
+              onClick={() => {
+                setDraftName(category.name);
+                setRenaming(true);
+              }}
+            >
+              <IconPencil />
+            </button>
+          </>
+        )}
       </div>
-      <div style={{ fontSize: 12.5, color: "var(--text-3)", marginBottom: 18 }}>
+      {renameError ? (
+        <div role="alert" style={{ fontSize: 12, color: "var(--over)", marginBottom: 6 }}>
+          {renameError}
+        </div>
+      ) : null}
+      <div style={{ fontSize: 12.5, color: "var(--text-3)", marginBottom: 12 }}>
         {capitalize(category.type)} · {monthLabel} · <span className="num">{count}</span> transactions
       </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+        {category.active ? (
+          <button type="button" style={ghostButton} onClick={() => void runLifecycle(() => onArchiveCategory(category.category_id))}>
+            Archive
+          </button>
+        ) : (
+          <button type="button" style={ghostButton} onClick={() => void runLifecycle(() => onUnarchiveCategory(category.category_id))}>
+            Unarchive
+          </button>
+        )}
+        {confirmingDelete ? (
+          <>
+            <button
+              type="button"
+              style={{ ...ghostButton, borderColor: "var(--over)", color: "var(--over)" }}
+              onClick={() => void runLifecycle(() => onDeleteCategory(category.category_id))}
+            >
+              Delete for good
+            </button>
+            <button type="button" style={ghostButton} onClick={() => setConfirmingDelete(false)}>
+              Keep it
+            </button>
+          </>
+        ) : (
+          <button type="button" style={ghostButton} onClick={() => { setLifecycleError(null); setConfirmingDelete(true); }}>
+            Delete
+          </button>
+        )}
+        <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+          {confirmingDelete
+            ? "This cannot be undone."
+            : "Archiving keeps this category's history; deleting needs it to be unused."}
+        </span>
+      </div>
+      {lifecycleError ? (
+        <div role="alert" style={{ fontSize: 12, color: "var(--over)", lineHeight: 1.45, marginBottom: 16 }}>
+          {lifecycleError}
+        </div>
+      ) : null}
 
       {hasBudget && usage ? (
         <>

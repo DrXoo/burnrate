@@ -1,8 +1,10 @@
 import { useMemo, useState, type CSSProperties } from "react";
 
-import { IconPencil, IconTrash } from "../icons";
+import { IconPencil, IconRestore, IconTrash } from "../icons";
 import {
   categoryColor,
+  dayAndMonth,
+  finalMonthFor,
   eurPlain,
   prettyMatchField,
   prettyMatchOperator,
@@ -22,8 +24,16 @@ import type {
 
 interface RulesBudgetsPageProps {
   rules: Rule[];
+  /** Every category, archived ones included. Only the per-rule colour is read off
+      this: a rule's own label comes from its payload. Archived ones belong here so a
+      rule left over on one still draws in its type's colour rather than grey. */
   categories: Category[];
-  budgets: Budget[];
+  /** The categories new spend may be filed against: archived ones are excluded.
+      Every picker on this page reads this one, never `categories`. */
+  assignableCategories: Category[];
+  // Null is a month whose budget list has not arrived, which is a different claim
+  // from a month with no budgets. The page has to tell them apart.
+  budgets: Budget[] | null;
   summary: SummaryDashboard | null;
   onToggleRule: (ruleId: string, active: boolean) => Promise<void>;
   onUpdateRule: (ruleId: string, draft: RuleUpdateDraft) => Promise<void>;
@@ -31,6 +41,10 @@ interface RulesBudgetsPageProps {
   onCreateBudget: (draft: BudgetDraft) => Promise<void>;
   onUpdateBudget: (budgetId: string, draft: BudgetUpdateDraft) => Promise<void>;
   onDeactivateBudget: (budgetId: string) => Promise<void>;
+  onReactivateBudget: (budgetId: string) => Promise<void>;
+  /** Renames the budget's category, which is where its label lives. Takes the id,
+      because the name being replaced is not a stable handle on the row. */
+  onRenameCategory: (categoryId: string, name: string) => Promise<void>;
 }
 
 interface RuleDraftState {
@@ -113,6 +127,7 @@ function num(value: string | null | undefined): number {
 export function RulesBudgetsPage({
   rules,
   categories,
+  assignableCategories,
   budgets,
   summary,
   onToggleRule,
@@ -121,6 +136,8 @@ export function RulesBudgetsPage({
   onCreateBudget,
   onUpdateBudget,
   onDeactivateBudget,
+  onReactivateBudget,
+  onRenameCategory,
 }: RulesBudgetsPageProps) {
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.category_id, category])), [categories]);
   const toneById = useMemo(
@@ -131,9 +148,28 @@ export function RulesBudgetsPage({
   const [editRuleId, setEditRuleId] = useState<string | null>(null);
   const [ruleDraft, setRuleDraft] = useState<RuleDraftState | null>(null);
 
-  const expenseCategories = categories.filter((category) => category.type === "expense");
-  const activeBudgets = budgets.filter((budget) => budget.active);
-  const budgetedIds = new Set(activeBudgets.map((budget) => budget.category_id));
+  const expenseCategories = assignableCategories.filter((category) => category.type === "expense");
+  // `active` is read against the month on screen, so these are the budgets that
+  // month holds -- including one the owner has since cancelled, which still counts
+  // towards the month's figures and so has to appear beside them.
+  const activeBudgets = (budgets ?? []).filter((budget) => budget.active);
+  const budgetedIds = new Set(
+    [...activeBudgets, ...(budgets ?? []).filter((budget) => budget.status === "scheduled")].map(
+      (budget) => budget.category_id,
+    ),
+  );
+  // Budgets the owner stopped. They belong to the months they covered and not to this
+  // one, so they sit apart from the month's list -- but they stay reachable, because
+  // cancelling is one click and the way back has to be one too.
+  // Rows the owner can put back. `can_reactivate` is the backend's answer, from the
+  // same function the endpoint refuses with -- a row closed by a later budget reads
+  // identically to a cancelled one here, so deciding it on this side offered a
+  // restore that was refused every time.
+  const restorableBudgets = (budgets ?? []).filter((budget) => budget.can_reactivate);
+  // Budgets that start after the month on screen. They cover no month yet, so they
+  // belong to neither list above -- but they are real, and their categories must not
+  // be offered a second budget that would overlap them.
+  const scheduledBudgets = (budgets ?? []).filter((budget) => budget.status === "scheduled");
 
   const [showNewBudget, setShowNewBudget] = useState(false);
   const [newBudgetCat, setNewBudgetCat] = useState("");
@@ -142,6 +178,15 @@ export function RulesBudgetsPage({
   const [editBudgetId, setEditBudgetId] = useState<string | null>(null);
   const [editBudgetAmount, setEditBudgetAmount] = useState("");
   const [editBudgetFixed, setEditBudgetFixed] = useState(false);
+  const [editBudgetName, setEditBudgetName] = useState("");
+  // Why the last cancel, restore or create did not go through. Each was fired with
+  // `void`, so a refusal the backend had written for the owner -- naming the budget in
+  // the way -- was dropped as an unhandled rejection and the click read as a no-op.
+  const [budgetActionError, setBudgetActionError] = useState<string | null>(null);
+  // Why the last Save did not go through, shown in the editor. A rename can fail for
+  // a reason the owner can fix -- the name is taken -- so it has to be said next to
+  // the field rather than swallowed.
+  const [editBudgetError, setEditBudgetError] = useState<string | null>(null);
 
   function startEditRule(rule: Rule) {
     setEditRuleId(rule.rule_id);
@@ -169,6 +214,15 @@ export function RulesBudgetsPage({
     setRuleDraft(null);
   }
 
+  async function runBudgetAction(act: () => Promise<void>) {
+    setBudgetActionError(null);
+    try {
+      await act();
+    } catch (error) {
+      setBudgetActionError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function addBudget() {
     const categoryId = newBudgetCat || expenseCategories.find((category) => !budgetedIds.has(category.category_id))?.category_id;
     if (!categoryId || !newBudgetAmount.trim()) {
@@ -181,13 +235,45 @@ export function RulesBudgetsPage({
     setNewBudgetFixed(false);
   }
 
-  async function saveBudget(budget: Budget) {
-    if (!editBudgetAmount.trim()) {
-      return;
-    }
-    await onUpdateBudget(budget.budget_id, { amount: editBudgetAmount.trim(), currency: budget.currency, is_fixed: editBudgetFixed });
+  function startEditBudget(budget: Budget) {
+    setEditBudgetId(budget.budget_id);
+    setEditBudgetAmount(String(num(budget.amount)));
+    setEditBudgetFixed(budget.is_fixed);
+    setEditBudgetName(budget.category_name);
+    setEditBudgetError(null);
+  }
+
+  function closeEditBudget() {
     setEditBudgetId(null);
     setEditBudgetAmount("");
+    setEditBudgetName("");
+    setEditBudgetError(null);
+  }
+
+  async function saveBudget(budget: Budget) {
+    const name = editBudgetName.trim();
+    if (!editBudgetAmount.trim() || !name) {
+      return;
+    }
+    setEditBudgetError(null);
+    // Both halves can be refused, and either refusal has to stay on screen: dropped,
+    // the editor closes on a Save that did not happen.
+    //
+    // The rename goes first because it is the half that is refused for a reason the
+    // owner can act on, and a refused rename then leaves the amount as it was rather
+    // than half-applying the edit. The reverse order cannot be protected the same way
+    // -- a rename already through cannot be taken back -- so the error says which
+    // half failed and the editor stays open on it.
+    try {
+      if (name !== budget.category_name) {
+        await onRenameCategory(budget.category_id, name);
+      }
+      await onUpdateBudget(budget.budget_id, { amount: editBudgetAmount.trim(), currency: budget.currency, is_fixed: editBudgetFixed });
+    } catch (error) {
+      setEditBudgetError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    closeEditBudget();
   }
 
   const unbudgetedExpense = expenseCategories.filter((category) => !budgetedIds.has(category.category_id));
@@ -267,7 +353,7 @@ export function RulesBudgetsPage({
                       value={ruleDraft.category_id}
                       onChange={(event) => setRuleDraft({ ...ruleDraft, category_id: event.target.value })}
                     >
-                      {categories.map((option) => (
+                      {assignableCategories.map((option) => (
                         <option key={option.category_id} value={option.category_id}>
                           {option.name}
                         </option>
@@ -333,6 +419,12 @@ export function RulesBudgetsPage({
           </button>
         </div>
 
+        {budgetActionError ? (
+          <div role="alert" style={{ fontSize: 12, color: "var(--over)", lineHeight: 1.45, marginBottom: 12 }}>
+            {budgetActionError}
+          </div>
+        ) : null}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {showNewBudget && unbudgetedExpense.length > 0 ? (
             <div style={{ background: "var(--bg-3)", border: "1px solid var(--accent)", borderRadius: 11, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -353,7 +445,7 @@ export function RulesBudgetsPage({
                   placeholder="Amount (€/mo)"
                   inputMode="decimal"
                 />
-                <button type="button" style={accentButton} onClick={() => void addBudget()}>
+                <button type="button" style={accentButton} onClick={() => void runBudgetAction(addBudget)}>
                   Add
                 </button>
               </div>
@@ -372,7 +464,13 @@ export function RulesBudgetsPage({
             </div>
           ) : null}
 
-          {activeBudgets.length === 0 && !showNewBudget ? (
+          {budgets === null ? (
+            <div style={{ padding: 22, textAlign: "center", color: "var(--text-3)", fontSize: 13, background: "var(--bg-3)", borderRadius: 11 }}>
+              Budgets unavailable for this month.
+            </div>
+          ) : null}
+
+          {budgets !== null && activeBudgets.length === 0 && !showNewBudget ? (
             <div style={{ padding: 22, textAlign: "center", color: "var(--text-3)", fontSize: 13, background: "var(--bg-3)", borderRadius: 11 }}>
               No budgets yet. Add one to start tracking spend against a plan.
             </div>
@@ -385,9 +483,18 @@ export function RulesBudgetsPage({
                 <div key={budget.budget_id} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "11px 14px", background: "var(--bg-3)", border: "1px solid var(--accent)", borderRadius: 11 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flex: "none" }} />
-                    <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{budget.category_name}</span>
                     <input
                       className="br-input"
+                      title="Budget name"
+                      aria-label="Budget name"
+                      style={{ flex: 1, minWidth: 0, background: "var(--bg-2)", fontSize: 13.5, fontWeight: 500 }}
+                      value={editBudgetName}
+                      onChange={(event) => setEditBudgetName(event.target.value)}
+                    />
+                    <input
+                      className="br-input"
+                      title="Budget amount"
+                      aria-label="Budget amount"
                       style={{ width: 96, background: "var(--bg-2)" }}
                       value={editBudgetAmount}
                       onChange={(event) => setEditBudgetAmount(event.target.value)}
@@ -396,7 +503,7 @@ export function RulesBudgetsPage({
                     <button type="button" style={accentButton} onClick={() => void saveBudget(budget)}>
                       Save
                     </button>
-                    <button type="button" style={ghostButton} onClick={() => setEditBudgetId(null)}>
+                    <button type="button" style={ghostButton} onClick={closeEditBudget}>
                       Cancel
                     </button>
                   </div>
@@ -412,9 +519,15 @@ export function RulesBudgetsPage({
                       rent or utilities. Not paced day-by-day.
                     </span>
                   </label>
+                  {editBudgetError ? (
+                    <div role="alert" style={{ fontSize: 12, color: "var(--over)", lineHeight: 1.45 }}>
+                      {editBudgetError}
+                    </div>
+                  ) : null}
                 </div>
               );
             }
+            const finalMonth = finalMonthFor(budget.active_to, summary?.month);
             return (
               <div key={budget.budget_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", background: "var(--bg-3)", border: "1px solid var(--line)", borderRadius: 11 }}>
                 <span style={{ width: 9, height: 9, borderRadius: 2, background: color, flex: "none" }} />
@@ -428,6 +541,14 @@ export function RulesBudgetsPage({
                       Fixed
                     </span>
                   ) : null}
+                  {finalMonth ? (
+                    <span
+                      title="The last month this budget covered. The month counts it in full; the months after it hold no budget for this category."
+                      style={{ flex: "none", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-3)", background: "var(--bg-4)", border: "1px solid var(--line-2)", borderRadius: 6, padding: "1px 6px" }}
+                    >
+                      {finalMonth}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="num" style={{ fontSize: 13.5, fontWeight: 600 }}>
                   {eurPlain(num(budget.amount))}
@@ -437,17 +558,86 @@ export function RulesBudgetsPage({
                   type="button"
                   title="Edit budget"
                   style={{ ...iconButton, color: "var(--text-2)" }}
-                  onClick={() => { setEditBudgetId(budget.budget_id); setEditBudgetAmount(String(num(budget.amount))); setEditBudgetFixed(budget.is_fixed); }}
+                  onClick={() => startEditBudget(budget)}
                 >
                   <IconPencil />
                 </button>
-                <button type="button" title="Remove budget" style={{ ...iconButton, color: "var(--text-3)" }} onClick={() => void onDeactivateBudget(budget.budget_id)}>
+                <button type="button" title="Cancel this budget from this month on. Earlier months keep it, and this can be undone." style={{ ...iconButton, color: "var(--text-3)" }} onClick={() => void runBudgetAction(() => onDeactivateBudget(budget.budget_id))}>
                   <IconTrash />
                 </button>
               </div>
             );
           })}
         </div>
+
+        {scheduledBudgets.length > 0 ? (
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-3)", marginBottom: 9 }}>
+              Starting later
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {scheduledBudgets.map((budget) => (
+                <div
+                  key={budget.budget_id}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 14px", background: "var(--bg-3)", border: "1px dashed var(--line-2)", borderRadius: 11, color: "var(--text-2)" }}
+                >
+                  <span style={{ width: 9, height: 9, borderRadius: 2, border: "1.5px solid var(--text-3)", flex: "none" }} />
+                  <span style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {budget.category_name}
+                  </span>
+                  <span className="num" style={{ fontSize: 12.5 }}>
+                    {eurPlain(num(budget.amount))}
+                    <span style={{ color: "var(--text-3)", fontSize: 11.5 }}>/mo</span>
+                  </span>
+                  <span
+                    title="This budget starts in a later month. The month on screen holds no budget for this category, so its figures do not count it."
+                    style={{ flex: "none", fontSize: 11.5, color: "var(--text-3)" }}
+                  >
+                    from {dayAndMonth(budget.active_from)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {restorableBudgets.length > 0 ? (
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-3)", marginBottom: 9 }}>
+              Cancelled
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {restorableBudgets.map((budget) => (
+                <div
+                  key={budget.budget_id}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 14px", background: "var(--bg-3)", border: "1px dashed var(--line-2)", borderRadius: 11, color: "var(--text-2)" }}
+                >
+                  <span style={{ width: 9, height: 9, borderRadius: 2, border: "1.5px solid var(--text-3)", flex: "none" }} />
+                  <span style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {budget.category_name}
+                  </span>
+                  <span className="num" style={{ fontSize: 12.5 }}>
+                    {eurPlain(num(budget.amount))}
+                    <span style={{ color: "var(--text-3)", fontSize: 11.5 }}>/mo</span>
+                  </span>
+                  {budget.active_to ? (
+                    <span style={{ flex: "none", fontSize: 11.5, color: "var(--text-3)" }}>
+                      until {dayAndMonth(budget.active_to)}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    title="Reactivate this budget"
+                    style={{ ...iconButton, color: "var(--text-2)" }}
+                    onClick={() => void runBudgetAction(() => onReactivateBudget(budget.budget_id))}
+                  >
+                    <IconRestore />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

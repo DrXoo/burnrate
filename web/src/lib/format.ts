@@ -174,6 +174,38 @@ export function shiftMonth(value: string, delta: number): string {
   return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}`;
 }
 
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A plain `YYYY-MM-DD` as `12 Oct`.
+ *
+ *  Spelled out rather than locale-formatted: this reads inside a sentence about one
+ *  budget, so it has to be the same words wherever the owner opens the page. */
+export function dayAndMonth(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return value;
+  }
+  return `${Number(match[3])} ${SHORT_MONTHS[Number(match[2]) - 1]}`;
+}
+
+/** Whether `month` is the last month a budget covers.
+ *
+ *  Worth saying, because a row on its final month otherwise reads exactly like a
+ *  running one and invites the owner to cancel what is already cancelled. An
+ *  `active_to` in a later month has months still ahead of it from here, so it is left
+ *  unsaid.
+ *
+ *  The day is not reported, because it carries nothing: both edges of a window sit on
+ *  month boundaries, so a window that closes in this month always closes on its last
+ *  day. Naming a date here read as a mid-month stop, which the rule cannot write and
+ *  migration 0008 erased from the rows that had one. */
+export function finalMonthFor(activeTo: string | null, month: string | undefined): string | null {
+  if (!activeTo || !month || activeTo.slice(0, 7) !== month) {
+    return null;
+  }
+  return "Final month";
+}
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) {
     return "Not available";

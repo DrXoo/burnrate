@@ -128,6 +128,10 @@ export interface Budget {
   is_fixed: boolean;
   active: boolean;
   status: BudgetStatus;
+  /** Whether reopening this row would be accepted. Decided in the backend with the
+      same function the reactivate endpoint refuses with, so a restore this page
+      offers is never one the endpoint rejects. */
+  can_reactivate: boolean;
 }
 
 export interface BudgetUsage {

@@ -1083,9 +1083,9 @@ def seed_rent_with_two_budget_rows_in_one_month(db: Session) -> None:
 
     Seeded straight into the session because ``BudgetService`` refuses this shape --
     ``_validate_month_start`` forces a period to begin on the 1st of a month and
-    ``_ensure_no_overlap`` rejects a second period touching an existing one. So this
-    is a missing invariant in ``SummaryService`` rather than a live miscalculation,
-    and the seam that can state it is this one.
+    ``_first_overlap`` rejects a second period touching an existing one, on creation
+    and on reactivation alike. So this is a missing invariant in ``SummaryService``
+    rather than a live miscalculation, and the seam that can state it is this one.
 
     The charge books once, at 1100.00: exactly the two estimates together, so an
     owner in this state is precisely on budget.

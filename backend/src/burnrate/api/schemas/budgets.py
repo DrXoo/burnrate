@@ -20,6 +20,10 @@ class BudgetSummaryResponse(BaseModel):
     is_fixed: bool = False
     active: bool
     status: Literal["active", "scheduled", "inactive"]
+    # Whether reopening this row would be accepted. Decided in the backend, with the
+    # same function the reactivate endpoint refuses with, so an interface never offers
+    # a restore that is always rejected.
+    can_reactivate: bool = False
 
 
 class BudgetListResponse(BaseModel):

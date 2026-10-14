@@ -33,7 +33,7 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
-async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+async function request(url: string, options: RequestInit = {}): Promise<Response> {
   const response = await fetch(url, {
     // Send the session cookie, including on the cross-origin dev setup
     // (web :3000 -> api :8000). The server must allow credentials in CORS.
@@ -53,7 +53,19 @@ async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> 
     throw new ApiError(response.status, `Request failed (${response.status}): ${body}`);
   }
 
+  return response;
+}
+
+async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const response = await request(url, options);
   return response.json() as Promise<T>;
+}
+
+/** For endpoints that answer 204. Parsing a body that is not there throws a
+    SyntaxError that reads like a network fault, so these share the error handling
+    above without the parse. */
+async function fetchNoContent(url: string, options: RequestInit = {}): Promise<void> {
+  await request(url, options);
 }
 
 function buildQuery(params: Record<string, string | number | undefined>): string {
@@ -223,6 +235,30 @@ export async function createCategory(
   });
 }
 
+export async function renameCategory(
+  apiBase: string,
+  categoryId: string,
+  name: string,
+): Promise<Category> {
+  return fetchJson<Category>(`${apiBase}/categories/${categoryId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteCategory(apiBase: string, categoryId: string): Promise<void> {
+  return fetchNoContent(`${apiBase}/categories/${categoryId}`, { method: "DELETE" });
+}
+
+export async function archiveCategory(apiBase: string, categoryId: string): Promise<Category> {
+  return fetchJson<Category>(`${apiBase}/categories/${categoryId}/archive`, { method: "POST" });
+}
+
+export async function unarchiveCategory(apiBase: string, categoryId: string): Promise<Category> {
+  return fetchJson<Category>(`${apiBase}/categories/${categoryId}/unarchive`, { method: "POST" });
+}
+
 export async function getRules(apiBase: string): Promise<Rule[]> {
   const payload = await fetchJson<{ rules: Rule[] }>(`${apiBase}/rules`);
   return payload.rules ?? [];
@@ -266,8 +302,11 @@ export async function deleteRule(apiBase: string, ruleId: string): Promise<void>
   await fetchJson(`${apiBase}/rules/${ruleId}`, { method: "DELETE" });
 }
 
-export async function getBudgets(apiBase: string): Promise<Budget[]> {
-  const payload = await fetchJson<{ budgets: Budget[] }>(`${apiBase}/budgets`);
+export async function getBudgets(apiBase: string, month: string): Promise<Budget[]> {
+  // Each row's status is read against this month, so a budget that covered it reads
+  // as active there even once it has been cancelled. Omitting the month would get
+  // the month the owner is in, which is not necessarily the one on screen.
+  const payload = await fetchJson<{ budgets: Budget[] }>(`${apiBase}/budgets${buildQuery({ month })}`);
   return payload.budgets ?? [];
 }
 
@@ -280,7 +319,7 @@ export async function createBudgetForMonth(
   draft: BudgetDraft,
   activeFrom: string,
 ): Promise<Budget> {
-  return fetchJson<Budget>(`${apiBase}/budgets`, {
+  return fetchJson<Budget>(`${apiBase}/budgets${buildQuery({ month: activeFrom.slice(0, 7) })}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -293,8 +332,13 @@ export async function createBudgetForMonth(
   });
 }
 
-export async function updateBudget(apiBase: string, budgetId: string, draft: BudgetUpdateDraft): Promise<Budget> {
-  return fetchJson<Budget>(`${apiBase}/budgets/${budgetId}`, {
+export async function updateBudget(
+  apiBase: string,
+  budgetId: string,
+  draft: BudgetUpdateDraft,
+  month: string,
+): Promise<Budget> {
+  return fetchJson<Budget>(`${apiBase}/budgets/${budgetId}${buildQuery({ month: month || undefined })}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -305,10 +349,21 @@ export async function updateBudget(apiBase: string, budgetId: string, draft: Bud
   });
 }
 
-export async function deactivateBudget(apiBase: string, budgetId: string): Promise<Budget> {
-  return fetchJson<Budget>(`${apiBase}/budgets/${budgetId}/deactivate`, {
-    method: "POST",
-  });
+// The month decides the window the backend writes, not just how the row is reported:
+// cancelling drops the budget from that month on. So it is the month on screen, never
+// one the server reads off its own clock.
+export async function deactivateBudget(apiBase: string, budgetId: string, month: string): Promise<Budget> {
+  return fetchJson<Budget>(
+    `${apiBase}/budgets/${budgetId}/deactivate${buildQuery({ month: month || undefined })}`,
+    { method: "POST" },
+  );
+}
+
+export async function reactivateBudget(apiBase: string, budgetId: string, month: string): Promise<Budget> {
+  return fetchJson<Budget>(
+    `${apiBase}/budgets/${budgetId}/reactivate${buildQuery({ month: month || undefined })}`,
+    { method: "POST" },
+  );
 }
 
 export async function getTransactions(

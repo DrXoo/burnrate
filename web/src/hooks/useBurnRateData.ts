@@ -1,11 +1,16 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   categorizeTransaction,
   createBudgetForMonth,
+  archiveCategory,
   createCategory,
+  deleteCategory,
+  renameCategory,
+  unarchiveCategory,
   createRuleFromTransaction,
   deactivateBudget,
+  reactivateBudget,
   deleteRule,
   detectApiBase,
   excludeTransaction,
@@ -71,8 +76,21 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  // Archived categories stay in `categories` -- the Categories page lists them and is
+  // where they come back from -- but must not be offered for new spend, which is the
+  // whole point of archiving. Stated once here so four pickers cannot drift, and
+  // memoized because it is passed to pages that derive from it on every render.
+  const assignableCategories = useMemo(
+    () => categories.filter((category) => category.active),
+    [categories],
+  );
   const [rules, setRules] = useState<Rule[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  // Which month the rows above describe. A budget list is as month-scoped as the
+  // summary is -- a row's status is read against the month requested -- so the same
+  // rule applies: a list fetched for the month the owner left must not be shown
+  // under the one they reached.
+  const [budgetsMonth, setBudgetsMonth] = useState("");
   const [uncategorizedCount, setUncategorizedCount] = useState(0);
   const [summary, setSummary] = useState<SummaryDashboard | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
@@ -151,13 +169,12 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
           return;
         }
 
-        const [initialConnections, initialAccounts, initialCategories, initialRules, initialBudgets] =
+        const [initialConnections, initialAccounts, initialCategories, initialRules] =
           await Promise.all([
             getConnections(base),
             getAccounts(base),
             getCategories(base),
             getRules(base),
-            getBudgets(base),
           ]);
 
         if (cancelled) {
@@ -169,7 +186,6 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
           setAccounts(initialAccounts);
           setCategories(initialCategories);
           setRules(initialRules);
-          setBudgets(initialBudgets);
           setAuthStatus("authenticated");
           setBootError(null);
           setBootLoading(false);
@@ -223,12 +239,14 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
           return;
         }
 
-        const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
-          getTransactions(base, filters, transactionsPaging),
-          getUncategorizedCount(base, filters),
-          getUnknownQueue(base, filters, unknownPaging),
-          getSummary(base, filters.month),
-        ]);
+        const [transactionsPayload, countPayload, unknownPayload, summaryPayload, budgetsPayload] =
+          await Promise.all([
+            getTransactions(base, filters, transactionsPaging),
+            getUncategorizedCount(base, filters),
+            getUnknownQueue(base, filters, unknownPaging),
+            getSummary(base, filters.month),
+            getBudgets(base, filters.month),
+          ]);
 
         if (cancelled) {
           return;
@@ -239,6 +257,8 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
           setSummaryLoading(false);
           setSummaryError(null);
           setUncategorizedCount(countPayload);
+          setBudgets(budgetsPayload);
+          setBudgetsMonth(summaryPayload.month);
         });
 
         let adjusted = false;
@@ -311,19 +331,17 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     if (!apiBase) {
       return;
     }
-    const [nextConnections, nextAccounts, nextCategories, nextRules, nextBudgets] = await Promise.all([
+    const [nextConnections, nextAccounts, nextCategories, nextRules] = await Promise.all([
       getConnections(apiBase),
       getAccounts(apiBase),
       getCategories(apiBase),
       getRules(apiBase),
-      getBudgets(apiBase),
     ]);
     startTransition(() => {
       setConnections(nextConnections);
       setAccounts(nextAccounts);
       setCategories(nextCategories);
       setRules(nextRules);
-      setBudgets(nextBudgets);
     });
   }
 
@@ -363,12 +381,14 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     }
     const requestedMonth = filters.month;
     try {
-      const [transactionsPayload, countPayload, unknownPayload, summaryPayload] = await Promise.all([
-        getTransactions(apiBase, filters, transactionsPaging),
-        getUncategorizedCount(apiBase, filters),
-        getUnknownQueue(apiBase, filters, unknownPaging),
-        getSummary(apiBase, filters.month),
-      ]);
+      const [transactionsPayload, countPayload, unknownPayload, summaryPayload, budgetsPayload] =
+        await Promise.all([
+          getTransactions(apiBase, filters, transactionsPaging),
+          getUncategorizedCount(apiBase, filters),
+          getUnknownQueue(apiBase, filters, unknownPaging),
+          getSummary(apiBase, filters.month),
+          getBudgets(apiBase, filters.month),
+        ]);
 
       // The owner reached another month while this was in flight. These payloads
       // describe the month they left, and the loader keyed on the new month is already
@@ -383,6 +403,8 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
         setSummaryLoading(false);
         setSummaryError(null);
         setUncategorizedCount(countPayload);
+        setBudgets(budgetsPayload);
+        setBudgetsMonth(summaryPayload.month);
       });
 
       let adjusted = false;
@@ -502,6 +524,55 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
 
     const canonicalCategories = await getCategories(apiBase);
     setCategories(canonicalCategories);
+  }
+
+  async function renameCategoryAction(categoryId: string, name: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await renameCategory(apiBase, categoryId, name);
+    // The name is the label on four surfaces, and all four read it off the category,
+    // so all four are re-read. Nothing here patches a name into a cached row: a rename
+    // the backend normalized or rejected would otherwise show locally as typed.
+    const [nextCategories, nextRules, nextBudgets, nextSummary] = await Promise.all([
+      getCategories(apiBase),
+      getRules(apiBase),
+      getBudgets(apiBase, filters.month),
+      getSummary(apiBase, filters.month),
+    ]);
+    setCategories(nextCategories);
+    setRules(nextRules);
+    setBudgets(nextBudgets);
+    setBudgetsMonth(nextSummary.month);
+    setSummary(nextSummary);
+  }
+
+  /** Deleting is refused by the backend unless nothing points at the category, so
+      nothing else on screen can have changed -- only the list needs re-reading. */
+  async function deleteCategoryAction(categoryId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await deleteCategory(apiBase, categoryId);
+    setCategories(await getCategories(apiBase));
+  }
+
+  /** Same reasoning: archiving is refused while a budget reaches this month or an
+      active rule targets it, so no budget figure on screen can change either. */
+  async function archiveCategoryAction(categoryId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await archiveCategory(apiBase, categoryId);
+    setCategories(await getCategories(apiBase));
+  }
+
+  async function unarchiveCategoryAction(categoryId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await unarchiveCategory(apiBase, categoryId);
+    setCategories(await getCategories(apiBase));
   }
 
   async function updateAccountAction(
@@ -638,8 +709,12 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     // Create the budget for the month the user is currently viewing, not always
     // the real current month, so a new budget shows up in the summary they see.
     await createBudgetForMonth(apiBase, draft, `${filters.month}-01`);
-    const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
+    const [nextBudgets, nextSummary] = await Promise.all([
+      getBudgets(apiBase, filters.month),
+      getSummary(apiBase, filters.month),
+    ]);
     setBudgets(nextBudgets);
+    setBudgetsMonth(nextSummary.month);
     setSummary(nextSummary);
   }
 
@@ -647,9 +722,27 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await updateBudget(apiBase, budgetId, draft);
-    const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
+    await updateBudget(apiBase, budgetId, draft, filters.month);
+    const [nextBudgets, nextSummary] = await Promise.all([
+      getBudgets(apiBase, filters.month),
+      getSummary(apiBase, filters.month),
+    ]);
     setBudgets(nextBudgets);
+    setBudgetsMonth(nextSummary.month);
+    setSummary(nextSummary);
+  }
+
+  async function reactivateBudgetAction(budgetId: string) {
+    if (!apiBase) {
+      throw new Error("API base not loaded");
+    }
+    await reactivateBudget(apiBase, budgetId, filters.month);
+    const [nextBudgets, nextSummary] = await Promise.all([
+      getBudgets(apiBase, filters.month),
+      getSummary(apiBase, filters.month),
+    ]);
+    setBudgets(nextBudgets);
+    setBudgetsMonth(nextSummary.month);
     setSummary(nextSummary);
   }
 
@@ -657,9 +750,13 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     if (!apiBase) {
       throw new Error("API base not loaded");
     }
-    await deactivateBudget(apiBase, budgetId);
-    const [nextBudgets, nextSummary] = await Promise.all([getBudgets(apiBase), getSummary(apiBase, filters.month)]);
+    await deactivateBudget(apiBase, budgetId, filters.month);
+    const [nextBudgets, nextSummary] = await Promise.all([
+      getBudgets(apiBase, filters.month),
+      getSummary(apiBase, filters.month),
+    ]);
     setBudgets(nextBudgets);
+    setBudgetsMonth(nextSummary.month);
     setSummary(nextSummary);
   }
 
@@ -671,6 +768,9 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
   // have for a month whose figures are unknown. The Categories page reached this
   // conclusion for its budget rows; this is that rule applied once, at the door.
   const summaryForSelectedMonth = summary && summary.month === filters.month ? summary : null;
+  // Null, not an empty list: "no budgets this month" is a claim, and a month whose
+  // list has not arrived is not entitled to make it.
+  const budgetsForSelectedMonth = budgetsMonth === filters.month ? budgets : null;
 
   return {
     apiBase,
@@ -682,8 +782,9 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     connections,
     accounts,
     categories,
+    assignableCategories,
     rules,
-    budgets,
+    budgets: budgetsForSelectedMonth,
     summary: summaryForSelectedMonth,
     summaryLoading,
     summaryError,
@@ -699,6 +800,10 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     listMonthTransactions,
     refreshReferenceData,
     createCategory: createCategoryAction,
+    renameCategory: renameCategoryAction,
+    deleteCategory: deleteCategoryAction,
+    archiveCategory: archiveCategoryAction,
+    unarchiveCategory: unarchiveCategoryAction,
     updateAccount: updateAccountAction,
     syncConnection: syncConnectionAction,
     categorizeTransaction: categorizeTransactionAction,
@@ -712,5 +817,6 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     createBudget: createBudgetAction,
     updateBudget: updateBudgetAction,
     deactivateBudget: deactivateBudgetAction,
+    reactivateBudget: reactivateBudgetAction,
   };
 }

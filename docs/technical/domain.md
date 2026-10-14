@@ -180,7 +180,11 @@ For the first version, monthly budgets are sufficient.
 
 Budgets should be defined per category.
 
-A category can hold more than one budget row overlapping a single month, so a month's commitment for a category is the sum of its active rows, and the category counts as fixed if any of them is. Every budget-basis figure is derived from that per-category fold rather than from the rows themselves, because the spend it is compared against is grouped per category: pairing each row with it counts the commitment once per row — inventing a fixed overrun for an owner who is exactly on budget, adding the step projection twice, and printing the same category twice with each row claiming all of its spend.
+A category holds **at most one budget covering any given month**. It can hold many rows over time — one per amount change, each closing where the next begins — but their windows never overlap. Creating a window and reopening a cancelled one both refuse an overlap, through one predicate, because two rows covering a month are summed into a single inflated figure; see `docs/adr/0005-budget-windows-are-month-granular.md`.
+
+Even so, every budget-basis figure is derived from a **fold per category** — a month's commitment is the sum of that category's active rows, and the category counts as fixed if any of them is — rather than from the rows themselves. That fold is a defensive invariant of `SummaryService`, not a consequence of the model: it protects figures from a row pair the service refuses to write but that a database predating the guard could still hold, since `0008_budget_active_to_month_end` normalises window edges without de-duplicating overlaps.
+
+It is kept because the spend each figure is compared against is grouped per category, so pairing each row with that spend would count the commitment once per row — inventing a fixed overrun for an owner who is exactly on budget, adding the step projection twice, and printing the same category twice with each row claiming all of its spend. A single pathological row pair would therefore corrupt several figures at once, which is more than the fold costs.
 
 There is no need for a separate global monthly budget entity in the first version, because the overall budget can be derived as the sum of all active category budgets.
 

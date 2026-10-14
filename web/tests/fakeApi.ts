@@ -24,16 +24,18 @@ interface MonthLedger {
   transactions: Transaction[];
   unknownQueue: Transaction[];
   summary: Partial<SummaryDashboard>;
+  budgets: Budget[];
 }
 
 const ledgers = new Map<string, MonthLedger>();
+const categoryStore = new Map<string, Category>();
 const heldMonths = new Set<string>();
 const resumers = new Map<string, (() => void)[]>();
 const failures = new Map<string, string>();
 let currentMonth = "2026-10";
 
 function emptyLedger(): MonthLedger {
-  return { transactions: [], unknownQueue: [], summary: {} };
+  return { transactions: [], unknownQueue: [], summary: {}, budgets: [] };
 }
 
 let unscopedLedgerReads = 0;
@@ -46,6 +48,7 @@ let unscopedLedgerReads = 0;
 export const fakeApi = {
   reset(): void {
     ledgers.clear();
+    categoryStore.clear();
     heldMonths.clear();
     resumers.clear();
     failures.clear();
@@ -58,6 +61,10 @@ export const fakeApi = {
   },
   setMonth(month: string, ledger: Partial<MonthLedger>): void {
     ledgers.set(month, { ...emptyLedger(), ...ledger });
+  },
+  setCategories(categories: Category[]): void {
+    categoryStore.clear();
+    categories.forEach((category) => categoryStore.set(category.category_id, category));
   },
   /** Park every read that asks for this month until `resumeReads`. */
   holdReads(month: string): void {
@@ -161,6 +168,25 @@ export function summaryFor(month: string): SummaryDashboard {
   };
 }
 
+export function budget(categoryName: string, overrides: Partial<Budget> = {}): Budget {
+  return {
+    budget_id: `budget-${categoryName.toLowerCase()}`,
+    category_id: `cat-${categoryName.toLowerCase()}`,
+    category_name: categoryName,
+    category_type: "expense",
+    amount: "800.00",
+    currency: "EUR",
+    period_type: "monthly",
+    active_from: "2025-01-01",
+    active_to: null,
+    is_fixed: true,
+    active: true,
+    status: "active",
+    can_reactivate: false,
+    ...overrides,
+  };
+}
+
 export function transaction(
   transactionId: string,
   description: string,
@@ -212,15 +238,20 @@ export async function getAccounts(): Promise<Account[]> {
 }
 
 export async function getCategories(): Promise<Category[]> {
-  return [];
+  return [...categoryStore.values()];
 }
 
 export async function getRules(): Promise<Rule[]> {
   return [];
 }
 
-export async function getBudgets(): Promise<Budget[]> {
-  return [];
+export async function getBudgets(_apiBase: string, month: string): Promise<Budget[]> {
+  // Budgets are per month like the summary is, so this answers the month it was
+  // asked for. A fake that returned one list whatever was requested would agree
+  // with a caller that never passes the month -- the defect under test.
+  //
+  // An omitted month means the month the owner is in, as it does on `/summary`.
+  return read(month, () => ledgerFor(month || currentMonth).budgets);
 }
 
 export async function getSummary(_apiBase: string, month: string): Promise<SummaryDashboard> {
@@ -258,8 +289,112 @@ function notExercised(name: string) {
 
 export const createBudgetForMonth = notExercised("createBudgetForMonth");
 export const createCategory = notExercised("createCategory");
+
+export async function deleteCategory(_apiBase: string, categoryId: string): Promise<void> {
+  // Strict about what the backend allows: a category anything points at is refused
+  // there, so a fake that deleted it regardless would let a caller look correct while
+  // asking for something the real endpoint rejects.
+  if (!categoryStore.has(categoryId)) {
+    throw new Error(`Category not found for id ${categoryId}`);
+  }
+  for (const ledger of ledgers.values()) {
+    if (ledger.budgets.some((row) => row.category_id === categoryId)) {
+      throw new Error("Category 'X' is still used by 1 budget");
+    }
+  }
+  categoryStore.delete(categoryId);
+}
+
+export async function archiveCategory(_apiBase: string, categoryId: string): Promise<Category> {
+  return setCategoryActive(categoryId, false);
+}
+
+export async function unarchiveCategory(_apiBase: string, categoryId: string): Promise<Category> {
+  return setCategoryActive(categoryId, true);
+}
+
+function setCategoryActive(categoryId: string, active: boolean): Category {
+  const category = categoryStore.get(categoryId);
+  if (category === undefined) {
+    throw new Error(`Category not found for id ${categoryId}`);
+  }
+  const updated = { ...category, active };
+  categoryStore.set(categoryId, updated);
+  return updated;
+}
+
+export async function renameCategory(
+  _apiBase: string,
+  categoryId: string,
+  name: string,
+): Promise<Category> {
+  // Strict about the id: a caller that renames the wrong category, or passes an id
+  // it never had, fails here rather than getting a payload back that agrees with it.
+  const category = categoryStore.get(categoryId);
+  if (category === undefined) {
+    throw new Error(`Category not found for id ${categoryId}`);
+  }
+  const renamed = { ...category, name };
+  categoryStore.set(categoryId, renamed);
+  // Budget rows and rules label themselves with the category's name through a join,
+  // so the rename lands on them too -- which is what makes a missing refresh in the
+  // caller observable instead of invisible.
+  for (const ledger of ledgers.values()) {
+    ledger.budgets = ledger.budgets.map((row) =>
+      row.category_id === categoryId ? { ...row, category_name: name } : row,
+    );
+  }
+  return renamed;
+}
 export const createRuleFromTransaction = notExercised("createRuleFromTransaction");
-export const deactivateBudget = notExercised("deactivateBudget");
+export async function deactivateBudget(
+  _apiBase: string,
+  budgetId: string,
+  month: string,
+): Promise<Budget> {
+  // Applies the cancellation to the month it was told about, which is the whole
+  // question here: the backend closes the window relative to that month, so a caller
+  // that sends its own idea of "now" changes a month the owner was not looking at.
+  // A fake that cancelled everywhere would agree with either caller.
+  if (!month) {
+    throw new Error("deactivateBudget was given no month");
+  }
+  const ledger = ledgerFor(month);
+  let cancelled: Budget | null = null;
+  ledger.budgets = ledger.budgets.map((row) => {
+    if (row.budget_id !== budgetId) {
+      return row;
+    }
+    cancelled = { ...row, active: false, status: "inactive", active_to: `${month}-01` };
+    return cancelled;
+  });
+  if (cancelled === null) {
+    throw new Error(`Budget not found for id ${budgetId} in ${month}`);
+  }
+  return cancelled;
+}
+
+export async function reactivateBudget(_apiBase: string, budgetId: string): Promise<Budget> {
+  // The backend reopens the window on the same row, so a month that had dropped the
+  // budget holds it again. Ledgers here are per month, so the row is restored
+  // wherever this fake was told it exists -- which is what makes the refresh the
+  // hook does afterwards observable, rather than agreeing with it by returning a
+  // fixed payload.
+  let restored: Budget | null = null;
+  for (const ledger of ledgers.values()) {
+    ledger.budgets = ledger.budgets.map((row) => {
+      if (row.budget_id !== budgetId) {
+        return row;
+      }
+      restored = { ...row, active_to: null, active: true, status: "active" };
+      return restored;
+    });
+  }
+  if (restored === null) {
+    throw new Error(`Budget not found for id ${budgetId}`);
+  }
+  return restored;
+}
 export const deleteRule = notExercised("deleteRule");
 export const excludeTransaction = notExercised("excludeTransaction");
 export const login = notExercised("login");

@@ -23,6 +23,10 @@ class CreateCategoryRequest(BaseModel):
     type: Literal["expense", "income", "transfer"] = "expense"
 
 
+class RenameCategoryRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
 class UncategorizedTransactionListResponse(BaseModel):
     transactions: list[TransactionSummaryResponse]
     total_count: int

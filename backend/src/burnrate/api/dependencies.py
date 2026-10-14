@@ -147,8 +147,9 @@ def get_ledger_service(
 
 def get_categorization_service(
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> CategorizationService:
-    return CategorizationService(db=db)
+    return CategorizationService(db=db, timezone_name=settings.app_timezone)
 
 
 def get_rules_service(

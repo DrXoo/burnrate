@@ -137,6 +137,16 @@ export function IconSync(props: IconProps) {
   );
 }
 
+/** Counter-clockwise arrow: undo a cancellation, putting a budget back as it was. */
+export function IconRestore(props: IconProps) {
+  return (
+    <Svg width={13} strokeWidth={2} {...props}>
+      <path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.4 2.6L3 8" />
+      <path d="M3 3v5h5" />
+    </Svg>
+  );
+}
+
 export function IconSearch(props: IconProps) {
   return (
     <Svg width={15} strokeWidth={2} {...props}>

@@ -7,10 +7,11 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
+from burnrate.db.budget_windows import budget_covers_month
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
@@ -415,13 +416,19 @@ class SummaryService:
     def _get_active_budgets(self, *, month_start: date, month_end: date) -> list[ActiveBudgetWindow]:
         """One budget window per category, with the month's estimates folded together.
 
-        A category can hold more than one ``Budget`` row overlapping a month, and the
-        spend every derived figure reads is grouped by category. Pairing each row with
-        it counted the whole commitment once per row: a Rent category budgeted 500.00
-        then 600.00 and charged exactly 1100.00 invented 1100.00 of fixed overrun,
-        which zeroed Safe to Spend Today and flagged the month ``over`` for an owner
-        on budget, added the step projection a second time, and printed two Rent rows
-        each claiming all of the spend.
+        A category is not supposed to hold two rows covering one month: creating a
+        window and reopening a cancelled one both refuse an overlap. This fold is the
+        defence anyway, because a database predating that guard can still hold such a
+        pair -- ``0008_budget_active_to_month_end`` normalises window edges without
+        de-duplicating them -- and one pathological pair corrupts several figures at
+        once.
+
+        The spend every derived figure reads is grouped by category, so pairing each
+        row with it counted the whole commitment once per row: a Rent category
+        budgeted 500.00 then 600.00 and charged exactly 1100.00 invented 1100.00 of
+        fixed overrun, which zeroed Safe to Spend Today and flagged the month ``over``
+        for an owner on budget, added the step projection a second time, and printed
+        two Rent rows each claiming all of the spend.
 
         Summing the estimates is the reading ``monthly_budget`` already takes of the
         same rows, so the total and the rows beneath it cannot disagree. A category
@@ -431,10 +438,7 @@ class SummaryService:
         rows = self.db.execute(
             select(Budget, Category.name)
             .join(Category, Category.id == Budget.category_id)
-            .where(
-                Budget.active_from < month_end,
-                or_(Budget.active_to.is_(None), Budget.active_to >= month_start),
-            )
+            .where(budget_covers_month(month_start=month_start, month_end=month_end))
             .order_by(Category.name.asc(), Budget.active_from.desc(), Budget.created_at.desc())
         ).all()
 

@@ -164,11 +164,38 @@ export default function App() {
   }
   async function deactivateBudget(budgetId: string) {
     await data.deactivateBudget(budgetId);
-    showToast("Budget removed");
+    // "Removed" claimed more than happened: the row stays, and the months it covered
+    // keep it. Cancelling is what the owner did, and it is undoable.
+    showToast("Budget cancelled");
+  }
+  async function reactivateBudget(budgetId: string) {
+    await data.reactivateBudget(budgetId);
+    showToast("Budget reactivated");
   }
   async function createCategory(name: string, type: Parameters<typeof data.createCategory>[1]) {
     await data.createCategory(name, type);
     showToast(`Category “${name}” created`);
+  }
+  async function renameCategory(categoryId: string, name: string) {
+    // Rethrown, not toasted: the caller keeps its editor open on the reason -- a name
+    // already in use is the owner's to resolve, and a toast that fades takes the
+    // reason with it.
+    await data.renameCategory(categoryId, name);
+    showToast(`Renamed to “${name}”`);
+  }
+  async function deleteCategory(categoryId: string) {
+    // Rethrown like renameCategory: the Categories panel keeps the refusal on screen,
+    // because it names the transactions, budgets or rules still pointing at it.
+    await data.deleteCategory(categoryId);
+    showToast("Category deleted");
+  }
+  async function archiveCategory(categoryId: string) {
+    await data.archiveCategory(categoryId);
+    showToast("Category archived");
+  }
+  async function unarchiveCategory(categoryId: string) {
+    await data.unarchiveCategory(categoryId);
+    showToast("Category unarchived");
   }
   async function updateAccount(accountId: string, draft: Parameters<typeof data.updateAccount>[1]) {
     await data.updateAccount(accountId, draft);
@@ -261,6 +288,7 @@ export default function App() {
               <TransactionsPage
                 accounts={data.accounts}
                 categories={data.categories}
+                assignableCategories={data.assignableCategories}
                 rules={data.rules}
                 filters={data.filters}
                 applyFilters={data.applyFilters}
@@ -288,7 +316,7 @@ export default function App() {
                 loading={data.unknownQueue.loading}
                 error={data.unknownQueue.error}
                 paging={data.unknownPaging}
-                categories={data.categories}
+                assignableCategories={data.assignableCategories}
                 onMovePage={data.moveUnknownPage}
                 onCategorize={categorize}
                 onExclude={exclude}
@@ -305,6 +333,10 @@ export default function App() {
                 monthLabel={monthLabel}
                 loadMonthTransactions={data.listMonthTransactions}
                 onCreateCategory={createCategory}
+                onRenameCategory={renameCategory}
+                onDeleteCategory={deleteCategory}
+                onArchiveCategory={archiveCategory}
+                onUnarchiveCategory={unarchiveCategory}
               />
             ) : null}
 
@@ -312,6 +344,7 @@ export default function App() {
               <RulesBudgetsPage
                 rules={data.rules}
                 categories={data.categories}
+                assignableCategories={data.assignableCategories}
                 budgets={data.budgets}
                 summary={data.summary}
                 onToggleRule={toggleRule}
@@ -320,6 +353,8 @@ export default function App() {
                 onCreateBudget={createBudget}
                 onUpdateBudget={updateBudget}
                 onDeactivateBudget={deactivateBudget}
+                onReactivateBudget={reactivateBudget}
+                onRenameCategory={renameCategory}
               />
             ) : null}
 

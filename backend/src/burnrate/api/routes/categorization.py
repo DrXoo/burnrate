@@ -8,12 +8,32 @@ from burnrate.api.schemas.categorization import (
     CategoryListResponse,
     CategorySummaryResponse,
     CreateCategoryRequest,
+    RenameCategoryRequest,
     TransactionCategoryStateResponse,
     UncategorizedTransactionListResponse,
 )
-from burnrate.services.categorization_service import CategorizationService
+from burnrate.services.categorization_service import (
+    CategorizationService,
+    CategoryInUseError,
+    CategoryNameTakenError,
+)
 
 router = APIRouter(tags=["categorization"])
+
+
+def _as_http_error(exc: ValueError) -> HTTPException:
+    """The one place a category failure becomes a status code.
+
+    Stated once because every category handler needs the same mapping, and because a
+    conflict is recognised by its type rather than by its wording -- matching on the
+    message makes the status depend on the phrasing of a sentence written for the owner.
+    """
+    message = str(exc)
+    if isinstance(exc, (CategoryNameTakenError, CategoryInUseError)):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
+    if "not found" in message.lower():
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
 @router.get("/categories", response_model=CategoryListResponse)
@@ -31,7 +51,65 @@ def create_category(
     try:
         payload = service.create_category(name=request.name, category_type=request.type)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise _as_http_error(exc) from exc
+
+    return CategorySummaryResponse.model_validate(payload)
+
+
+@router.patch("/categories/{category_id}", response_model=CategorySummaryResponse)
+def rename_category(
+    category_id: str,
+    request: RenameCategoryRequest,
+    service: CategorizationService = Depends(get_categorization_service),
+) -> CategorySummaryResponse:
+    """Rename a category, which renames it on every surface that labels it."""
+    try:
+        payload = service.rename_category(category_id=category_id, name=request.name)
+    except ValueError as exc:
+        raise _as_http_error(exc) from exc
+
+    return CategorySummaryResponse.model_validate(payload)
+
+
+@router.delete("/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_category(
+    category_id: str,
+    service: CategorizationService = Depends(get_categorization_service),
+) -> None:
+    """Remove a category outright, which only an unreferenced one allows.
+
+    A category anything points at is refused with the reason, because its budgets are
+    what past months reported. Retiring a used one is ``/archive``.
+    """
+    try:
+        service.delete_category(category_id=category_id)
+    except ValueError as exc:
+        raise _as_http_error(exc) from exc
+
+
+@router.post("/categories/{category_id}/archive", response_model=CategorySummaryResponse)
+def archive_category(
+    category_id: str,
+    service: CategorizationService = Depends(get_categorization_service),
+) -> CategorySummaryResponse:
+    """Hide a category from new assignments, keeping everything it already recorded."""
+    try:
+        payload = service.archive_category(category_id=category_id)
+    except ValueError as exc:
+        raise _as_http_error(exc) from exc
+
+    return CategorySummaryResponse.model_validate(payload)
+
+
+@router.post("/categories/{category_id}/unarchive", response_model=CategorySummaryResponse)
+def unarchive_category(
+    category_id: str,
+    service: CategorizationService = Depends(get_categorization_service),
+) -> CategorySummaryResponse:
+    try:
+        payload = service.unarchive_category(category_id=category_id)
+    except ValueError as exc:
+        raise _as_http_error(exc) from exc
 
     return CategorySummaryResponse.model_validate(payload)
 

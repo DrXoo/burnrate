@@ -10,7 +10,9 @@ interface ReviewPageProps {
   loading: boolean;
   error: string | null;
   paging: PagingState;
-  categories: Category[];
+  /** Only an assignment picker here, so archived categories are excluded: the queue
+      exists to file new spend, and a retired category must not receive any. */
+  assignableCategories: Category[];
   onMovePage: (direction: "prev" | "next") => void;
   onCategorize: (transactionId: string, categoryId: string) => Promise<void>;
   onExclude: (transactionId: string) => Promise<void>;
@@ -37,7 +39,7 @@ const ignoreButton: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-export function ReviewPage({ items, total, loading, error, paging, categories, onMovePage, onCategorize, onExclude }: ReviewPageProps) {
+export function ReviewPage({ items, total, loading, error, paging, assignableCategories, onMovePage, onCategorize, onExclude }: ReviewPageProps) {
   if (error && items.length === 0) {
     return <div style={{ padding: "24px 4px", color: "var(--over)", fontSize: 13.5 }}>{error}</div>;
   }
@@ -126,7 +128,7 @@ export function ReviewPage({ items, total, loading, error, paging, categories, o
                   }}
                 >
                   <option value="uncat">Choose category…</option>
-                  {categories.map((category) => (
+                  {assignableCategories.map((category) => (
                     <option key={category.category_id} value={category.category_id}>
                       {category.name}
                     </option>

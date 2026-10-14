@@ -237,6 +237,23 @@ Suggested constraints:
 Notes:
 
 * `type` should support values such as `expense`, `income`, and `transfer`.
+* `name` is editable after creation; it is the only label any surface shows for a
+  category, so a rename reaches budget rows, rules and the dashboard through the
+  joins rather than being copied anywhere.
+* Uniqueness on `name` is enforced case-insensitively by the application, which is
+  stricter than the exact database constraint.
+* `active` is how a category is retired. Three guards read it and refuse an inactive
+  category: new transaction assignments, new budgets, and new rules. Archiving is
+  therefore the only way to retire a category that has history, and it keeps every
+  row that already points at it.
+* A category is deleted outright only while nothing references it -- no transaction,
+  no budget, no rule. A referenced one is refused rather than cascaded, because its
+  budget rows are what past months reported, and dropping them would change figures
+  those months already published.
+* Archiving is itself refused while anything would still file new spend into the
+  category: a budget whose window reaches the current month or later, or an active
+  rule targeting it. Both are the owner's to clear first, so neither is cancelled
+  silently as a side effect.
 
 ---
 
@@ -308,15 +325,23 @@ Notes:
 * **The window is month-granular at both ends, and the counting rule is why.** A
   budget is counted in full for any month its `[active_from, active_to]` window
   touches at all — there is no proration — so a window edge landing one day inside a
-  month hands that month the whole amount. `active_from` is therefore required to be
-  a 1st, and `active_to` must be written as the last day a month the budget really
-  covered: cancelling a budget records *yesterday*, not today, or cancelling on the
-  1st would give the new month a budget the owner had just switched off. An open
-  window (`active_to` NULL) is the normal state and rolls forward indefinitely, which
-  is why nothing asks the owner to close a month; changing an amount from a given
-  month creates the next row and closes the previous one automatically. Proration is
-  the alternative and was weighed and deferred; see
+  month hands that month the whole amount. Both edges are therefore month
+  boundaries: `active_from` is required to be a 1st, and `active_to` is always a
+  month end or NULL. Cancelling records the last day of the month *before* the one
+  the owner is in, so the month they cancel in drops the budget — cancelling says
+  the commitment is gone, the rest of this month included. An open window
+  (`active_to` NULL) is the normal state and rolls forward indefinitely, which is
+  why nothing asks the owner to close a month; changing an amount from a given month
+  creates the next row and closes the previous one automatically. Cancelling is
+  undoable: reactivating clears `active_to` on the same row, and is refused when a
+  later budget for the category has taken over. Proration is the alternative and was
+  weighed and deferred; see
   `docs/adr/0005-budget-windows-are-month-granular.md`.
+* **A budget's status is relative to a month, not to today.** The same window rule
+  decides both what a month's total counts and whether a row is `active`,
+  `scheduled` or `inactive` for the month being viewed, so `GET /budgets` takes the
+  same optional `?month=YYYY-MM` as `/summary` and defaults to the month the owner
+  is in. `burnrate.db.budget_windows` holds the rule for both readers.
 
 ---
 
