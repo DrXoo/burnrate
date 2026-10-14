@@ -237,23 +237,16 @@ Suggested constraints:
 Notes:
 
 * `type` should support values such as `expense`, `income`, and `transfer`.
-* `name` is editable after creation; it is the only label any surface shows for a
-  category, so a rename reaches budget rows, rules and the dashboard through the
-  joins rather than being copied anywhere.
-* Uniqueness on `name` is enforced case-insensitively by the application, which is
-  stricter than the exact database constraint.
-* `active` is how a category is retired. Three guards read it and refuse an inactive
-  category: new transaction assignments, new budgets, and new rules. Archiving is
-  therefore the only way to retire a category that has history, and it keeps every
-  row that already points at it.
-* A category is deleted outright only while nothing references it -- no transaction,
-  no budget, no rule. A referenced one is refused rather than cascaded, because its
-  budget rows are what past months reported, and dropping them would change figures
-  those months already published.
-* Archiving is itself refused while anything would still file new spend into the
-  category: a budget whose window reaches the current month or later, or an active
-  rule targeting it. Both are the owner's to clear first, so neither is cancelled
-  silently as a side effect.
+* `name` is editable after creation and is the only label any surface shows for a
+  category, so nothing stores a copy of it. Uniqueness is enforced
+  case-insensitively by the application, which is stricter than the exact database
+  constraint. See `docs/adr/0006-a-categorys-name-is-the-only-name-it-has.md`.
+* `active` is how a category is retired, and it is the only way to retire one that
+  has history: rows are deleted only while nothing references them. Four guards read
+  this column and refuse an inactive category -- assigning a transaction, opening a
+  budget, creating a rule, and reopening a cancelled budget. See
+  `docs/adr/0007-a-used-category-is-archived-never-deleted.md` for why deleting a
+  referenced category is refused rather than cascaded.
 
 ---
 

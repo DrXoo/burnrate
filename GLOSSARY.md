@@ -49,6 +49,19 @@ not the owner's decision at all, although the import stores it in `status` under
 that same word.
 _Avoid_: Ignored, rejected, void, reversed
 
+### Categories
+
+**Category**:
+The grouping a transaction is filed under, typed as expense, income or transfer.
+A budget is set for one, and a rule files into one.
+_Avoid_: Tag, label, bucket, class
+
+**Archived Category**:
+A category the owner has retired: closed to new spend, while everything already
+filed under it keeps counting. It is still named wherever past months are
+reported, which is what distinguishes archiving from deleting.
+_Avoid_: Deleted, hidden, disabled
+
 ### Budgets
 
 **Budget**:
