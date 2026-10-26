@@ -65,6 +65,63 @@ reconcile two vocabularies for the same payload.
 """
 
 
+_COMPARISON_PHRASES = {
+    "no_baseline": "no baseline yet",
+    "in_line": "in line with usual",
+    "below": "{magnitude} below usual",
+    "above": "{magnitude} above usual",
+    "anomalous": "unusually high · {magnitude} above usual",
+}
+
+
+def _comparison_phrase(comparison: dict[str, Any]) -> str:
+    """Words for a band the backend already decided.
+
+    The bot renders; it does not band. A client that re-derives a threshold is how
+    an on-plan month came to flip to a warning around day 26, and ticket 17 is where
+    this formatter stopped working out a month's tense for itself. The wording
+    matches the dashboard's, so an owner who reads both does not have to reconcile
+    two vocabularies for one payload.
+
+    The magnitude is rounded to a whole percent: the owner is deciding whether to
+    care, not auditing.
+    """
+    deviation = comparison["deviation_percent"]
+    magnitude = "" if deviation is None else f"{abs(round(deviation)):.0f}%"
+    return _COMPARISON_PHRASES[comparison["comparison_status"]].format(magnitude=magnitude)
+
+
+def _comparison_lines(payload: dict[str, Any], currency: str | None) -> list[str]:
+    """What the month's spending looks like against what is normal, or nothing.
+
+    Omitted entirely when the backend offers no comparison, rather than stated as
+    the dashboard states it. The asymmetry is deliberate: a screen the owner is
+    looking at makes an absent line ambiguous, and it reads as "nothing to say about
+    your spending"; a chat reply is a list of facts, and a fact that is not known is
+    simply not among them.
+
+    Only the comparable half is judged, and the rest is disclosed beside it rather
+    than folded in -- the shape Unbudgeted Spend already has above. See
+    ``docs/product/metrics.md``.
+    """
+    if payload.get("baseline_status") != "ok":
+        return []
+    comparison = payload["comparable_spend_baseline"]
+    baseline = comparison["baseline_amount"]
+    if baseline is None:
+        return []
+    months = payload["baseline_months_count"]
+    lines = [
+        f"   ↳ {_money(payload['comparable_spend_amount'], currency)} comparable"
+        f" · normally {_money(baseline, currency)}"
+        f" · {_comparison_phrase(comparison)} ({months}-month avg)"
+    ]
+    uncomparable = payload["uncomparable_spend_amount"]
+    if Decimal(uncomparable) != 0:
+        lines.append(f"   ↳ {_money(uncomparable, currency)} cannot be compared")
+    return lines
+
+
 def format_summary(payload: dict[str, Any]) -> str:
     currency = payload["current_balance_currency"]
     tense = _TENSE_SUFFIXES.get(payload["safe_to_spend_status"], "")
@@ -81,6 +138,8 @@ def format_summary(payload: dict[str, Any]) -> str:
 
     if Decimal(payload.get("unbudgeted_spending_amount", "0.00")) != 0:
         lines.append(f"   ↳ incl. {_money(payload['unbudgeted_spending_amount'], currency)} unbudgeted")
+
+    lines.extend(_comparison_lines(payload, currency))
 
     if Decimal(payload.get("monthly_income_amount", "0.00")) > 0:
         net_icon = "📈" if Decimal(payload["net_cash_flow_amount"]) >= 0 else "📉"
