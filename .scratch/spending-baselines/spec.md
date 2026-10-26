@@ -334,7 +334,8 @@ The month window is already non-sargable and plans as a sequential scan, and thi
 reads three months where one was read before. Request cost for the summary endpoint
 is measured before and after, and the figure is recorded. The roadmap requires
 measurement before any snapshot table is considered, and this is that measurement,
-not a licence to build one.
+not a licence to build one. The before-figure is recorded below, under
+**Recorded Measurement**.
 
 ## Testing Decisions
 
@@ -447,6 +448,88 @@ timezone cases.
 * **Snapshot tables.** The roadmap requires measurement first, and this spec measures.
 * **Proactive alerting.** Phase 10. 9a makes the comparison visible; it does not make
   the product speak first.
+
+## Recorded Measurement
+
+### Before (ticket 01, taken 2026-10-26, against commit `20592fe`)
+
+Against the owner's live database, 623 transactions.
+
+| Case | Month | SQL statements | Cold | Warm median |
+|---|---|---|---|---|
+| Current month | 2026-10 | 6 | 48.6 ms | 11.8 ms |
+| Closed month | 2026-09 | 6 | 10.0 ms | 10.0 ms |
+
+Taken twice. The statement count was 6 both times and the warm medians moved by
+0.5 ms and 0.0 ms. Warm min/max across ten runs spanned 9.2 to 13.8 ms, so **wall
+time carries roughly +/-15% of noise on a development machine, and the statement
+count is the stable signal.** It is also the figure that predicts what this feature
+costs, because the growth is in how many month windows get scanned, not in how fast
+one scan runs. Ticket 06 should compare statement counts first and treat a wall-time
+move inside that band as noise.
+
+Both cases cost the same today, and that is the thing to watch rather than a
+curiosity: nothing in the current summary reads a month other than the one
+requested, so a closed month and the current one scan the same number of windows.
+After this feature they will not, and the current month should become the more
+expensive of the two because of the same-day cutoff.
+
+### The harness
+
+Pinned inputs, so that ticket 06 repeats this measurement rather than taking a
+different one. Both the requested month and `today` are fixed: `today` is injectable
+on the service, and leaving it to the wall clock would silently change which case is
+"the current month" as soon as the calendar moves past October.
+
+Run from the repository root, against the running stack:
+
+```
+docker compose exec -T backend python - <<'PY'
+import statistics, time
+from datetime import date
+from sqlalchemy import event, text
+from burnrate.db.session import SessionLocal, engine
+from burnrate.services.summary_service import SummaryService
+
+RUNS = 11
+CASES = [("2026-10", date(2026, 10, 26), "current month"),
+         ("2026-09", date(2026, 10, 26), "closed month")]
+
+statements = []
+@event.listens_for(engine, "before_cursor_execute")
+def _count(conn, cursor, stmt, params, context, executemany):
+    statements.append(stmt)
+
+with SessionLocal() as db:
+    scope = db.execute(text("SELECT count(*) FROM transactions")).scalar()
+    print(f"transactions in database: {scope}")
+    for month, today, label in CASES:
+        svc = SummaryService(db=db, timezone_name="Europe/Madrid")
+        times = []
+        for i in range(RUNS):
+            statements.clear()
+            t0 = time.perf_counter()
+            svc.get_summary(month=month, today=today)
+            times.append((time.perf_counter() - t0) * 1000)
+            if i == 0:
+                n_stmts = len(statements)
+        cold, warm = times[0], times[1:]
+        print(f"\n{month} ({label}), today={today}")
+        print(f"  SQL statements : {n_stmts}")
+        print(f"  cold           : {cold:.1f} ms")
+        print(f"  warm median    : {statistics.median(warm):.1f} ms  (n={len(warm)})")
+        print(f"  warm min/max   : {min(warm):.1f} / {max(warm):.1f} ms")
+PY
+```
+
+The first run of each case is reported separately rather than averaged in, because
+it carries cold cache and connection setup; the median of the remaining ten is the
+comparable figure. It measures the service rather than the HTTP route deliberately:
+the route adds authentication and response validation this feature does not touch,
+and the service takes `today` as a parameter, which is what makes the measurement
+repeatable at all.
+
+---
 
 ## Further Notes
 
