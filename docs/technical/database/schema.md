@@ -217,9 +217,16 @@ Notes:
   baseline is recomputed from these same rows per request, because in this product
   the past changes (a budget cancelled from a past month, the pending sweep, an
   Unknown Transaction finally classified) and a stored figure could not be verified
-  against it. The cost is measured rather than assumed; see the Recorded
-  Measurement in the Phase 9a spec and the roadmap's standing requirement to
-  measure before introducing a snapshot table.
+  against it. The cost was measured rather than assumed, and the
+  answer is **no snapshot table**: 25 statements and some 37ms at the default
+  three-month window, over one owner's 623 transactions. The statement count is
+  bounded by the window rather than by how much history accrues behind it, so five
+  years of rows does not move it. What *would* move it is widening
+  `BASELINE_WINDOW_MONTHS`, which this design invites: twelve months comes to roughly
+  seventy statements per request. That is the trigger for revisiting this, and the
+  cheap mitigation then is the expression index or the stored `effective_date` column
+  named above rather than a snapshot table. Figures and reasoning in the Phase 9a
+  spec's Recorded Measurement.
 * The first version can stay coupled to Enable Banking transaction identifiers.
 
 ---

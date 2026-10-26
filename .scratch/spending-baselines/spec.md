@@ -474,6 +474,74 @@ requested, so a closed month and the current one scan the same number of windows
 After this feature they will not, and the current month should become the more
 expensive of the two because of the same-day cutoff.
 
+### After (ticket 06, taken 2026-10-26, against commit `a965f76`)
+
+Same 623 transactions and the same pinned inputs. The harness was read out of the
+block below and run in a one-off container from a rebuilt image, so that the
+branch's code met the live database without restarting the owner's stack.
+
+| Case | Month | SQL statements | Warm median | Before |
+|---|---|---|---|---|
+| Current month | 2026-10 | 13 | 37.1 ms | 6 / 11.8 ms |
+| Closed month | 2026-09 | 15 | 35.6 ms | 6 / 10.0 ms |
+
+**Ticket 01's prediction was wrong, and in the opposite direction.** It said the
+current month should become the more expensive of the two, and that finding them
+still equal would mean something was broken. They are not equal — but the *closed*
+month costs more. The cutoff is not what drives the cost: `_month_qualifies` tests
+sync coverage first and returns before running the two classification queries, so
+what a candidate month costs depends on **which test it fails**, not on how many
+months end up qualifying. Viewing September, two of its three candidate months pass
+the sync test and go on to the classification queries; viewing October, only one
+does. Four queries against two, and 15 − 13 = 2 accounts for the difference exactly.
+
+That makes the measurement **data-dependent**, which is the more useful finding: the
+same code over the same month costs 13 statements or 16 depending on whether the sync
+history has a hole in it.
+
+### These figures are a lower bound, because the owner's data is holed
+
+Both cases report `baseline_status: insufficient_history` with **zero** Qualifying
+Months, so most of the per-qualifying-month work never ran at all. The live figures
+measure the cheap path.
+
+The ceiling is measured separately, over an in-memory fixture at the default
+three-month window. The queries are the same, so the statement counts carry over; the
+timings would not and are not quoted.
+
+| Qualifying Months | SQL statements |
+|---|---|
+| 0 | 16 |
+| 2 | 22 |
+| 3 | 25 |
+
+Each Qualifying Month costs three more statements — its per-category spend and its
+two aggregate totals — and each candidate month that passes the sync test costs two
+more for classification coverage. The count is therefore bounded by the **window**,
+and does not move with how much history accumulates behind it.
+
+### The snapshot-table decision: no, with a named trigger for revisiting it
+
+**No snapshot table.** Recorded as the decision rather than left implicit.
+
+25 statements and roughly 37 ms, over one owner's 623 transactions, for a screen they
+open a few times a day. `AGENTS.md` ranks performance last of five, and `schema.md`
+already records that single-owner volumes make the non-sargable month window
+immeasurable in practice. Transactions accrue at roughly 80 to 190 a month, so five
+years of history is some 8,000 rows: still a trivial sequential scan, and the
+statement *count* does not move with it at all.
+
+What would change the answer is **widening the baseline window**, which is the one
+thing this design actively invites — `BASELINE_WINDOW_MONTHS` exists so the reach can
+grow as history does. At twelve months the same arithmetic gives roughly seventy
+statements per summary request. So the trigger to revisit this is a window change
+rather than the passage of time, and the cheap mitigation then is the one `schema.md`
+already names for these same queries: an expression index on the coalesce, or the
+stored `effective_date` column Phase 8 deferred. A snapshot table stays the last
+resort rather than the next step.
+
+---
+
 ### The harness
 
 Pinned inputs, so that ticket 06 repeats this measurement rather than taking a
@@ -548,8 +616,8 @@ can tell whether the ground has moved:
 |---|---|---|---|
 | 2026-06 | 7002.82 | 66.6% | no |
 | 2026-07 | 8602.36 | 57.6% | no |
-| 2026-08 | 2858.00 | 0.0% | yes |
-| 2026-09 | 2566.53 | 0.0% | yes |
+| 2026-08 | 2858.00 | 0.0% | no — see below |
+| 2026-09 | 2566.53 | 0.0% | no — see below |
 | 2026-10 | 9479.13 | 2.2% | current month |
 
 Expense-only spend for June through September is 2278.96, 2883.25, 2577.11 and
@@ -557,9 +625,41 @@ Expense-only spend for June through September is 2278.96, 2883.25, 2577.11 and
 holds to within about ±12%, which is where the `in_line` tolerance comes from. The
 apparent volatility in the outgoing column is an artefact of transfers.
 
-Two consequences of that table are worth stating plainly. **The feature ships with
-exactly two qualifying months, which is exactly the minimum** — baselines work from
-day one, by one month's margin. And **classifying the June and July backlog is the
-single highest-value thing the owner can do for this feature**, worth more than any
-code in it: it would take the qualifying set from two months to four and make a
-median worth revisiting.
+**The claim this section originally made was wrong, and ticket 06 corrected it.** It
+read: "the feature ships with exactly two qualifying months, which is exactly the
+minimum — baselines work from day one, by one month's margin." It ships with
+**zero**. That claim was computed from classification coverage alone, before the
+sync-coverage rule existed to disagree with it, and the table above is exactly the
+measurement that could not see the problem — which is why its verdict column now
+defers.
+
+**Ticket 03's rule found a real 36-day hole in the owner's live data**, from
+2026-08-29 to 2026-10-04, wider than the 30-day fetch window, which nothing else in
+the system reported. Running both coverage tests over the live database, month by
+month:
+
+| Month | Sync covered | Unclassified | Qualifies |
+|---|---|---|---|
+| 2026-06 | yes | 66.6% | no — classification |
+| 2026-07 | yes | 57.6% | no — classification |
+| 2026-08 | **no** | 0.0% | no — never asked about |
+| 2026-09 | **no** | 0.0% | no — never asked about |
+| 2026-10 | not yet | 2.2% | not yet — the month is still open |
+| 2026-11 | not yet | — | not yet |
+
+So the two months that looked cleanest are the two straddling the gap, and **they can
+never qualify**: no entry point can request a window older than 30 days, so the days
+from 30 August to 3 September will never be fetched. The expense totals quoted above
+for August and September are understated by whatever fell in them.
+
+Two things follow, and the second is the useful one:
+
+* **Left alone, the feature starts working in December 2026.** Viewing December, the
+  window reaches September, October and November; October and November will both
+  qualify once closed, given continuous syncs and classification above the floor.
+  Every earlier view has at most one Qualifying Month within reach.
+* **Or it works today, for the price of one setting and some classification.** June
+  and July *are* sync-covered; only the backlog disqualifies them. Classifying it and
+  setting `BASELINE_WINDOW_MONTHS=5` puts both inside October's window, which is two
+  Qualifying Months and a working comparison. That this is an environment variable
+  rather than a migration is the whole return on refusing a stored accumulator.
