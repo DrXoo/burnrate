@@ -10,6 +10,7 @@ each other, so its inputs are a series rather than a month's figures.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -176,3 +177,42 @@ def deviation_percent(*, spend: Decimal, baseline: Decimal | None) -> Decimal | 
     if baseline is None or baseline <= 0:
         return None
     return ((spend - baseline) / baseline * Decimal("100.0")).quantize(Decimal("0.1"))
+
+
+def month_sync_covered(
+    *,
+    month_start: date,
+    month_end: date,
+    successful_sync_days: Sequence[date],
+    fetch_window_days: int,
+) -> bool:
+    """Whether the bank was actually asked about every day of this month.
+
+    The second of the two tests a Qualifying Month must pass, and the one
+    classification coverage is blind to: a month with a sync hole looks perfectly
+    classified, because every row it *does* have is filed, while transactions are
+    missing outright and no figure anywhere says so. A baseline built on such a month
+    is understated, and an understated baseline makes ordinary spend look like an
+    anomaly -- the over-firing the roadmap says the alerting phase fails by.
+
+    A sync run on day S fetches the trailing window ``[S - fetch_window_days, S]``, so
+    the month is covered only if the windows of its successful syncs union to span
+    every one of its days. ``month_end`` is exclusive, matching the month window
+    convention everywhere else.
+
+    Only days on which a sync *succeeded* may be passed. That matters most for the
+    case this rule exists to catch: an expired consent writes a session row per
+    attempt, so counting rows rather than successes would see an unbroken chain of
+    sessions running straight through the gap it is meant to detect.
+    """
+    needed = month_start
+    for sync_day in sorted(successful_sync_days):
+        window_start = sync_day - timedelta(days=fetch_window_days)
+        if window_start > needed:
+            # Sorted ascending, so every window from here on starts later still:
+            # nothing can reach back to ``needed`` and the gap is real.
+            return False
+        needed = max(needed, sync_day + timedelta(days=1))
+        if needed >= month_end:
+            return True
+    return False

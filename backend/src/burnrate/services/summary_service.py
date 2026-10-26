@@ -84,7 +84,7 @@ class SummaryService:
         self._timezone_name = timezone_name
         self._clock = clock or (lambda: datetime.now(UTC))
         self._baseline_window_months = baseline_window_months
-        self._baselines = BaselineService(db=db)
+        self._baselines = BaselineService(db=db, timezone_name=timezone_name)
 
     def get_summary(
         self,

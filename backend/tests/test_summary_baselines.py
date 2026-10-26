@@ -10,7 +10,7 @@ handing the baseline only the months a category appeared in.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from burnrate.db.base import Base
-from burnrate.db.models import Account, Category, Transaction
+from burnrate.db.models import Account, Category, SyncSession, Transaction
 from burnrate.services.summary_service import SummaryService
 
 # Every fixture pins its own "today". Nothing here reads the wall clock: this whole
@@ -43,8 +43,13 @@ def make_session() -> Session:
 class Fixture:
     """A database seeded month by month, so each test reads as its own example."""
 
-    def __init__(self, db: Session) -> None:
+    def __init__(self, db: Session, *, synced: bool = True) -> None:
         self.db = db
+        # A healthy sync history by default, because every other test in this module
+        # is about classification coverage and a sync hole would be an unrelated
+        # confound. Tests about sync coverage opt out and seed their own runs.
+        if synced:
+            self.sync_daily(date(2026, 6, 1), date(2026, 12, 31))
         self.account = Account(
             display_name="Main account",
             currency="EUR",
@@ -92,6 +97,25 @@ class Fixture:
         self.db.add(transaction)
         self.db.flush()
         return transaction
+
+    def sync_daily(self, first: date, last: date, *, status: str = "success") -> None:
+        """One sync run per day across the range, as the cron would produce."""
+        day = first
+        while day <= last:
+            self.sync_on(day, status=status)
+            day += timedelta(days=1)
+
+    def sync_on(self, day: date, *, status: str = "success") -> None:
+        self.db.add(
+            SyncSession(
+                started_at=datetime(day.year, day.month, day.day, 9, 0, tzinfo=timezone.utc),
+                finished_at=datetime(day.year, day.month, day.day, 9, 5, tzinfo=timezone.utc),
+                status=status,
+                imported_accounts_count=1,
+                imported_transactions_count=0,
+            )
+        )
+        self.db.flush()
 
     def summary(self, *, month: str = "2026-10", today: date = TODAY) -> dict:
         return SummaryService(db=self.db).get_summary(month=month, today=today)
@@ -521,3 +545,86 @@ def test_too_little_history_withholds_a_baseline_the_presence_floor_would_allow(
     food = row_for(summary, "Food")
     assert food["baseline_amount"] is None
     assert food["comparison_status"] == "no_baseline"
+
+
+def test_a_month_with_a_sync_hole_is_excluded_though_it_looks_fully_classified() -> None:
+    """The test classification coverage is blind to, and that is the whole point.
+
+    All three months behind the one on screen are fully classified -- every row they
+    hold is filed, so coverage by amount reads 0% unfiled for each. August is
+    nevertheless missing transactions, because syncs stopped on the 2nd and did not
+    resume until the 20th of September, so the 3rd of August to the 20th was never
+    asked about.
+
+    Food is 600 in July, 100 in the gap-ridden August and 300 in September. Excluding
+    August gives a baseline of 450; admitting it on its classification alone gives
+    333.33, understated by a month whose figures were never complete. An understated
+    baseline is the one that makes ordinary spend look like an anomaly.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    # Covers July in full: the window reaching back from 2 August spans it.
+    fixture.sync_daily(date(2026, 7, 1), date(2026, 8, 2))
+    # Then nothing until late September. [Jul 21, Aug 2] and [Aug 21, Sep 20] leave
+    # the 3rd to the 20th of August unasked, while September is covered from here on.
+    fixture.sync_daily(date(2026, 9, 20), date(2026, 10, 26))
+
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="600.00")
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="100.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="450.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_months_count"] == 2
+    assert row_for(summary, "Food")["baseline_amount"] == "450.00"
+
+
+def test_an_expired_consent_leaves_session_rows_that_are_not_coverage() -> None:
+    """A row per attempt is not a row per answer.
+
+    This is the shape the real failure takes. When the consent lapses the import
+    writes a ``skipped`` session for every attempt and fetches nothing, so the gap is
+    papered over with an unbroken chain of session rows. Counting rows rather than
+    successes would read August as covered on the strength of runs that asked the
+    bank nothing at all.
+
+    Identical to the test above except that the gap is full of attempts, and the
+    answer has to be identical too.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    fixture.sync_daily(date(2026, 7, 1), date(2026, 8, 2))
+    fixture.sync_daily(date(2026, 8, 3), date(2026, 9, 19), status="skipped")
+    fixture.sync_daily(date(2026, 9, 20), date(2026, 10, 26))
+
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="600.00")
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="100.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="450.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_months_count"] == 2
+    assert row_for(summary, "Food")["baseline_amount"] == "450.00"
+
+
+def test_a_sync_hole_can_leave_too_little_history_to_compare_at_all() -> None:
+    """And when it does, the product says so rather than thinning the mean quietly.
+
+    Two clean months behind October, one of them never fully asked about. That leaves
+    one Qualifying Month, which is not a baseline.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    fixture.sync_daily(date(2026, 9, 20), date(2026, 10, 26))
+
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="100.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_status"] == "insufficient_history"
+    assert summary["baseline_months_count"] == 1
+    assert row_for(summary, "Food")["baseline_amount"] is None

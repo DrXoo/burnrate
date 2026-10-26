@@ -215,7 +215,11 @@ Enable Banking returns one status per call, so BurnRate makes two: a default cal
 
 That is a constraint, not three numbers that happen to agree. The sweep deletes a pending row the bank stopped reporting, and the *booked* call is the only thing that can bring its settled copy back — so the booked window has to cover at least the window the sweep judges. When the booked call ran from the first of the current month instead, it did not: for the first 30 days of every month the sweep judged days the booked call never re-asked about. A hold that pended on the 31st and booked overnight under that same date was deleted as absent and never re-imported, so the charge existed in neither status and the previous month was understated for good — the exact loss ADR-0003 calls self-healing. Re-importing a settled charge is idempotent and the volume is one owner's, so the cheap direction is to widen the booked call rather than narrow the sweep.
 
-Anything that changes one of the three windows has to change all of them, which is why they are derived from a single value in the service rather than per call site.
+Anything that changes one of the three windows has to change all of them, which is why they are derived from a single value in the service rather than per call site. That value is `TRANSACTION_WINDOW`, and it is public because there is now a **fourth reader outside the integration**: baseline coverage.
+
+A month is only trustworthy as baseline input if successful syncs asked about every one of its days, and "every one of its days" is this window's length — a run on day S asked about `[S - 30, S]`, so a month is covered only when the windows of its successful runs *union* to span it. Two runs 25 days apart cover a month between them although neither does alone. Widening this window therefore makes more months qualify as baseline input, and narrowing it makes fewer; it is no longer only a question of what gets fetched and swept. `BaselineService` imports the constant rather than restating 30, which is the same invariant this section already exists to protect.
+
+Only a `success` session counts as coverage, and the status this excludes most importantly is `skipped`. An expired consent writes a `skipped` session per attempt and fetches nothing, so the gap it opens is papered over with an unbroken chain of session rows: anything counting rows rather than successes would read the months the owner was disconnected as fully covered, and build their baselines on months missing transactions outright.
 
 ### Pending Transaction Reconciliation
 

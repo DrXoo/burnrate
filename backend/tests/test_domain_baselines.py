@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -10,6 +11,7 @@ from burnrate.domain.baselines import (
     comparison_status,
     deviation_percent,
     month_qualifies,
+    month_sync_covered,
 )
 
 
@@ -251,3 +253,79 @@ def test_deviation_percent_is_signed_so_a_quiet_month_reads_as_one(
 def test_deviation_percent_is_absent_without_a_baseline() -> None:
     assert deviation_percent(spend=Decimal("8403.83"), baseline=None) is None
     assert deviation_percent(spend=Decimal("100.00"), baseline=Decimal("0.00")) is None
+
+
+# Worked examples for sync coverage, all for September 2026 against a 30-day fetch
+# window. Each row is the days successful syncs ran on and whether the month was
+# fully asked about.
+#
+# A sync run on day S fetches the window [S - 30, S], so a month is covered only if
+# the windows of its successful syncs union to span every one of its days. This is
+# the test classification coverage cannot perform: a month with a sync hole looks
+# perfectly classified, because every row it does have is filed, while transactions
+# are missing outright and no figure anywhere says so.
+#
+# sync days, covered
+SYNC_COVERAGE_EXAMPLES = [
+    # The ordinary case: a daily cron, windows overlapping thirty deep.
+    ([date(2026, 9, d) for d in range(1, 31)] + [date(2026, 10, 1)], True),
+    # Two runs are enough when their windows meet: [Aug 16, Sep 15] and [Sep 1, Oct 1].
+    ([date(2026, 9, 15), date(2026, 10, 1)], True),
+    # One run on the 1st of October reaches back over the whole of September.
+    ([date(2026, 10, 1)], True),
+    # And one on the 30th still does: [Aug 31, Sep 30] spans every day of the month.
+    ([date(2026, 9, 30)], True),
+    # A day short. [Aug 30, Sep 29] leaves the 30th never asked about.
+    ([date(2026, 9, 29)], False),
+    # A day late. [Sep 2, Oct 2] never asks about the 1st.
+    ([date(2026, 10, 2)], False),
+    # The real failure: syncs stop on the 5th and resume six weeks later, so
+    # [Aug 6, Sep 5] and [Sep 20, Oct 20] leave the 6th to the 19th unasked.
+    ([date(2026, 9, 5), date(2026, 10, 20)], False),
+    # Nothing ran at all.
+    ([], False),
+    # Everything ran before the month, so its window closed before the month opened.
+    ([date(2026, 8, 20)], False),
+    # Coverage by *chain*, which is the case that separates this rule from a weaker
+    # one. Neither window spans September alone and the second one opens well after
+    # the month did -- [Aug 21, Sep 20] and [Sep 15, Oct 15] -- but they overlap, so
+    # together they reach every day. A cron that slowed from daily to weekly produces
+    # exactly this, and judging each window against the month's first day instead of
+    # against what is still unaccounted for would reject it.
+    ([date(2026, 9, 20), date(2026, 10, 15)], True),
+    # A longer chain of the same, three windows deep.
+    ([date(2026, 9, 10), date(2026, 10, 5), date(2026, 10, 25)], True),
+    # And the chain broken by one day: [Aug 21, Sep 20] then [Sep 22, Oct 22] leaves
+    # the 21st unasked, which the month's first day alone can never reveal.
+    ([date(2026, 9, 20), date(2026, 10, 22)], False),
+]
+
+
+@pytest.mark.parametrize(("sync_days", "expected"), SYNC_COVERAGE_EXAMPLES)
+def test_month_sync_covered_asks_whether_the_bank_was_asked_about_every_day(
+    sync_days: list[date],
+    expected: bool,
+) -> None:
+    covered = month_sync_covered(
+        month_start=date(2026, 9, 1),
+        month_end=date(2026, 10, 1),
+        successful_sync_days=sync_days,
+        fetch_window_days=30,
+    )
+
+    assert covered is expected
+
+
+def test_month_sync_covered_does_not_care_what_order_the_syncs_arrive_in() -> None:
+    """The caller hands over rows from a database, and row order is not a promise."""
+    unordered = [date(2026, 10, 1), date(2026, 8, 20), date(2026, 9, 15)]
+
+    assert (
+        month_sync_covered(
+            month_start=date(2026, 9, 1),
+            month_end=date(2026, 10, 1),
+            successful_sync_days=unordered,
+            fetch_window_days=30,
+        )
+        is True
+    )

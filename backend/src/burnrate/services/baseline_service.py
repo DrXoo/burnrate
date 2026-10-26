@@ -14,18 +14,25 @@ the pending sweep, and by an Unknown Transaction finally being classified.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from burnrate.clock import civil_date
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
-from burnrate.db.models import Account, Category, Transaction
+from burnrate.db.models import Account, Category, SyncSession, Transaction
 from burnrate.domain.metrics import MonthTense
+# ``as_utc`` lives under connection expiry rather than beside the clock, which is
+# the wrong home for it -- but it is the repo's one answer for a datetime read back
+# naive from SQLite, and duplicating it here would be worse than importing it.
+from burnrate.services.connection_expiry import as_utc
+from burnrate.services.enable_banking_service import TRANSACTION_WINDOW
 from burnrate.domain.baselines import (
     BaselineComparisonStatus,
     BaselineStatus,
@@ -34,6 +41,7 @@ from burnrate.domain.baselines import (
     comparison_status,
     deviation_percent,
     month_qualifies,
+    month_sync_covered,
 )
 
 COMMITTED_STATUSES = ("booked", "pending")
@@ -64,8 +72,12 @@ class Baselines:
 
 
 class BaselineService:
-    def __init__(self, *, db: Session) -> None:
+    def __init__(self, *, db: Session, timezone_name: str = "UTC") -> None:
         self.db = db
+        # Sync instants are stored in UTC; coverage is judged in civil days, because
+        # the fetch window the sync actually used was derived from the owner's own
+        # today. See ``burnrate/clock.py``.
+        self._timezone_name = timezone_name
 
     def baselines_for(
         self,
@@ -85,7 +97,12 @@ class BaselineService:
             return Baselines(status="month_not_started", qualifying_months_count=0, categories=())
 
         candidates = _preceding_months(month_value, window_months)
-        qualifying = [month for month in candidates if self._month_qualifies(month)]
+        # Fetched once rather than per candidate month: the rule needs runs from after
+        # a month as well as during it, since a window reaches backwards.
+        sync_days = self._successful_sync_days(since=month_window(candidates[0])[0])
+        qualifying = [
+            month for month in candidates if self._month_qualifies(month, sync_days=sync_days)
+        ]
         status = baseline_status(qualifying_months_count=len(qualifying))
 
         # The month on screen and every month behind it are measured over the same
@@ -130,9 +147,51 @@ class BaselineService:
             categories=tuple(comparisons),
         )
 
-    def _month_qualifies(self, month_value: str) -> bool:
+    def _month_qualifies(self, month_value: str, *, sync_days: Sequence[date]) -> bool:
+        """Both tests, because each is blind to the other.
+
+        Classification coverage asks whether the owner has filed the month's money.
+        Sync coverage asks whether the bank was ever asked about all of it. A month
+        with a hole passes the first test perfectly -- every row it holds is filed --
+        while transactions are missing outright, and the resulting baseline is
+        understated with nothing anywhere to say so.
+        """
+        month_start, month_end = month_window(month_value)
+        if not month_sync_covered(
+            month_start=month_start,
+            month_end=month_end,
+            successful_sync_days=sync_days,
+            fetch_window_days=TRANSACTION_WINDOW.days,
+        ):
+            return False
         outgoing, unclassified = self._outgoing_and_unclassified(month_value)
         return month_qualifies(outgoing_amount=outgoing, unclassified_amount=unclassified)
+
+    def _successful_sync_days(self, *, since: date) -> list[date]:
+        """The owner's civil days on which a sync actually succeeded.
+
+        Only ``success`` counts. ``skipped`` is the status an expired consent writes,
+        once per attempt, so it papers over the very gap this rule exists to find;
+        ``failed`` learned nothing and ``running`` has not finished learning.
+
+        Bounded below by the oldest candidate month, less a day for the timezone
+        conversion: a run whose window closed before a month opened cannot cover any
+        part of it.
+        """
+        floor = datetime(since.year, since.month, since.day, tzinfo=UTC) - timedelta(days=1)
+        instants = self.db.scalars(
+            select(SyncSession.started_at).where(
+                func.lower(SyncSession.status) == "success",
+                SyncSession.started_at >= floor,
+            )
+        ).all()
+        return sorted(
+            {
+                civil_date(timezone_name=self._timezone_name, instant=as_utc(instant))
+                for instant in instants
+                if instant is not None
+            }
+        )
 
     def _outgoing_and_unclassified(self, month_value: str) -> tuple[Decimal, Decimal]:
         """How much money left the account that month, and how much of it is unfiled.
