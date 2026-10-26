@@ -110,6 +110,20 @@ is never read out of a React component or a SQL method. The queries, the
 confidence-weighted projection blend and the fixed step projection stay in
 `SummaryService`. See `docs/adr/0001-domain-module-for-metric-policy.md`.
 
+Baseline policy lives beside it in `burnrate/domain/baselines.py`, as a sibling
+rather than an extension: `metrics` judges one month against the budgets the owner
+set, while `baselines` judges a series of months against each other, so its inputs
+are a series rather than a month's figures. It owns the classification-coverage
+floor, the minimum qualifying-month count, the per-category presence floor, the
+divisor rule, the comparison bands and the anomaly ratio.
+
+`BaselineService` owns the queries that read *other* months -- coverage per month,
+and per-category totals over a window -- and `SummaryService` composes it, asking
+one question rather than depending on a broad persistence API. Nothing is stored:
+every baseline is recomputed from transactions per request, which is what keeps the
+owner's corrections to their own past effective and what keeps the *shape* of the
+mean cheap to change, since there is no accumulated state to convert.
+
 ---
 
 ### Infrastructure Layer

@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+
+from burnrate.domain.baselines import (
+    baseline_status,
+    category_baseline,
+    comparison_status,
+    deviation_percent,
+    month_qualifies,
+)
+
+
+# Worked examples for the trailing mean. Each row is one entry per Qualifying Month
+# in the window -- the category's spend in that month, zero for a month it had none
+# -- and the baseline the owner should be shown.
+#
+# The divisor is the number of Qualifying Months, never the number of months the
+# category appeared in. For a recurring expense an absent month is a real zero and
+# carries information: 600 and 0 and 300 over three qualifying months is 300, not
+# the 450 that averaging only the months with spend would give.
+#
+# spend per qualifying month, baseline
+TRAILING_MEAN_EXAMPLES = [
+    (["600.00", "300.00"], "450.00"),
+    (["600.00", "0.00", "300.00"], "300.00"),
+    (["100.00", "100.00", "100.00"], "100.00"),
+    # 829.49 over two months is 414.745 exactly, a half cent. Every money figure
+    # in the product quantizes with Decimal's default half-even rounding, so this
+    # lands on 414.74 rather than up. Pinned here so the convention is stated
+    # once rather than discovered by a reader of a dashboard.
+    (["256.84", "572.65"], "414.74"),
+    (["10.00", "10.00", "10.00"], "10.00"),
+    (["100.00", "0.00", "0.00", "100.00"], "50.00"),
+]
+
+
+@pytest.mark.parametrize(("spend_by_month", "expected"), TRAILING_MEAN_EXAMPLES)
+def test_category_baseline_divides_by_the_qualifying_months_not_the_months_present(
+    spend_by_month: list[str],
+    expected: str,
+) -> None:
+    baseline = category_baseline(
+        spend_by_qualifying_month=[Decimal(amount) for amount in spend_by_month],
+    )
+
+    assert baseline == Decimal(expected)
+
+
+# Worked examples for the presence floor. Each row is one entry per Qualifying Month
+# and whether the category earns a baseline at all.
+#
+# A category the owner spent in once has no normal monthly cost, and inventing one by
+# spreading a single charge across the window is worse than saying nothing: in the
+# owner's live data this is what keeps a one-off relocation, a single toll and one
+# holiday from each reporting an invented monthly figure. The floor is two Qualifying
+# Months with spend, which is also what makes the divisor rule above safe to apply.
+#
+# spend per qualifying month, baseline or None
+PRESENCE_FLOOR_EXAMPLES = [
+    (["500.00", "0.00", "0.00"], None),
+    (["0.00", "0.00", "500.00"], None),
+    (["0.00", "0.00", "0.00"], None),
+    (["500.00", "100.00", "0.00"], "200.00"),
+    (["0.00", "300.00", "300.00"], "200.00"),
+    (["500.00"], None),
+]
+
+
+@pytest.mark.parametrize(("spend_by_month", "expected"), PRESENCE_FLOOR_EXAMPLES)
+def test_category_baseline_refuses_a_category_the_owner_rarely_spends_in(
+    spend_by_month: list[str],
+    expected: str | None,
+) -> None:
+    baseline = category_baseline(
+        spend_by_qualifying_month=[Decimal(amount) for amount in spend_by_month],
+    )
+
+    assert baseline == (Decimal(expected) if expected is not None else None)
+
+
+# Worked examples for classification coverage. Each row is a month's total outgoing
+# amount, how much of it the owner has not classified, and whether the month may be
+# used as baseline input.
+#
+# The first five rows are the owner's own months as of 2026-10-26, which is why the
+# measure is by amount and not by row count. June reads 79% classified counting rows
+# and 33% counting money, because the unclassified rows are the large ones: a
+# row-based measure would have admitted a two-thirds-empty month as clean baseline
+# input and biased every category's baseline downwards, silently.
+#
+# outgoing, unclassified, qualifies
+COVERAGE_EXAMPLES = [
+    ("7002.82", "4661.72", False),  # 2026-06, 66.6% unclassified
+    ("8602.36", "4952.77", False),  # 2026-07, 57.6%
+    ("2858.00", "0.00", True),      # 2026-08, fully classified
+    ("2566.53", "0.00", True),      # 2026-09, fully classified
+    ("9479.13", "212.99", True),    # 2026-10, 2.2%
+    ("1000.00", "50.00", True),     # exactly at the floor, which is inclusive
+    ("1000.00", "50.01", False),    # a cent past it
+    ("1000.00", "1000.00", False),  # nothing classified at all
+]
+
+
+@pytest.mark.parametrize(("outgoing", "unclassified", "expected"), COVERAGE_EXAMPLES)
+def test_month_qualifies_on_the_share_of_money_classified_not_the_share_of_rows(
+    outgoing: str,
+    unclassified: str,
+    expected: bool,
+) -> None:
+    qualifies = month_qualifies(
+        outgoing_amount=Decimal(outgoing),
+        unclassified_amount=Decimal(unclassified),
+    )
+
+    assert qualifies is expected
+
+
+def test_month_qualifies_refuses_a_month_with_no_outgoing_money_at_all() -> None:
+    """A month showing no spend is not evidence of a frugal month.
+
+    Nothing is unclassified in such a month, so a share-based test would admit it and
+    then contribute a zero to every category's baseline, dragging all of them down --
+    the silently-low failure this rule exists to prevent. It is refused here on the
+    weakest available evidence; ticket 03 catches the subtler and more likely case,
+    a month holding *some* data with a sync gap through the middle of it.
+    """
+    assert month_qualifies(outgoing_amount=Decimal("0.00"), unclassified_amount=Decimal("0.00")) is False
+
+
+# Worked examples for the minimum history. Each row is how many Qualifying Months the
+# window found and the state the backend reports.
+#
+# The state is named here rather than left to each interface to infer from a null
+# amount, following the amendment ADR-0002 records for the allowance's status: one
+# interface inferring it is one interface that can infer it differently. Two months
+# is the floor, which is what the owner has today -- the feature works from the day
+# it ships, by one month's margin.
+#
+# qualifying months, status
+MINIMUM_HISTORY_EXAMPLES = [
+    (0, "insufficient_history"),
+    (1, "insufficient_history"),
+    (2, "ok"),
+    (3, "ok"),
+    (12, "ok"),
+]
+
+
+@pytest.mark.parametrize(("qualifying_months", "expected"), MINIMUM_HISTORY_EXAMPLES)
+def test_baseline_status_names_too_little_history_rather_than_reporting_a_thin_mean(
+    qualifying_months: int,
+    expected: str,
+) -> None:
+    assert baseline_status(qualifying_months_count=qualifying_months) == expected
+
+
+# Worked examples for the comparison bands. Each row is what the owner spent in a
+# category, what that category normally costs them, and the one verdict the backend
+# publishes so that no interface bands the figure itself.
+#
+# The bands: in_line is the closed interval 0.85 to 1.15 of the baseline, which is
+# where the owner's real month-to-month variation sits in clean months; above is past
+# 1.15 but short of the anomaly ratio; anomalous is 1.5 of the baseline or more.
+#
+# Comparing and firing are different acts. The deviation is reported in both
+# directions because a quiet month is information, but an anomaly only ever fires
+# upward: the product exists to stop the owner overspending, and the roadmap is
+# explicit that Phase 10 fails by over-firing. The first row is the owner's own
+# October Food figure against its Aug-Sep baseline -- 38% below, and good news.
+#
+# spend, baseline, verdict
+COMPARISON_EXAMPLES = [
+    ("256.84", "414.74", "below"),       # live October Food: far below, fires nothing
+    ("0.00", "1000.00", "below"),        # spent nothing at all
+    ("849.99", "1000.00", "below"),      # a cent under the in_line band
+    ("850.00", "1000.00", "in_line"),    # the lower edge, inclusive
+    ("1000.00", "1000.00", "in_line"),   # exactly normal
+    ("1150.00", "1000.00", "in_line"),   # the upper edge, inclusive
+    ("1150.01", "1000.00", "above"),     # a cent past it
+    ("1499.99", "1000.00", "above"),     # a cent short of the anomaly ratio
+    ("1500.00", "1000.00", "anomalous"), # the anomaly ratio, inclusive
+    ("9000.00", "1000.00", "anomalous"), # far past it
+]
+
+
+@pytest.mark.parametrize(("spend", "baseline", "expected"), COMPARISON_EXAMPLES)
+def test_comparison_status_bands_the_month_against_what_is_normal(
+    spend: str,
+    baseline: str,
+    expected: str,
+) -> None:
+    status = comparison_status(spend=Decimal(spend), baseline=Decimal(baseline))
+
+    assert status == expected
+
+
+# A category below the presence floor has no baseline, and the live October case for
+# it is a one-off legal expense of 8403.83 -- larger than every other category in the
+# month put together. There is nothing to compare it against and the product says so
+# rather than reporting it as the worst overspend it has ever seen.
+NO_BASELINE_EXAMPLES = [
+    ("8403.83", None),
+    ("0.00", None),
+    ("100.00", "0.00"),
+]
+
+
+@pytest.mark.parametrize(("spend", "baseline"), NO_BASELINE_EXAMPLES)
+def test_comparison_status_makes_no_claim_without_a_baseline(
+    spend: str,
+    baseline: str | None,
+) -> None:
+    status = comparison_status(
+        spend=Decimal(spend),
+        baseline=Decimal(baseline) if baseline is not None else None,
+    )
+
+    assert status == "no_baseline"
+
+
+# Worked examples for the deviation the owner reads beside the verdict. Signed, so
+# that a quiet month reads as a quiet month rather than as an unexplained absence of
+# warning, and quantized to one decimal place like every other percent the product
+# publishes.
+#
+# spend, baseline, deviation
+DEVIATION_EXAMPLES = [
+    ("256.84", "414.74", "-38.1"),   # live October Food against its Aug-Sep baseline
+    ("1000.00", "1000.00", "0.0"),
+    ("1500.00", "1000.00", "50.0"),
+    ("500.00", "1000.00", "-50.0"),
+    ("0.00", "1000.00", "-100.0"),
+    ("2000.00", "1000.00", "100.0"),
+]
+
+
+@pytest.mark.parametrize(("spend", "baseline", "expected"), DEVIATION_EXAMPLES)
+def test_deviation_percent_is_signed_so_a_quiet_month_reads_as_one(
+    spend: str,
+    baseline: str,
+    expected: str,
+) -> None:
+    deviation = deviation_percent(spend=Decimal(spend), baseline=Decimal(baseline))
+
+    assert deviation == Decimal(expected)
+
+
+def test_deviation_percent_is_absent_without_a_baseline() -> None:
+    assert deviation_percent(spend=Decimal("8403.83"), baseline=None) is None
+    assert deviation_percent(spend=Decimal("100.00"), baseline=Decimal("0.00")) is None

@@ -149,3 +149,19 @@ _Avoid_: Runway, buffer, emergency fund, months of runway
 How long the owner could sustain a negative cash flow before designated savings
 run out. Only meaningful, and only shown, while cash flow is actually negative.
 _Avoid_: Runway, time left, survival time
+
+### Baselines
+
+**Baseline**:
+What a figure normally is for the owner: its mean over the Qualifying Months a
+window reaches. Recomputed from transactions on every request and never stored,
+so correcting the past corrects it. A figure is only ever compared against its
+own baseline, never against another owner's or an external norm.
+_Avoid_: Average, normal, trend, expected
+
+**Qualifying Month**:
+A closed month whose data can be trusted as baseline input. It must be
+classified -- measured as a share of the month's outgoing money, never of its
+rows -- and it must be spanned by successful syncs. The current month never
+qualifies, and how many months qualify is reported alongside every baseline.
+_Avoid_: Complete month, clean month, valid month

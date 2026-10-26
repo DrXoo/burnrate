@@ -164,6 +164,9 @@ export function summaryFor(month: string): SummaryDashboard {
     projected_month_end_spend_amount: "0.00",
     projected_overspend_amount: "0.00",
     budget_usage: [],
+    baseline_status: "ok",
+    baseline_months_count: 2,
+    category_baselines: [],
     ...ledgerFor(resolved).summary,
   };
 }

@@ -15,6 +15,7 @@ from burnrate.db.budget_windows import budget_covers_month
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
+from burnrate.services.baseline_service import BaselineService
 from burnrate.domain.metrics import (
     FixedCommitment,
     MetricStatus,
@@ -77,10 +78,13 @@ class SummaryService:
         db: Session,
         timezone_name: str = "UTC",
         clock: Callable[[], datetime] | None = None,
+        baseline_window_months: int = 3,
     ) -> None:
         self.db = db
         self._timezone_name = timezone_name
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._baseline_window_months = baseline_window_months
+        self._baselines = BaselineService(db=db)
 
     def get_summary(
         self,
@@ -105,6 +109,14 @@ class SummaryService:
         uncategorized_count = self._count_uncategorized_transactions(
             month_start=month_start,
             month_end=month_end,
+        )
+
+        month_tense = self._month_tense(month_start=month_start, reference_day=reference_day)
+        baselines = self._baselines.baselines_for(
+            month_value=month_value,
+            month_tense=month_tense,
+            reference_day=reference_day,
+            window_months=self._baseline_window_months,
         )
 
         active_budgets = self._get_active_budgets(month_start=month_start, month_end=month_end)
@@ -213,10 +225,7 @@ class SummaryService:
             fixed_overrun=overrun,
             days_in_month=days_in_month,
             days_elapsed=days_elapsed,
-            month_tense=self._month_tense(
-                month_start=month_start,
-                reference_day=reference_day,
-            ),
+            month_tense=month_tense,
         )
 
         # Burn rate reflects the *variable* daily pace only -- fixed lumps are excluded
@@ -308,6 +317,21 @@ class SummaryService:
             "projected_month_end_spend_amount": self._format_decimal(projected_month_end_spend),
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "budget_usage": budget_usage,
+            "baseline_status": baselines.status,
+            "baseline_months_count": baselines.qualifying_months_count,
+            "category_baselines": [
+                {
+                    "category_id": str(row.category_id),
+                    "category_name": row.category_name,
+                    "spend_amount": self._format_decimal(row.spend_amount),
+                    "baseline_amount": self._format_optional_decimal(row.baseline_amount),
+                    "deviation_percent": (
+                        float(row.deviation_percent) if row.deviation_percent is not None else None
+                    ),
+                    "comparison_status": row.comparison_status,
+                }
+                for row in baselines.categories
+            ],
         }
 
     def _resolve_month(self, *, month: str | None, current_month: str) -> tuple[date, date, str]:

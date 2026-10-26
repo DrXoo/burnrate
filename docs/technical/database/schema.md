@@ -211,6 +211,15 @@ Notes:
   expression index on the coalesce, or the stored `effective_date` column that
   Phase 8 deferred because it needs a backfill -- the latter restores plain
   indexing and is the better end state.
+* Baselines multiply that cost rather than adding to it: a comparison reads one
+  month window per month in its window, so the default of three turns one
+  sequential scan into several. They add **no table and no column** -- every
+  baseline is recomputed from these same rows per request, because in this product
+  the past changes (a budget cancelled from a past month, the pending sweep, an
+  Unknown Transaction finally classified) and a stored figure could not be verified
+  against it. The cost is measured rather than assumed; see the Recorded
+  Measurement in the Phase 9a spec and the roadmap's standing requirement to
+  measure before introducing a snapshot table.
 * The first version can stay coupled to Enable Banking transaction identifiers.
 
 ---

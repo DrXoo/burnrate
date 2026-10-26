@@ -14,6 +14,39 @@ export type SafeToSpendStatus =
   | "month_not_started"
   | BudgetUsageStatus;
 
+/** Whether a comparison against what is normal is offered, and if not, why not.
+
+    A month that has not started has no outcome to compare however much history sits
+    behind it, so the reason is a value here rather than something this client works
+    out by cross-referencing `safe_to_spend_status`. */
+export type BaselineStatus = "ok" | "insufficient_history" | "month_not_started";
+
+/** Which side of normal a figure is, and whether it is worth raising.
+
+    Only `anomalous` is a warning. `below` is reported in full because a quiet month
+    is information, but it never raises anything: the product exists to stop the owner
+    overspending. The bands are the backend's; this client renders the words. */
+export type BaselineComparisonStatus =
+  | "no_baseline"
+  | "below"
+  | "in_line"
+  | "above"
+  | "anomalous";
+
+export interface CategoryBaseline {
+  category_id: string;
+  category_name: string;
+  // The figure the comparison is about. For the current month both sides are measured
+  // to the same day of the month, so this can differ from the category's spend in
+  // `budget_usage` when a standing order falls later in the month.
+  spend_amount: string;
+  // Null when the category is below the presence floor, or when there is too little
+  // history for any baseline. Never a zero, which would read as "normally nothing".
+  baseline_amount: string | null;
+  deviation_percent: number | null;
+  comparison_status: BaselineComparisonStatus;
+}
+
 export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
 
 export interface Connection {
@@ -177,6 +210,11 @@ export interface SummaryDashboard {
   projected_month_end_spend_amount: string;
   projected_overspend_amount: string;
   budget_usage: BudgetUsage[];
+  baseline_status: BaselineStatus;
+  // How many Qualifying Months the means rest on. Shown beside them, so the owner
+  // can see how much to trust a comparison resting on as few as two.
+  baseline_months_count: number;
+  category_baselines: CategoryBaseline[];
 }
 
 export interface TransactionsResponse {

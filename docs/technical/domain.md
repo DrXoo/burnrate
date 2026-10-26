@@ -273,6 +273,21 @@ The current pace of spending, typically represented as daily average spending an
 
 The estimated time remaining before designated savings are exhausted, based on the current monthly deficit.
 
+### Baseline
+
+What a figure normally is for the owner: its mean over the Qualifying Months a window reaches, recomputed from transactions on each request and never stored.
+
+A **Qualifying Month** is a closed month whose data can be trusted. Two independent tests decide it, because each is blind to the other:
+
+* **Classification coverage** — the share of the month's *outgoing money* that is still unclassified must be under a floor. Measured by amount and never by rows: a month can read almost fully classified by row count while most of its money sits in the few large rows the owner has not got to, and admitting such a month biases every baseline downwards with nothing to signal it.
+* **Sync coverage** — the month must be spanned by successful syncs with no gap wider than the provider fetch window. A month with a sync hole looks perfectly classified, because every row it does have is filed, while transactions are missing outright.
+
+Two rules keep a mean from being computed where it would mislead. A **presence floor** denies a baseline to a category the owner spends in too rarely, which is what makes the divisor safe: for a category above the floor the mean divides by every Qualifying Month in the window, treating an absent month as a real zero, because for a recurring expense that absence is information. The floor also retires a category whose spend has stopped, without anyone declaring anything — it falls below the floor as the window moves past it.
+
+For the month in progress, both sides are summed only to the **same day of the month**, clamped to each past month's own length. A part-month measured against whole ones is favourable for most of the month, which is the defect Phase 8 fixed in the budget pacing; summing past months to the same cutoff makes no assumption about pacing, so a Fixed Budget charged as a step lands identically on both sides. A closed month is compared whole against whole, and a month that has not started is not compared at all.
+
+Comparing and firing are different acts. The deviation is reported in both directions, since a quiet month is information. An anomaly fires **only upward**: the product exists to stop the owner overspending.
+
 ---
 
 ## Important Invariants

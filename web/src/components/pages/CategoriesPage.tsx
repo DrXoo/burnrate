@@ -15,7 +15,14 @@ import {
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
-import type { BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
+import type {
+  BudgetUsage,
+  Category,
+  CategoryBaseline,
+  CategoryType,
+  SummaryDashboard,
+  Transaction,
+} from "../../types";
 
 interface CategoriesPageProps {
   categories: Category[];
@@ -137,6 +144,32 @@ function num(value: string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/** The phrase the owner reads beside a category's figures.
+ *
+ * The bands are the backend's; this picks words for them. The magnitude is rounded
+ * to a whole percent because the owner is deciding whether to care, not auditing.
+ *
+ * Only `anomalous` is worded as a warning. Being well under a baseline is reported
+ * in full and flagged as nothing: the product exists to stop the owner overspending,
+ * and in their own October every ordinary category sits below its baseline while one
+ * one-off swamps the month. */
+function comparisonPhrase(comparison: CategoryBaseline): string {
+  const deviation = comparison.deviation_percent;
+  const magnitude = deviation == null ? "" : `${Math.abs(Math.round(deviation))}%`;
+  switch (comparison.comparison_status) {
+    case "no_baseline":
+      return "no baseline yet";
+    case "in_line":
+      return "in line with usual";
+    case "below":
+      return `${magnitude} below usual`;
+    case "above":
+      return `${magnitude} above usual`;
+    case "anomalous":
+      return `unusually high · ${magnitude} above usual`;
+  }
+}
+
 export function CategoriesPage({
   categories,
   summary,
@@ -193,6 +226,12 @@ export function CategoriesPage({
       ledgerTotal[transaction.category_id] = (ledgerTotal[transaction.category_id] ?? 0) + Math.abs(num(transaction.amount));
     }
 
+    // Keyed by category, like the budget rows, but a list of its own: the comparison
+    // covers every category with spend, including ones the owner never budgeted.
+    const comparisonById = new Map(
+      (summary?.category_baselines ?? []).map((row) => [row.category_id, row]),
+    );
+
     return categories.map((category) => {
       const usage = usageById.get(category.category_id);
       const ledgerSpent = ledgerTotal[category.category_id] ?? 0;
@@ -211,6 +250,14 @@ export function CategoriesPage({
       return {
         category,
         usage,
+        // Withheld unless the backend says a comparison is on offer. A month with too
+        // little history, or one that has not started, has none -- and inferring that
+        // from a null amount here is the re-derivation ADR-0002's amendment exists to
+        // stop.
+        comparison:
+          summary?.baseline_status === "ok"
+            ? comparisonById.get(category.category_id) ?? null
+            : null,
         budget,
         spent,
         tone,
@@ -250,6 +297,15 @@ export function CategoriesPage({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>Categories</div>
           <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+            {summary?.baseline_status === "ok" ? (
+              <>
+                {/* Said once rather than on every row, because the mean rests on the
+                    same Qualifying Months for every category. Shown at all because a
+                    comparison resting on two months deserves to say so. */}
+                <span className="num">{summary.baseline_months_count}-month average</span>
+                {" · "}
+              </>
+            ) : null}
             <span className="num">{categories.length}</span> total
           </span>
         </div>
@@ -334,6 +390,27 @@ export function CategoriesPage({
                               </span>
                               <span style={{ fontSize: 11, fontWeight: 600, color: stat.color }}>{pctStr}</span>
                             </div>
+                            {stat.comparison ? (
+                              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
+                                {stat.comparison.baseline_amount ? (
+                                  <>
+                                    <span className="num">
+                                      normally {eurPlain(stat.comparison.baseline_amount)}
+                                    </span>
+                                    {" · "}
+                                  </>
+                                ) : null}
+                                <span
+                                  style={
+                                    stat.comparison.comparison_status === "anomalous"
+                                      ? { color: "var(--text)", fontWeight: 600 }
+                                      : undefined
+                                  }
+                                >
+                                  {comparisonPhrase(stat.comparison)}
+                                </span>
+                              </div>
+                            ) : null}
                           </>
                         ) : (
                           <div className="num" style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 6 }}>
