@@ -534,6 +534,14 @@ def test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent() 
     assert {key: summary[key] for key in sorted(summary) if key.endswith("_amount")} == {
         "average_daily_spend_amount": "19.00",
         "budgeted_spending_amount": "285.00",
+        # Nothing is seeded before June, so no month behind it qualifies as baseline
+        # input, no category earns a baseline, and the comparable half is empty. The
+        # residual therefore covers the month's entire spending, which is the honest
+        # answer for a month with no history behind it, and the net cash flow
+        # baseline is absent rather than zero.
+        "comparable_spend_amount": "0.00",
+        "uncomparable_spend_amount": "285.00",
+        "net_cash_flow_baseline_amount": None,
         "current_balance_amount": "2000.00",
         "expected_daily_spend_amount": "13.33",
         "fixed_overrun_amount": "0.00",

@@ -8,6 +8,7 @@ import {
   TONE_LABEL,
   capitalize,
   categoryColor,
+  comparisonPhrase,
   eur,
   eurPlain,
   shortAccount,
@@ -50,6 +51,11 @@ interface CategoryStat {
       budget figure and the verdict are read off it, so this page and the dashboard
       cannot disagree about the same category. */
   usage: BudgetUsage | undefined;
+  /** The month's comparison against what this category normally costs, when the
+      backend offers one. Null whenever it does not: too little trustworthy history,
+      a month with no outcome yet, or a category the owner spends in too rarely to
+      have a normal monthly cost. */
+  comparison: CategoryBaseline | null;
   budget: number | null;
   spent: number;
   tone: Tone;
@@ -142,32 +148,6 @@ function budgetNotice(budgetsKnown: boolean, loading: boolean, error: string | n
 function num(value: string | null | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-/** The phrase the owner reads beside a category's figures.
- *
- * The bands are the backend's; this picks words for them. The magnitude is rounded
- * to a whole percent because the owner is deciding whether to care, not auditing.
- *
- * Only `anomalous` is worded as a warning. Being well under a baseline is reported
- * in full and flagged as nothing: the product exists to stop the owner overspending,
- * and in their own October every ordinary category sits below its baseline while one
- * one-off swamps the month. */
-function comparisonPhrase(comparison: CategoryBaseline): string {
-  const deviation = comparison.deviation_percent;
-  const magnitude = deviation == null ? "" : `${Math.abs(Math.round(deviation))}%`;
-  switch (comparison.comparison_status) {
-    case "no_baseline":
-      return "no baseline yet";
-    case "in_line":
-      return "in line with usual";
-    case "below":
-      return `${magnitude} below usual`;
-    case "above":
-      return `${magnitude} above usual`;
-    case "anomalous":
-      return `unusually high · ${magnitude} above usual`;
-  }
 }
 
 export function CategoriesPage({

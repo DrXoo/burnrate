@@ -98,6 +98,24 @@ class Fixture:
         self.db.flush()
         return transaction
 
+    def income(self, *, category: str, on: date, amount: str) -> None:
+        """One incoming row. Income is booked-only everywhere, so this is booked."""
+        self.db.add(
+            Transaction(
+                account_id=self.account.id,
+                booking_date=on,
+                value_date=on,
+                amount=Decimal(amount),
+                currency="EUR",
+                description=f"{category} {on.isoformat()}",
+                direction="credit",
+                status="booked",
+                category_id=self.category(category, type_="income").id,
+                imported_at=datetime(2026, 10, 26, 9, 0, tzinfo=timezone.utc),
+            )
+        )
+        self.db.flush()
+
     def sync_daily(self, first: date, last: date, *, status: str = "success") -> None:
         """One sync run per day across the range, as the cron would produce."""
         day = first
@@ -628,3 +646,198 @@ def test_a_sync_hole_can_leave_too_little_history_to_compare_at_all() -> None:
     assert summary["baseline_status"] == "insufficient_history"
     assert summary["baseline_months_count"] == 1
     assert row_for(summary, "Food")["baseline_amount"] is None
+
+
+def test_the_aggregate_comparison_leaves_out_what_it_cannot_compare() -> None:
+    """The month this whole split exists for.
+
+    Shaped after the owner's live October. Food and Invoices both have two clean
+    months behind them -- 400 and 180 usual, respectively -- and both come in under
+    that: 250 and 45, so 295 spent where 580 is normal, a notably quiet month. A
+    one-off legal expense of 8400 has no history and so no baseline.
+
+    The comparison speaks only to the 295 against the 580 and reads 49% below. Were
+    the uncomparable 8400 folded in, the same month would report 8695 against 580 --
+    fifteen times normal -- and the product would cry catastrophic overspending in a
+    month where every category the owner controls came in cheap.
+
+    The 8400 is disclosed rather than dropped, and the three figures reconcile
+    against the month's spending: Uncomparable Spend is defined as the residual, so
+    comparable plus uncomparable is exactly the headline above them.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="500.00")
+    fixture.spend(category="Invoices", on=date(2026, 8, 5), amount="200.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Invoices", on=date(2026, 9, 5), amount="160.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="250.00")
+    fixture.spend(category="Invoices", on=date(2026, 10, 5), amount="45.00")
+    fixture.spend(category="Divorce", on=date(2026, 10, 5), amount="8400.00")
+
+    summary = fixture.summary()
+
+    assert summary["comparable_spend_amount"] == "295.00"
+    assert summary["uncomparable_spend_amount"] == "8400.00"
+    assert summary["comparable_spend_baseline"]["baseline_amount"] == "580.00"
+    assert summary["comparable_spend_baseline"]["comparison_status"] == "below"
+    assert summary["comparable_spend_baseline"]["deviation_percent"] == -49.1
+    # The headline is untouched and the split reconciles against it.
+    assert summary["monthly_spending_amount"] == "8695.00"
+
+
+def test_income_is_shown_against_what_the_owner_normally_earns() -> None:
+    """A short payslip should be visible the month it happens, not at year end.
+
+    Two thousand in each of August and September, fourteen hundred this month: 30%
+    down, which for a salaried owner is the single most consequential thing that can
+    change about their month.
+
+    Income needs no comparable split. That split exists because per-category spend
+    baselines feed the spend aggregate and a category without one would poison it;
+    income is one whole-month figure with no per-category decomposition in play.
+
+    The Food rows are not decoration -- a month qualifies on the share of its
+    *outgoing* money that is classified, so a month holding only income has nothing
+    to measure coverage over and would not qualify at all.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.income(category="Salary", on=date(2026, 8, 25), amount="2000.00")
+    fixture.income(category="Salary", on=date(2026, 9, 25), amount="2000.00")
+    fixture.income(category="Salary", on=date(2026, 10, 25), amount="1400.00")
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    assert summary["monthly_income_amount"] == "1400.00"
+    assert summary["monthly_income_baseline"]["baseline_amount"] == "2000.00"
+    assert summary["monthly_income_baseline"]["deviation_percent"] == -30.0
+    assert summary["monthly_income_baseline"]["comparison_status"] == "below"
+
+
+def test_an_aggregate_figure_has_no_presence_floor() -> None:
+    """A month with no income at all is a real zero, not a month to leave out.
+
+    The presence floor exists for a category the owner spends in too rarely to have
+    a normal monthly cost. An aggregate figure has no such notion: a month in which
+    nothing came in is a fact about the owner's year, and dropping it would report a
+    salary as normal to someone who was paid once in three months.
+
+    August and September each saw 2000 and October nothing, so the usual figure is
+    2000 and this month is 100% down.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.income(category="Salary", on=date(2026, 8, 25), amount="2000.00")
+    fixture.income(category="Salary", on=date(2026, 9, 25), amount="2000.00")
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    assert summary["monthly_income_amount"] == "0.00"
+    assert summary["monthly_income_baseline"]["baseline_amount"] == "2000.00"
+    assert summary["monthly_income_baseline"]["deviation_percent"] == -100.0
+
+
+def test_net_cash_flow_gets_a_baseline_amount_and_deliberately_no_verdict() -> None:
+    """The owner normally keeps 1700 a month. This month they are 6700 down.
+
+    The amount is published and the band is not, because a ratio on a figure that
+    can cross zero means nothing: 1700 against -6700 is a ratio of -3.94, which no
+    band reads sensibly, and an owner whose usual month is a deficit would have a
+    negative baseline that the band logic treats as no baseline at all -- a status
+    saying there is none beside an amount saying there is. The two figures side by
+    side already say it: normally this much kept, this month this much.
+
+    Net cash flow also takes no comparable split. The split is for per-category
+    spend baselines feeding an aggregate; "this month was much worse than usual"
+    about money kept is simply true, one-off included, which is exactly what makes
+    it different from reporting the owner overspent.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    for month in (8, 9, 10):
+        fixture.income(category="Salary", on=date(2026, month, 25), amount="2000.00")
+        fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
+    fixture.spend(category="Divorce", on=date(2026, 10, 6), amount="8400.00")
+
+    summary = fixture.summary()
+
+    assert summary["net_cash_flow_amount"] == "-6700.00"
+    assert summary["net_cash_flow_baseline_amount"] == "1700.00"
+    assert "net_cash_flow_baseline" not in summary
+
+
+def test_the_daily_allowance_is_given_no_baseline() -> None:
+    """Comparing an allowance across months compares three things that all moved.
+
+    The budget, the month's length and the fixed overrun all differ between any two
+    months, so a change in the allowance says nothing the owner can act on. The
+    baseline belongs on spend, which is what the allowance is derived from.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    assert not [key for key in summary if key.startswith("safe_to_spend") and "baseline" in key]
+
+
+def test_paging_back_to_a_closed_month_compares_it_against_the_months_before_it() -> None:
+    """The baseline is not only ever about today.
+
+    Viewed from the 26th of October, September is closed: its window reaches June,
+    July and August, of which July and August hold spend and qualify. Food's usual
+    figure there is 500, September spent 300, so the month that has already happened
+    reads 40% below -- compared whole against whole, since the cutoff is for a month
+    still in progress.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="600.00")
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="400.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+
+    summary = fixture.summary(month="2026-09", today=date(2026, 10, 26))
+
+    assert summary["baseline_months_count"] == 2
+    assert summary["comparable_spend_amount"] == "300.00"
+    assert summary["comparable_spend_baseline"]["baseline_amount"] == "500.00"
+    assert summary["comparable_spend_baseline"]["deviation_percent"] == -40.0
+    assert summary["uncomparable_spend_amount"] == "0.00"
+
+
+def test_with_too_little_history_the_whole_month_is_reported_as_uncomparable() -> None:
+    """Which is the honest answer: nothing in it can be compared to anything.
+
+    One Qualifying Month, so no category earns a baseline and the comparable half is
+    empty. The residual then covers the month's entire spending, every amount the
+    comparison would have spoken to is null rather than zero, and no verdict is
+    offered on any of the three figures.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="50.00")
+    fixture.spend(category=None, on=date(2026, 8, 6), amount="950.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+    fixture.income(category="Salary", on=date(2026, 10, 25), amount="2000.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_status"] == "insufficient_history"
+    assert summary["comparable_spend_amount"] == "0.00"
+    assert summary["uncomparable_spend_amount"] == "300.00"
+    assert summary["monthly_spending_amount"] == "300.00"
+    assert summary["comparable_spend_baseline"]["baseline_amount"] is None
+    assert summary["comparable_spend_baseline"]["comparison_status"] == "no_baseline"
+    assert summary["monthly_income_baseline"]["baseline_amount"] is None
+    assert summary["net_cash_flow_baseline_amount"] is None

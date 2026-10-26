@@ -4,6 +4,7 @@ import {
   TONE_COLOR,
   TONE_DIM,
   TONE_LABEL,
+  comparisonPhrase,
   eur,
   eurPlain,
   formatMonthLabel,
@@ -497,7 +498,20 @@ function MeterBar({ label, value, subtitle, fillPct, color, markers = [], footLe
   );
 }
 
-function MetricCard({ label, value, sub }: { label: string; value: string; sub: ReactNode }) {
+function MetricCard({
+  label,
+  value,
+  sub,
+  compare,
+}: {
+  label: string;
+  value: string;
+  sub: ReactNode;
+  // A second line beneath a figure the owner already reads, rather than a page of
+  // its own: the product competes with a fuel gauge, not with a BI tool. Absent
+  // whenever the backend offers no comparison.
+  compare?: ReactNode;
+}) {
   return (
     <div style={cardBase}>
       <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 600, marginBottom: 7 }}>{label}</div>
@@ -505,6 +519,9 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub: 
         {value}
       </div>
       <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3 }}>{sub}</div>
+      {compare ? (
+        <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3 }}>{compare}</div>
+      ) : null}
     </div>
   );
 }
@@ -682,7 +699,12 @@ function DashboardContent({
               color={savings.statusColor}
               label="Saved this month"
               centerText={eur(savings.saved)}
-              subtitle={`of ${eurPlain(savings.income)} income`}
+              subtitle={
+                // Both hero modes carry it: the owner picks the mode, not the data.
+                summary.net_cash_flow_baseline_amount
+                  ? `of ${eurPlain(savings.income)} income · normally ${eurPlain(summary.net_cash_flow_baseline_amount)} kept`
+                  : `of ${eurPlain(savings.income)} income`
+              }
               footLeft="saved"
               footRight={`${savings.ratePct} rate`}
             />
@@ -714,7 +736,16 @@ function DashboardContent({
             <MeterBar
               label="Saved this month"
               value={eur(savings.saved)}
-              subtitle={<>of {eurPlain(savings.income)} income this month</>}
+              subtitle={
+                <>
+                  of {eurPlain(savings.income)} income this month
+                  {/* An amount and no verdict: a ratio on a figure that can cross
+                      zero means nothing, and the two figures side by side say it. */}
+                  {summary.net_cash_flow_baseline_amount ? (
+                    <> · normally {eurPlain(summary.net_cash_flow_baseline_amount)} kept</>
+                  ) : null}
+                </>
+              }
               fillPct={`${(savings.savedFrac * 100).toFixed(1)}%`}
               color={savings.statusColor}
               footLeft={
@@ -783,11 +814,42 @@ function DashboardContent({
           label="Monthly income"
           value={eur(summary.monthly_income_amount)}
           sub="booked income this month"
+          compare={
+            summary.monthly_income_baseline.baseline_amount ? (
+              <>
+                normally {eurPlain(summary.monthly_income_baseline.baseline_amount)} ·{" "}
+                {comparisonPhrase(summary.monthly_income_baseline)}
+              </>
+            ) : null
+          }
         />
         <MetricCard
           label="Monthly spending"
           value={eur(summary.monthly_spending_amount)}
           sub={`${eurPlain(summary.budgeted_spending_amount)} budgeted · ${eurPlain(summary.unbudgeted_spending_amount)} unbudgeted`}
+          compare={
+            // Said on the spending card alone rather than under all three figures:
+            // one statement of the reason, beside the figure the owner acts on.
+            // Silence would read as "nothing to say about your spending", which is a
+            // different and wrong claim -- and the owner's own fix is to classify
+            // the months the backlog disqualified.
+            summary.baseline_status === "insufficient_history" ? (
+              <>not enough history to compare yet</>
+            ) : summary.comparable_spend_baseline.baseline_amount ? (
+              <>
+                {eurPlain(summary.comparable_spend_amount)} comparable · normally{" "}
+                {eurPlain(summary.comparable_spend_baseline.baseline_amount)} ·{" "}
+                {comparisonPhrase(summary.comparable_spend_baseline)}
+                {/* Disclosed beside the comparison, never folded into it. A month
+                    dominated by a one-off in a category with no history would
+                    otherwise report catastrophic overspending while every ordinary
+                    category came in cheap. */}
+                {num(summary.uncomparable_spend_amount) > 0 ? (
+                  <> · {eurPlain(summary.uncomparable_spend_amount)} cannot be compared</>
+                ) : null}
+              </>
+            ) : null
+          }
         />
         <MetricCard
           label="Projected spend"

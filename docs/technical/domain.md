@@ -288,6 +288,10 @@ For the month in progress, both sides are summed only to the **same day of the m
 
 Comparing and firing are different acts. The deviation is reported in both directions, since a quiet month is information. An anomaly fires **only upward**: the product exists to stop the owner overspending.
 
+The spend comparison is computed over **Comparable Spend** only — the categories that have a baseline — and the rest is disclosed beside it as **Uncomparable Spend**, which is the shape Unbudgeted Spend already has. This is load-bearing rather than tidy: a month dominated by a one-off in a category with no history would otherwise report catastrophic overspending while every ordinary category sat under its own usual figure. Uncomparable Spend is defined as the residual, monthly spending less the comparable half, so the two reconcile against the headline rather than against a third total; the three things that land in it are a category with no baseline, an Archived Category, and spend dated after today's cutoff.
+
+Income and net cash flow take no such split. It exists because per-category baselines feed the spend aggregate and a category without one would poison it; both of these are whole-month figures with no per-category decomposition in play, and "this month was much worse than usual" about money kept is simply true, one-off included. Their means also take **no presence floor**, unlike a category's: a month in which nothing came in is a fact about the owner's year, and skipping it would report a salary as normal to someone paid once in three months. Net cash flow carries a baseline **amount and no verdict**, because a ratio on a figure that can cross zero means nothing and an owner whose usual month is a deficit would carry a negative baseline that the bands read as no baseline at all.
+
 ---
 
 ## Important Invariants

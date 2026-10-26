@@ -165,3 +165,19 @@ classified -- measured as a share of the month's outgoing money, never of its
 rows -- and it must be spanned by successful syncs. The current month never
 qualifies, and how many months qualify is reported alongside every baseline.
 _Avoid_: Complete month, clean month, valid month
+
+**Comparable Spend**:
+The share of a month's spending that falls in categories with a baseline, and
+therefore the only spending a comparison speaks to. Judging the whole month
+instead would let one one-off in a category with no history report the owner as
+overspending in a month where everything they control came in cheap.
+_Avoid_: Baselined spend, tracked spend, known spend
+
+**Uncomparable Spend**:
+The rest of the month's spending: monthly spending less Comparable Spend. Always
+disclosed beside the comparison and never counted inside it, as Unbudgeted Spend
+is. Three things land here -- a category with no baseline, an Archived Category,
+and spend dated after today's cutoff -- and it is defined as the residual so the
+two halves reconcile against the month's spending rather than against a total of
+their own.
+_Avoid_: Unbaselined spend, other spend, excluded spend

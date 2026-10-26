@@ -38,8 +38,10 @@ from burnrate.domain.baselines import (
     BaselineStatus,
     baseline_status,
     category_baseline,
+    comparable_totals,
     comparison_status,
     deviation_percent,
+    figure_baseline_amount,
     month_qualifies,
     month_sync_covered,
 )
@@ -63,12 +65,50 @@ class CategoryComparison:
 
 
 @dataclass(frozen=True)
+class MonthTotals:
+    """One month's income and spending, on the same basis the summary reports them."""
+
+    income: Decimal
+    spending: Decimal
+
+    @property
+    def net(self) -> Decimal:
+        return self.income - self.spending
+
+
+@dataclass(frozen=True)
+class FigureBaseline:
+    """One figure against its own normal."""
+
+    baseline_amount: Decimal | None
+    deviation_percent: Decimal | None
+    comparison_status: BaselineComparisonStatus
+
+
+NO_COMPARISON = FigureBaseline(
+    baseline_amount=None,
+    deviation_percent=None,
+    comparison_status="no_baseline",
+)
+
+
+@dataclass(frozen=True)
 class Baselines:
     """Everything the summary needs to publish a comparison, and nothing else."""
 
     status: BaselineStatus
     qualifying_months_count: int
     categories: tuple[CategoryComparison, ...]
+    # The spend the comparison can actually speak to, and what it speaks to it
+    # against. The rest of the month's spending is the caller's residual to disclose.
+    comparable_spend: Decimal
+    comparable: FigureBaseline
+    income: FigureBaseline
+    # Amount only, no band. A ratio on a figure that can cross zero means nothing,
+    # and an owner whose usual month is a deficit would carry a negative baseline
+    # that the band logic reads as no baseline at all -- a verdict denying what the
+    # amount beside it states. The two figures side by side already say it.
+    net_cash_flow_baseline: Decimal | None
 
 
 class BaselineService:
@@ -94,7 +134,15 @@ class BaselineService:
         owner is on.
         """
         if month_tense == "not_started":
-            return Baselines(status="month_not_started", qualifying_months_count=0, categories=())
+            return Baselines(
+                status="month_not_started",
+                qualifying_months_count=0,
+                categories=(),
+                comparable_spend=NO_SPEND,
+                comparable=NO_COMPARISON,
+                income=NO_COMPARISON,
+                net_cash_flow_baseline=None,
+            )
 
         candidates = _preceding_months(month_value, window_months)
         # Fetched once rather than per candidate month: the rule needs runs from after
@@ -110,6 +158,14 @@ class BaselineService:
         # Phase 8 paid for the alternative in the budget pacing, where a comparison
         # with no time term flipped an on-plan month to a warning around day 26.
         cutoff_day = reference_day.day if month_tense == "current" else None
+
+        # Income and total spending for the month on screen and every Qualifying
+        # Month, read once each: the income baseline and the net cash flow baseline
+        # are both built from them.
+        monthly = {
+            month: self._month_totals(month, cutoff_day=cutoff_day)
+            for month in [month_value, *qualifying]
+        }
 
         this_month = self._category_spend(month_value, cutoff_day=cutoff_day)
         past_months = [self._category_spend(month, cutoff_day=cutoff_day) for month in qualifying]
@@ -141,10 +197,27 @@ class BaselineService:
             )
 
         comparisons.sort(key=lambda row: row.category_name)
+        totals = comparable_totals(
+            spend_and_baselines=[(row.spend_amount, row.baseline_amount) for row in comparisons],
+        )
         return Baselines(
             status=status,
             qualifying_months_count=len(qualifying),
             categories=tuple(comparisons),
+            comparable_spend=totals.spend,
+            comparable=_figure_baseline(spend=totals.spend, baseline=totals.baseline),
+            income=self._aggregate_baseline(
+                this_month=monthly[month_value].income,
+                past_months=[monthly[month].income for month in qualifying],
+                offered=status == "ok",
+            ),
+            net_cash_flow_baseline=(
+                figure_baseline_amount(
+                    amounts_by_qualifying_month=[monthly[month].net for month in qualifying],
+                )
+                if status == "ok"
+                else None
+            ),
         )
 
     def _month_qualifies(self, month_value: str, *, sync_days: Sequence[date]) -> bool:
@@ -276,6 +349,74 @@ class BaselineService:
         return {category_id: name for category_id, name in rows}
 
 
+    def _aggregate_baseline(
+        self,
+        *,
+        this_month: Decimal,
+        past_months: Sequence[Decimal],
+        offered: bool,
+    ) -> FigureBaseline:
+        """One whole-month figure against its mean, or no claim at all."""
+        baseline = figure_baseline_amount(amounts_by_qualifying_month=past_months) if offered else None
+        return _figure_baseline(spend=this_month, baseline=baseline)
+
+    def _month_totals(self, month_value: str, *, cutoff_day: int | None) -> MonthTotals:
+        """A month's income and total spending, on the same basis the summary uses."""
+        income = self._month_income(month_value, cutoff_day=cutoff_day)
+        spending = self._month_spending(month_value, cutoff_day=cutoff_day)
+        return MonthTotals(income=income, spending=spending)
+
+    def _month_spending(self, month_value: str, *, cutoff_day: int | None) -> Decimal:
+        """Total spending for one month, matching the month's own spending figure.
+
+        Committed statuses, every expense category, archived included -- the filters
+        of the figure this feeds rather than those of the per-category list, which
+        excludes archived categories because it is a list the owner reads.
+        """
+        month_start, month_end = _month_window_to_cutoff(month_value, cutoff_day=cutoff_day)
+        total = self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), NO_SPEND))
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Category, Category.id == Transaction.category_id)
+            .where(
+                Account.included_in_calculations.is_(True),
+                within_month(month_start=month_start, month_end=month_end),
+                func.lower(Transaction.status).in_(COMMITTED_STATUSES),
+                Category.type == "expense",
+                not_ignored(),
+            )
+        ) or NO_SPEND
+        return (-Decimal(total)).quantize(Decimal("0.01"))
+
+    def _month_income(self, month_value: str, *, cutoff_day: int | None) -> Decimal:
+        """Income for one month, to the cutoff day where there is one.
+
+        Booked only, matching the figure this is compared against: a credit the bank
+        has not settled is not money kept, which is the asymmetry ADR-0003 records.
+
+        Archived categories are *not* excluded here, unlike the per-category spend
+        query. Each baseline matches the filters of the figure it is compared against,
+        and the month's income figure counts every income category, so excluding
+        archived ones would compare a narrower total against a wider one.
+        """
+        month_start, month_end = _month_window_to_cutoff(month_value, cutoff_day=cutoff_day)
+        total = self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), NO_SPEND))
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Category, Category.id == Transaction.category_id)
+            .where(
+                Account.included_in_calculations.is_(True),
+                within_month(month_start=month_start, month_end=month_end),
+                func.lower(Transaction.status) == "booked",
+                Category.type == "income",
+                not_ignored(),
+            )
+        ) or NO_SPEND
+        return Decimal(total).quantize(Decimal("0.01"))
+
+
 def _preceding_months(month_value: str, count: int) -> list[str]:
     """The ``count`` months immediately before ``month_value``, oldest first.
 
@@ -305,3 +446,13 @@ def _month_window_to_cutoff(month_value: str, *, cutoff_day: int | None) -> tupl
         return month_start, month_end
     days_in_month = (month_end - month_start).days
     return month_start, month_start + timedelta(days=min(cutoff_day, days_in_month))
+
+
+def _figure_baseline(*, spend: Decimal, baseline: Decimal | None) -> FigureBaseline:
+    """Band one figure against its baseline, or state that there is none to band."""
+    return FigureBaseline(
+        baseline_amount=baseline,
+        deviation_percent=deviation_percent(spend=spend, baseline=baseline),
+        comparison_status=comparison_status(spend=spend, baseline=baseline),
+    )
+

@@ -136,6 +136,12 @@ function page(rows: Transaction[], paging: PagingState) {
   };
 }
 
+const NO_FIGURE_BASELINE = {
+  baseline_amount: null,
+  deviation_percent: null,
+  comparison_status: "no_baseline" as const,
+};
+
 export function summaryFor(month: string): SummaryDashboard {
   const resolved = month || currentMonth;
   return {
@@ -167,6 +173,11 @@ export function summaryFor(month: string): SummaryDashboard {
     baseline_status: "ok",
     baseline_months_count: 2,
     category_baselines: [],
+    comparable_spend_amount: "0.00",
+    uncomparable_spend_amount: "0.00",
+    comparable_spend_baseline: NO_FIGURE_BASELINE,
+    monthly_income_baseline: NO_FIGURE_BASELINE,
+    net_cash_flow_baseline_amount: null,
     ...ledgerFor(resolved).summary,
   };
 }

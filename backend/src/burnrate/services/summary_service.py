@@ -15,7 +15,7 @@ from burnrate.db.budget_windows import budget_covers_month
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
-from burnrate.services.baseline_service import BaselineService
+from burnrate.services.baseline_service import BaselineService, FigureBaseline
 from burnrate.domain.metrics import (
     FixedCommitment,
     MetricStatus,
@@ -318,6 +318,20 @@ class SummaryService:
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "budget_usage": budget_usage,
             "baseline_status": baselines.status,
+            "comparable_spend_amount": self._format_decimal(baselines.comparable_spend),
+            # Defined as the residual, so the two halves reconcile against the
+            # headline above them rather than against a third total of their own.
+            # Every euro in it is a euro the comparison cannot speak to, for one of
+            # three reasons: a category with no baseline, a category the owner
+            # archived, or spend dated after today's cutoff.
+            "uncomparable_spend_amount": self._format_decimal(
+                monthly_spending - baselines.comparable_spend
+            ),
+            "comparable_spend_baseline": self._serialize_figure_baseline(baselines.comparable),
+            "monthly_income_baseline": self._serialize_figure_baseline(baselines.income),
+            "net_cash_flow_baseline_amount": self._format_optional_decimal(
+                baselines.net_cash_flow_baseline
+            ),
             "baseline_months_count": baselines.qualifying_months_count,
             "category_baselines": [
                 {
@@ -634,6 +648,15 @@ class SummaryService:
 
     def _format_decimal(self, value: Decimal) -> str:
         return format(value.quantize(Decimal("0.01")), ".2f")
+
+    def _serialize_figure_baseline(self, figure: FigureBaseline) -> dict[str, Any]:
+        return {
+            "baseline_amount": self._format_optional_decimal(figure.baseline_amount),
+            "deviation_percent": (
+                float(figure.deviation_percent) if figure.deviation_percent is not None else None
+            ),
+            "comparison_status": figure.comparison_status,
+        }
 
     def _format_optional_decimal(self, value: Decimal | None) -> str | None:
         """A figure the owner may not have, kept distinct from one that is zero."""

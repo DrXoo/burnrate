@@ -274,3 +274,44 @@ Example:
 * Savings available for runway: 10,000EUR
 * Average monthly deficit: 500EUR
 * Deficit runway: 20 months
+
+
+---
+
+## Comparable Spend and Uncomparable Spend
+
+Every figure the owner acts on is shown against what that figure normally is for
+them. For spending, "normally" can only be claimed per category, so the
+comparison is computed over **Comparable Spend** -- the categories that have a
+baseline -- and the rest of the month is reported beside it as **Uncomparable
+Spend**.
+
+The split is not tidiness. Worked from the owner's own October 2026:
+
+| Category | This month | Normally |
+|---|---|---|
+| Food | 256.84 | 414.74 |
+| Invoices | 44.95 | 179.94 |
+| Divorce | 8403.83 | no baseline |
+
+Comparing the whole month gives 8705.62 against 594.68, fourteen times normal, and
+the product would report catastrophic overspending in a month where every category
+the owner controls came in under its usual figure. Comparing the comparable half
+gives 301.79 against 594.68 -- about half, a notably quiet month -- with 8403.83
+disclosed as uncomparable.
+
+Uncomparable Spend is the **residual**: monthly spending less Comparable Spend. So
+the two halves always reconcile against the month's spending, rather than being a
+third total the owner has to tie back by hand. Three things land in it, and each is
+genuinely something the comparison cannot speak to:
+
+* a category below the presence floor, too rarely spent in to have a normal cost
+* an Archived Category, closed to new spend
+* spend dated after today's cutoff, since both sides are measured to the same day
+
+Income and net cash flow are compared without any split, because neither is built
+from per-category baselines. Net cash flow is given its usual amount and no
+verdict: a ratio on a figure that can cross zero means nothing, and an owner whose
+usual month is a deficit would carry a negative baseline that the bands read as no
+baseline at all. The two figures side by side already say it -- normally this much
+kept, this month this much.

@@ -18,6 +18,20 @@ class BudgetUsageResponse(BaseModel):
     is_fixed: bool = False
 
 
+class FigureBaselineResponse(BaseModel):
+    """One whole-month figure against its own normal.
+
+    Shared by the two figures a band reads sensibly on. Net cash flow has no entry
+    here on purpose: a ratio on a figure that can cross zero means nothing, and an
+    owner whose usual month is a deficit would carry a negative baseline that the
+    band logic reads as no baseline at all.
+    """
+
+    baseline_amount: str | None
+    deviation_percent: float | None
+    comparison_status: BaselineComparisonStatus
+
+
 class CategoryBaselineResponse(BaseModel):
     """One category's month against its own normal.
 
@@ -82,3 +96,14 @@ class SummaryResponse(BaseModel):
     # each row.
     baseline_months_count: int
     category_baselines: list[CategoryBaselineResponse]
+    # The spend the comparison can speak to, and the rest. Uncomparable Spend is the
+    # residual -- monthly spending less the comparable half -- so the two reconcile
+    # against the headline rather than against a third total of their own. Every euro
+    # in it is one the comparison cannot speak to: a category with no baseline, a
+    # category the owner archived, or spend dated after today's cutoff.
+    comparable_spend_amount: str
+    uncomparable_spend_amount: str
+    comparable_spend_baseline: FigureBaselineResponse
+    monthly_income_baseline: FigureBaselineResponse
+    # Amount only, no verdict. See FigureBaselineResponse.
+    net_cash_flow_baseline_amount: str | None

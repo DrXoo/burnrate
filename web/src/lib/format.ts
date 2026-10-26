@@ -1,3 +1,5 @@
+import type { BaselineComparisonStatus } from "../types";
+
 import type {
   BudgetUsageStatus,
   CategoryType,
@@ -309,3 +311,34 @@ export function formatMonthLabel(value: string): string {
   });
 }
 
+
+
+/** The phrase the owner reads beside a figure compared against its own normal.
+ *
+ * The bands are the backend's; this picks words for them. The magnitude is rounded
+ * to a whole percent because the owner is deciding whether to care, not auditing.
+ *
+ * Only `anomalous` is worded as a warning. Being well under a baseline is reported
+ * in full and flagged as nothing: the product exists to stop the owner overspending,
+ * and in their own October every ordinary category sits below its baseline while one
+ * one-off swamps the month.
+ */
+export function comparisonPhrase(comparison: {
+  deviation_percent: number | null;
+  comparison_status: BaselineComparisonStatus;
+}): string {
+  const deviation = comparison.deviation_percent;
+  const magnitude = deviation == null ? "" : `${Math.abs(Math.round(deviation))}%`;
+  switch (comparison.comparison_status) {
+    case "no_baseline":
+      return "no baseline yet";
+    case "in_line":
+      return "in line with usual";
+    case "below":
+      return `${magnitude} below usual`;
+    case "above":
+      return `${magnitude} above usual`;
+    case "anomalous":
+      return `unusually high · ${magnitude} above usual`;
+  }
+}

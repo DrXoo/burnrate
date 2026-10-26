@@ -11,17 +11,118 @@ report of catastrophic overspending.
 
 **Blocked by:** 02.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Monthly spending is shown against a baseline computed only over the categories that have one
-- [ ] The Uncomparable Spend total is reported beside the comparison and never counted inside it
-- [ ] A month in which one uncomparable category exceeds the entire comparable total does not move the comparison, and the comparison still reports the ordinary categories honestly
-- [ ] Income and net cash flow are each shown against their own baseline
-- [ ] Safe to Spend Today is given no baseline
-- [ ] The comparisons appear beneath the existing figures; no new page is added
-- [ ] An absent baseline is null in the payload rather than zero, and renders as no claim rather than as a figure
-- [ ] Paging back to a closed month shows that month's comparison against the months before it
-- [ ] Below the minimum Qualifying Month count, the dashboard states that there is not enough history rather than showing an empty comparison
-- [ ] Every pre-existing summary field is unchanged, asserted as a regression
-- [ ] Tests live only at the pure-domain seam, the summary service seam, and page rendering
-- [ ] Including uncomparable categories in the aggregate puts the October-shaped test red
+- [x] Monthly spending is shown against a baseline computed only over the categories that have one
+- [x] The Uncomparable Spend total is reported beside the comparison and never counted inside it
+- [x] A month in which one uncomparable category exceeds the entire comparable total does not move the comparison, and the comparison still reports the ordinary categories honestly
+- [x] Income and net cash flow are each shown against their own baseline
+- [x] Safe to Spend Today is given no baseline
+- [x] The comparisons appear beneath the existing figures; no new page is added
+- [x] An absent baseline is null in the payload rather than zero, and renders as no claim rather than as a figure
+- [x] Paging back to a closed month shows that month's comparison against the months before it
+- [x] Below the minimum Qualifying Month count, the dashboard states that there is not enough history rather than showing an empty comparison
+- [x] Every pre-existing summary field is unchanged, asserted as a regression
+- [x] Tests live only at the pure-domain seam, the summary service seam, and page rendering
+- [x] Including uncomparable categories in the aggregate puts the October-shaped test red
+
+
+## Comments
+
+**Done.** 11 new backend tests and 6 new page tests (a new `DashboardPage.test.tsx`);
+454 backend and 57 web pass, `tsc` is clean and `npm run build` succeeds.
+
+Red first on five of six cycles. The closed-month and allowance tests went green on
+arrival and were mutation-checked instead.
+
+### A correction to ticket 02: it shipped a broken web build
+
+Ticket 02's note that `tsc` was clean was **wrong, and the mistake was mine**: I
+filtered the command's output with `tail -5`, which showed only npm's notices and cut
+the five type errors above them. `CategoryStat` is an explicit interface and
+`useMemo<CategoryStat[]>` annotates the return, so adding a `comparison` field to the
+returned object without declaring it on the interface is an error.
+
+Two things made it invisible. Vitest transforms through esbuild and **does not type
+check**, so 52 tests were green over a broken build. And `npm run build` is
+`tsc -b && vite build`, so the web image would have failed to build from that commit.
+The interface now declares the field, and the real gate is the build rather than
+`tsc --noEmit` read through a filter.
+
+### The pin earned its keep
+
+`test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent` asserts an
+exact dict of every key ending in `_amount`, so three new fields broke it — exactly
+what it exists for. No existing figure moved; the fix was to state the new amounts by
+hand. The seeded month has nothing before it, so the comparable half is empty and the
+residual covers the month's entire spending, which is the honest answer for a month
+with no history behind it.
+
+It also surfaced a process lapse of mine: I had been running only
+`test_summary_baselines.py` through several cycles and so carried the failure for
+three of them before the first full-suite run caught it.
+
+### Decisions taken here
+
+* **Uncomparable Spend is the residual**, monthly spending less the comparable half,
+  rather than a sum over the categories without baselines. The two halves then
+  reconcile against the headline the owner already has on screen instead of forming a
+  third total they would have to tie back by hand, and every euro in it is genuinely
+  something the comparison cannot speak to: a category below the presence floor, an
+  Archived Category, or spend dated after today's cutoff. Defining it as a sum would
+  have left those last two unaccounted for in either half.
+* **Income and net cash flow take no comparable split.** The split exists because
+  per-category baselines feed the spend aggregate and a category without one would
+  poison it. Both of these are whole-month figures with no per-category decomposition
+  in play, and "much worse than usual" about money kept is simply *true*, one-off
+  included -- which is what makes it different from reporting that the owner
+  overspent.
+* **Net cash flow gets an amount and no verdict.** A ratio on a figure that can cross
+  zero means nothing (1700 against -6700 is -3.94), and an owner whose usual month is
+  a deficit would carry a negative baseline that the band logic reads as
+  `no_baseline` -- a status denying what the amount beside it states. The two figures
+  side by side already say it.
+* **Aggregate figures take no presence floor.** `figure_baseline_amount` exists
+  alongside `category_baseline` to state that: the floor is for a category spent in
+  too rarely to have a normal monthly cost, while a month in which nothing came in is
+  a fact about the owner's year. Skipping it would report a salary as normal to
+  someone paid once in three months.
+* **The income baseline does not exclude Archived Categories, while the per-category
+  spend query does.** Each baseline matches the filters of the figure it is compared
+  against: the month's income counts every income category, so excluding archived
+  ones would compare a narrower total against a wider one. The per-category list
+  excludes them because it is a list the owner reads.
+* **`comparisonPhrase` moved to `lib/format.ts`.** The second real use case arrived,
+  which is when `AGENTS.md` says to extract; duplicating it across two pages would
+  have been the alternative.
+* **The insufficient-history statement goes on the spending card only.** One
+  statement of the reason, beside the figure the owner acts on, rather than the same
+  sentence under all three.
+
+### A criterion I had missed, and the owner should know about
+
+The last acceptance criterion asks the dashboard to **state** that there is not
+enough history rather than show an empty comparison. My first implementation was
+silent, and I only caught it re-reading the criteria before closing. Silence reads as
+"nothing to say about your spending", which is a different and wrong claim. It now
+says "not enough history to compare yet", so the owner can tell a product that has
+nothing to report from one that cannot report yet -- and in their case the fix is
+theirs rather than the code's.
+
+### Mutations run
+
+| Mutation | Result |
+|---|---|
+| Uncomparable categories folded into the aggregate | `8705.62` vs `301.79` |
+| Income baseline not gated on the status | `'0.00'` where `None` is owed |
+| Net cash flow baseline not gated on the status | `'-300.00'` where `None` is owed |
+| Residual computed backwards | `-8400.00` vs `8400.00`, 2 tests |
+| Dashboard silent instead of stating the reason | its own test |
+
+### For ticket 06
+
+The month on screen and every Qualifying Month now each cost two more aggregate
+queries -- income and total spending -- on top of ticket 02's per-category spend and
+coverage pair and ticket 03's single sync query. With a three-month window and two
+qualifying months that is a lot more than the six statements ticket 01 recorded, and
+the current month should now cost strictly more than a closed one.

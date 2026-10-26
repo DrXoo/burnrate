@@ -33,6 +33,16 @@ export type BaselineComparisonStatus =
   | "above"
   | "anomalous";
 
+/** One whole-month figure against its own normal.
+
+    Net cash flow has no entry of this shape on purpose: a ratio on a figure that can
+    cross zero means nothing, so it carries an amount and no verdict. */
+export interface FigureBaseline {
+  baseline_amount: string | null;
+  deviation_percent: number | null;
+  comparison_status: BaselineComparisonStatus;
+}
+
 export interface CategoryBaseline {
   category_id: string;
   category_name: string;
@@ -215,6 +225,16 @@ export interface SummaryDashboard {
   // can see how much to trust a comparison resting on as few as two.
   baseline_months_count: number;
   category_baselines: CategoryBaseline[];
+  // The spend the comparison can speak to, and the rest. Uncomparable Spend is the
+  // residual -- monthly spending less the comparable half -- so the two reconcile
+  // against the headline above them. Every euro in it is one the comparison cannot
+  // speak to: a category with no baseline, an archived category, or spend dated after
+  // today's cutoff.
+  comparable_spend_amount: string;
+  uncomparable_spend_amount: string;
+  comparable_spend_baseline: FigureBaseline;
+  monthly_income_baseline: FigureBaseline;
+  net_cash_flow_baseline_amount: string | null;
 }
 
 export interface TransactionsResponse {

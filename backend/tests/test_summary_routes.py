@@ -55,6 +55,19 @@ class FakeSummaryService:
             ],
             "baseline_status": "ok",
             "baseline_months_count": 2,
+            "comparable_spend_amount": "120.00",
+            "uncomparable_spend_amount": "8403.83",
+            "comparable_spend_baseline": {
+                "baseline_amount": "80.00",
+                "deviation_percent": 50.0,
+                "comparison_status": "above",
+            },
+            "monthly_income_baseline": {
+                "baseline_amount": "2000.00",
+                "deviation_percent": 0.0,
+                "comparison_status": "in_line",
+            },
+            "net_cash_flow_baseline_amount": "1715.00",
             "category_baselines": [
                 {
                     "category_id": "cat-1",
@@ -101,6 +114,15 @@ def test_summary_route_uses_service_dependency() -> None:
     assert response.category_baselines[1].baseline_amount is None
     assert response.category_baselines[1].deviation_percent is None
     assert response.category_baselines[1].comparison_status == "no_baseline"
+    # The aggregate comparison excludes what has no baseline and discloses it beside,
+    # so the two halves reconcile against the month's spending rather than restating
+    # it: this fake month is 120.00 comparable and 8403.83 that cannot be compared.
+    assert response.comparable_spend_amount == "120.00"
+    assert response.uncomparable_spend_amount == "8403.83"
+    assert response.comparable_spend_baseline.comparison_status == "above"
+    assert response.monthly_income_baseline.baseline_amount == "2000.00"
+    # Net cash flow carries an amount and deliberately no verdict.
+    assert response.net_cash_flow_baseline_amount == "1715.00"
 
 
 def test_summary_route_serves_an_allowance_the_owner_does_not_have() -> None:

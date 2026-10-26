@@ -6,6 +6,7 @@ from decimal import Decimal
 import pytest
 
 from burnrate.domain.baselines import (
+    comparable_totals,
     baseline_status,
     category_baseline,
     comparison_status,
@@ -329,3 +330,63 @@ def test_month_sync_covered_does_not_care_what_order_the_syncs_arrive_in() -> No
         )
         is True
     )
+
+
+def test_comparable_totals_leave_out_what_has_no_baseline() -> None:
+    """The owner's live October, which is why the aggregate is split at all.
+
+    Three categories: Food at 256.84 against a usual 414.74, Invoices at 44.95
+    against 179.94, and a one-off legal expense of 8403.83 with no history and so no
+    baseline. The comparable half is 301.79 spent where 594.68 is usual -- a bit over
+    half, a notably quiet month.
+
+    Folding the uncomparable category in gives 8705.62 against 594.68, fourteen times
+    normal, and the product would report catastrophic overspending in a month where
+    every ordinary category came in under its own usual figure. The excluded money is
+    not hidden; it is reported beside the comparison, which is the shape Unbudgeted
+    Spend already has.
+    """
+    totals = comparable_totals(
+        spend_and_baselines=[
+            (Decimal("256.84"), Decimal("414.74")),
+            (Decimal("44.95"), Decimal("179.94")),
+            (Decimal("8403.83"), None),
+        ],
+    )
+
+    assert totals.spend == Decimal("301.79")
+    assert totals.baseline == Decimal("594.68")
+
+
+# Each row is the per-category spend and baseline pairs, and the comparable spend and
+# comparable baseline they add up to.
+#
+# pairs, comparable spend, comparable baseline
+COMPARABLE_TOTALS_EXAMPLES = [
+    ([("100.00", "80.00")], "100.00", "80.00"),
+    ([("100.00", "80.00"), ("50.00", "60.00")], "150.00", "140.00"),
+    # Nothing has a baseline: there is no comparison to offer and no total to offer
+    # it against, but the spend still has to be accounted for somewhere.
+    ([("100.00", None), ("50.00", None)], "0.00", None),
+    ([], "0.00", None),
+    # A category with a baseline and no spend this month counts as zero spend against
+    # its usual figure, which is the point of the divisor rule one layer down.
+    ([("0.00", "80.00")], "0.00", "80.00"),
+]
+
+
+@pytest.mark.parametrize(("pairs", "spend", "baseline"), COMPARABLE_TOTALS_EXAMPLES)
+def test_comparable_totals_add_up_only_the_categories_that_can_be_compared(
+    pairs: list[tuple[str, str | None]],
+    spend: str,
+    baseline: str | None,
+) -> None:
+    totals = comparable_totals(
+        spend_and_baselines=[
+            (Decimal(each_spend), Decimal(each_baseline) if each_baseline is not None else None)
+            for each_spend, each_baseline in pairs
+        ],
+    )
+
+    assert totals.spend == Decimal(spend)
+    assert totals.baseline == (Decimal(baseline) if baseline is not None else None)

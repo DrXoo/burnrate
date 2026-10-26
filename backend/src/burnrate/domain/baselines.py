@@ -10,6 +10,7 @@ each other, so its inputs are a series rather than a month's figures.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -216,3 +217,57 @@ def month_sync_covered(
         if needed >= month_end:
             return True
     return False
+
+
+@dataclass(frozen=True)
+class ComparableTotals:
+    """The half of a month's spend that can be judged, and what it is judged against."""
+
+    spend: Decimal
+    baseline: Decimal | None
+
+
+def comparable_totals(
+    *,
+    spend_and_baselines: Sequence[tuple[Decimal, Decimal | None]],
+) -> ComparableTotals:
+    """Add up only the categories that have a baseline to be compared against.
+
+    This is policy, not arithmetic. A month dominated by a one-off in a category
+    with no history would otherwise report catastrophic overspending while every
+    ordinary category sat under its own usual figure -- which is the owner's live
+    October, where one legal expense is fourteen times the comparable total. The
+    aggregate would not merely be unhelpful there; it would be actively wrong about
+    the one thing the product exists to say.
+
+    The excluded money is not hidden. The caller reports it beside the comparison as
+    Uncomparable Spend, which is the shape Unbudgeted Spend already has: invisible to
+    the figure it would corrupt, always disclosed next to it.
+
+    ``baseline`` is ``None`` when nothing in the month has one, so that no caller
+    reads a zero as "normally nothing".
+    """
+    comparable = [
+        (spend, baseline) for spend, baseline in spend_and_baselines if baseline is not None
+    ]
+    if not comparable:
+        return ComparableTotals(spend=Decimal("0.00"), baseline=None)
+    return ComparableTotals(
+        spend=sum((spend for spend, _ in comparable), Decimal("0.00")),
+        baseline=sum((baseline for _, baseline in comparable), Decimal("0.00")),
+    )
+
+
+def figure_baseline_amount(*, amounts_by_qualifying_month: Sequence[Decimal]) -> Decimal | None:
+    """The mean of a whole-month figure over the Qualifying Months given.
+
+    No presence floor, unlike ``category_baseline``, and that is the decision this
+    function exists to state. The floor is for a category the owner spends in too
+    rarely to have a normal monthly cost; an aggregate figure has no such notion. A
+    month in which nothing came in is a fact about the owner's year, and skipping it
+    would report a salary as normal to someone who was paid once in three months.
+    """
+    if not amounts_by_qualifying_month:
+        return None
+    total = sum(amounts_by_qualifying_month, Decimal("0.00"))
+    return (total / Decimal(len(amounts_by_qualifying_month))).quantize(_CENTS)
