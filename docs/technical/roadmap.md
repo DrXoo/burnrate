@@ -383,7 +383,24 @@ rendering, which ticket 17 then took.
 
 ---
 
-## Phase 9: "Is this normal?"
+## Phase 9: "Is this normal?" — Split; 9a shipped, 9b not started
+
+**The phase was split before any code was written**, during
+`/grill-with-docs`. Its six scope bullets hold three independent machines, and two
+of them are each larger than Phase 8's original scope was — which Phase 8 then
+overran by sixteen tickets. The split falls on the natural seam:
+
+* **9a — baselines.** Trailing per-category averages, month-over-month comparison,
+  and anomaly flagging on category totals. All three hang off the same aggregation.
+  **Shipped**; its Definition of Done is checked below.
+* **9b — recurring charges.** Recurring-payment detection, the subscription
+  inventory and price-change detection. All three hang off matching by counterparty
+  and need no baseline at all. **Not started.** It also owes the last open Phase 8
+  gap, because carrying a decision across the pending-to-booked transition needs the
+  same identity matching.
+
+The Definition of Done below is the *whole* phase's and is not satisfied: its
+second clause is entirely 9b's. **Phase 9 is open.**
 
 ### Objective
 
@@ -412,6 +429,72 @@ derived, per the database rules in `AGENTS.md`.
 Every headline figure on the dashboard is shown against its own baseline, and the
 owner can see a list of their recurring commitments and total subscription cost
 without having gone looking for it manually.
+
+### Definition of Done: checked (9a)
+
+Checked against the implementation rather than assumed, and against the live
+database rather than only the tests. Phase 8 learned that its own check was not
+enough — the check found five gaps and per-ticket review found five more — so this
+one reads the running product too.
+
+| Clause | Result | Evidence |
+|---|---|---|
+| Every headline figure on the dashboard is shown against its own baseline | **Not met as written: three of seven** | Monthly spending, Monthly income and Saved this month each carry a comparison, asserted in `web/tests/DashboardPage.test.tsx`. Safe to Spend Today, Current balance, Budget left and Projected spend do not. See the gaps below. |
+| The owner can see their recurring commitments and total subscription cost | **Not met** | 9b, not started. Nothing in the codebase detects a Recurring Charge. |
+| Trailing per-category averages over a configurable window, default 3 months | Met | `BASELINE_WINDOW_MONTHS`, default 3, read through the dependency the route uses and asserted by behaviour rather than by attribute. |
+| Month-over-month comparison on spending, income and per-category totals | Met in substance, not on the stated surface | Spending, income and net cash flow are on the dashboard. The per-category comparison is on the **Categories** page, not the dashboard, and the dashboard's own per-category rows carry none. See the gaps. |
+| Anomaly flagging on category totals, relative to baseline | Met | One status over five bands in `burnrate.domain.baselines`, fired one-sided at 1.5× the baseline, as a worked-example table. |
+| Anomaly flagging **on transactions** | **Not met, deliberately** | Needs a per-transaction distribution. Two Qualifying Months with eleven rows in a category is not one. Recorded in the spec's Out of Scope rather than discovered later. |
+| Derived metrics stay derived; measure before any snapshot table | Met | No migration, no table, nothing stored. Measured before and after: 6 statements to 13-15 live, 25 at the ceiling; the decision is no snapshot table, with widening the window named as the trigger to revisit. |
+
+### Known gaps (9a)
+
+Recorded explicitly, because Phase 3 was closed over a known gap and it stayed
+closed for six phases.
+
+* **Four of the dashboard's seven figures have no baseline, and only one of those is
+  a decision.** Safe to Spend Today is excluded deliberately and has a test saying so
+  — comparing an allowance across months mixes a budget, a month length and a fixed
+  overrun, all of which moved. **Current balance, Budget left and Projected spend
+  were never examined at all.** Two of them plausibly deserve the allowance's
+  reasoning (Budget left is a budget the owner changed; Projected spend is a plan,
+  not an outcome) and Current balance plausibly deserves a baseline, but none of that
+  was decided — it was simply not asked, and the Definition of Done says "every".
+* **The dashboard's Budget pulse rows are silent while the Categories page's rows
+  are not.** Both render the same categories for the same month; one carries the
+  comparison and the other does not. Cheap to close: the per-category payload already
+  exists and joins by category id. Left open only because no ticket owned it.
+  `budget_usage` is the wrong carrier on its own, though — it holds only budgeted
+  categories, which is why the comparison travels in a list of its own.
+* **Nothing yet is proactive**, by design. 9a makes the comparison visible; Phase 10
+  is what makes the product speak first.
+
+### The gap that is not in the code (9a)
+
+**The live product shows no comparison at all today**, and the reason is the data
+rather than the implementation. Both the current and a closed month report
+`insufficient_history` with **zero** Qualifying Months, because the sync history has
+a **36-day hole from 2026-08-29 to 2026-10-04** — wider than the 30-day fetch window.
+The sync-coverage rule found it; nothing else in the system reports it.
+
+August and September therefore **can never qualify**: no entry point can request a
+window older than 30 days, so 30 August to 3 September will never be fetched. Their
+spending totals are understated by whatever fell in those days, and every figure
+BurnRate has ever reported for those two months is too.
+
+Two consequences worth carrying into Phase 10 and beyond:
+
+* **The feature becomes demonstrable in December 2026** without anyone touching it,
+  once October and November are both closed and inside the window. It can instead be
+  demonstrated today by classifying the June and July backlog — both months *are*
+  sync-covered — and setting `BASELINE_WINDOW_MONTHS=5`. That this is an environment
+  variable rather than a migration is the return on refusing a stored accumulator
+  during design.
+* **Nothing alerts the owner to a sync gap.** A lapsed consent writes a `skipped`
+  session per attempt and the product carries on reporting figures for months it
+  never fully fetched. That silence is now load-bearing for Phase 9's value and is a
+  strong candidate for Phase 10's first alert — it is the one case where the product
+  knows something the owner cannot see.
 
 ---
 
@@ -572,7 +655,9 @@ Act II, under way:
 
 * **Data Becomes a Decision** (Phase 8) — one number that changes what the owner
   does today. Shipped, with the gaps listed under that phase still open.
-* **Data Gets a Memory** (Phase 9) — every figure has a baseline.
+* **Data Gets a Memory** (Phase 9) — every figure has a baseline. 9a shipped: the
+  comparison exists and refuses to speak when it cannot speak honestly. 9b, the
+  recurring charges, is not started.
 * **Data Speaks First** (Phase 10) — BurnRate reaches out instead of waiting.
 * **Data Gets a Horizon** (Phase 11) — how long the cushion lasts.
 * **Data Gets Help** (Phase 12) — the model handles the tail the rules cannot.
@@ -599,24 +684,52 @@ Still off the table, and now for firmer reasons:
 
 ---
 
+## Between Phase 8 and 9a: the category lifecycle
+
+Not a phase, and recorded here because it shipped between the two and the roadmap
+would otherwise read as though Phase 8 were the last thing that happened.
+
+Categories could only ever be created: their name was fixed and nothing could retire
+one, although `Category.active` existed and three guards already refused an inactive
+category. Renaming now lives on the category rather than on a per-surface label, so
+one rename reaches budget rows, rules, the dashboard and Telegram through joins that
+already existed. Retiring is two operations, because deleting and archiving are not
+the same act — delete only while nothing references it, archive otherwise, and both
+refuse rather than cascade, because a category's budget rows are what past months
+reported. ADR-0005 settled the month-granular budget window rules alongside it, and
+ADR-0006 and ADR-0007 record the two decisions a future reader will question.
+
+---
+
 ## Recommended Immediate Next Steps
 
-Phase 8 is closed. All eighteen of its tickets are done, and of the ten gaps its
-Definition of Done check and the per-ticket reviews found, nine are fixed and the
-tenth is deferred to Phase 9 with its obvious-but-wrong fix written down. What is
-next:
+Phase 9a is shipped and its Definition of Done is checked above: three of the seven
+dashboard figures carry a baseline, the per-category comparison lives on the
+Categories page, and the second half of Phase 9's Definition of Done is untouched.
+**Phase 9 is open.** In rough order of value:
 
-1. Add trailing per-category baselines, as the foundation for Phase 9.
-2. Decide whether to promote Phase 12's categorization copilot, based on whether
-   the unknown queue is actually the daily friction. Phase 8 sharpened the argument:
-   the allowance only counts *categorized* pending spend in budgeted categories, so
-   the headline's accuracy is a function of rule coverage.
-3. Carry a decision across the pending-to-booked transition, which needs the two rows
-   recognised as one transaction. It belongs with Phase 9's recurring-payment
-   matching, and it is the last Phase 8 gap left open.
+1. **Close the sync gap, and alert on the next one.** 9a works and shows nothing,
+   because the live data has a 36-day hole that makes every candidate month
+   unqualifiable. August and September are unrecoverable. Nothing in the product
+   reports a gap, which makes this both the cheapest Phase 10 alert and the one that
+   protects every figure Phase 9 produces.
+2. **Classify the June and July backlog.** Both months are sync-covered and only the
+   backlog disqualifies them; with `BASELINE_WINDOW_MONTHS=5` that makes the
+   comparison demonstrable today rather than in December.
+3. **Close 9a's cheap gaps**: the dashboard's Budget pulse rows, and a decision —
+   either way — on Current balance, Budget left and Projected spend, which were never
+   examined rather than deliberately excluded.
+4. **Then 9b**: recurring-charge detection, the subscription inventory and
+   price-change detection, which also owes the last open Phase 8 gap. Note before
+   starting: an automated round-up saver is 232 near-identical rows across four months
+   in the owner's live data — the densest category there is, a transfer, and the first
+   thing any naive matcher will detect.
+5. **Decide whether to promote Phase 12's categorization copilot.** 9a sharpened the
+   argument a second time: the review backlog does not merely delay categorization,
+   it disqualifies whole months from being baseline input.
 
 Phase 3's lesson was that a phase closed over a known gap stays closed for six
-phases. Phase 8's gap list having grown twice *after* its own Definition of Done
-check is that lesson arriving a second time — the check is what found the first five,
-and per-ticket `/code-review` is what found the rest, so neither alone would have
-been enough.
+phases. Phase 8's gap list growing twice *after* its own check was that lesson
+arriving again. 9a's version is narrower and worth naming: **its check passed on the
+tests and failed on the data**, and only reading the running product showed the
+difference.
