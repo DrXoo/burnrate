@@ -4,6 +4,7 @@ import {
   TONE_COLOR,
   TONE_DIM,
   TONE_LABEL,
+  baselineFigure,
   comparisonPhrase,
   eur,
   eurPlain,
@@ -591,6 +592,11 @@ function DashboardContent({
   const headline = useHeadline(summary);
   const disclosures = useDisclosures(summary);
   const savings = useSavingsModel(summary);
+  // Taken off the band rather than off the amount, once per card. See
+  // ``baselineFigure``: the amount can read "0.00" while the band says there is no
+  // baseline at all, and "0.00" is truthy.
+  const incomeBaseline = baselineFigure(summary.monthly_income_baseline);
+  const comparableBaseline = baselineFigure(summary.comparable_spend_baseline);
 
   return (
     <div>
@@ -701,8 +707,11 @@ function DashboardContent({
               centerText={eur(savings.saved)}
               subtitle={
                 // Both hero modes carry it: the owner picks the mode, not the data.
-                summary.net_cash_flow_baseline_amount
-                  ? `of ${eurPlain(savings.income)} income · normally ${eurPlain(summary.net_cash_flow_baseline_amount)} kept`
+                // Signed, because this is the one baseline that can be a deficit --
+                // the amount is published without a band for exactly that reason --
+                // and an unsigned formatter smuggled the minus in as "€-450.00".
+                summary.net_cash_flow_baseline_amount != null
+                  ? `of ${eurPlain(savings.income)} income · normally ${eur(summary.net_cash_flow_baseline_amount)} kept`
                   : `of ${eurPlain(savings.income)} income`
               }
               footLeft="saved"
@@ -741,8 +750,8 @@ function DashboardContent({
                   of {eurPlain(savings.income)} income this month
                   {/* An amount and no verdict: a ratio on a figure that can cross
                       zero means nothing, and the two figures side by side say it. */}
-                  {summary.net_cash_flow_baseline_amount ? (
-                    <> · normally {eurPlain(summary.net_cash_flow_baseline_amount)} kept</>
+                  {summary.net_cash_flow_baseline_amount != null ? (
+                    <> · normally {eur(summary.net_cash_flow_baseline_amount)} kept</>
                   ) : null}
                 </>
               }
@@ -815,9 +824,9 @@ function DashboardContent({
           value={eur(summary.monthly_income_amount)}
           sub="booked income this month"
           compare={
-            summary.monthly_income_baseline.baseline_amount ? (
+            incomeBaseline != null ? (
               <>
-                normally {eurPlain(summary.monthly_income_baseline.baseline_amount)} ·{" "}
+                normally {eurPlain(incomeBaseline)} ·{" "}
                 {comparisonPhrase(summary.monthly_income_baseline)}
               </>
             ) : null
@@ -835,10 +844,10 @@ function DashboardContent({
             // the months the backlog disqualified.
             summary.baseline_status === "insufficient_history" ? (
               <>not enough history to compare yet</>
-            ) : summary.comparable_spend_baseline.baseline_amount ? (
+            ) : comparableBaseline != null ? (
               <>
                 {eurPlain(summary.comparable_spend_amount)} comparable · normally{" "}
-                {eurPlain(summary.comparable_spend_baseline.baseline_amount)} ·{" "}
+                {eurPlain(comparableBaseline)} ·{" "}
                 {comparisonPhrase(summary.comparable_spend_baseline)}
                 {/* Disclosed beside the comparison, never folded into it. A month
                     dominated by a one-off in a category with no history would

@@ -480,6 +480,29 @@ def test_format_summary_reports_spending_against_what_is_normal() -> None:
     ]
 
 
+def test_format_summary_omits_the_comparison_when_the_baseline_is_zero() -> None:
+    """A zero baseline is an absent one, and only the status says so.
+
+    The amount is what every reader reached for first, and it is the wrong field: a
+    baseline of zero or less is not divided by, so the band is already
+    ``no_baseline`` while the amount beside it reads "0.00". Keyed on the amount,
+    this line published "normally 0.00 EUR · no baseline yet" -- a figure and a
+    denial of it in one breath. The owner's own case is a salary dated the 28th read
+    on the 26th, where every Qualifying Month contributes nothing to the cutoff.
+    """
+    text = format_summary(
+        with_comparison(
+            comparable_spend_baseline={
+                "baseline_amount": "0.00",
+                "deviation_percent": None,
+                "comparison_status": "no_baseline",
+            },
+        )
+    )
+
+    assert comparison_lines(text) == []
+
+
 def test_format_summary_omits_the_comparison_with_too_little_history() -> None:
     """Omitted rather than stated, which is the opposite of what the dashboard does.
 

@@ -309,6 +309,19 @@ genuinely something the comparison cannot speak to:
 * an Archived Category, closed to new spend
 * spend dated after today's cutoff, since both sides are measured to the same day
 
+A hold on a fixed bill is **not** one of them. Pending spend on a Fixed Budget's
+category counts towards nothing until it books -- the budgeted estimate already
+stands for the whole commitment -- so it is absent from the month's spending and
+from the comparable half alike, and from the baselines behind them. Counting it on
+one side only is what makes a residual go negative, and "minus 500.00 cannot be
+compared" is not a sentence the product can say.
+
+Income is compared but never fired on. A month in which more money came in than
+usual -- a bonus, a refund, a late invoice finally paid -- reads *above usual* and
+no further: an anomaly is worded "unusually high", and being paid more than usual
+is not a thing to interrupt the owner about. The direction that would be worth
+saying, income well below normal, already has its own band.
+
 Income and net cash flow are compared without any split, because neither is built
 from per-category baselines. Net cash flow is given its usual amount and no
 verdict: a ratio on a figure that can cross zero means nothing, and an owner whose

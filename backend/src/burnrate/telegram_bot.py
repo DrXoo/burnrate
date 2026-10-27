@@ -153,6 +153,7 @@ def main(settings: Settings | None = None) -> None:
     router = TelegramCommandRouter(
         session_factory=SessionLocal,
         timezone_name=settings.app_timezone,
+        baseline_window_months=settings.baseline_window_months,
     )
     logger.info("Starting telegram bot (authorized chats: %s)", len(allowed_chat_ids))
     try:

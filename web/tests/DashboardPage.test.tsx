@@ -3,15 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import { summaryFor } from "./fakeApi";
 import { DashboardPage } from "../src/components/pages/DashboardPage";
+import type { HeroMode } from "../src/lib/viewTypes";
 import type { SummaryDashboard } from "../src/types";
 
-function render(overrides: Partial<SummaryDashboard>): string {
+function render(overrides: Partial<SummaryDashboard>, heroMode: HeroMode = "dial"): string {
   return renderToStaticMarkup(
     <DashboardPage
       summary={{ ...summaryFor("2026-10"), ...overrides }}
       loading={false}
       error={null}
-      heroMode="dial"
+      heroMode={heroMode}
       includedAccountCount={1}
     />,
   );
@@ -91,6 +92,44 @@ describe("the dashboard's comparison against what is normal", () => {
     // they can tell a product that has nothing to report from one that cannot
     // report yet -- and in their case the fix is theirs: classify the backlog.
     expect(html).toContain("not enough history to compare yet");
+  });
+
+  it("prints no figure for a baseline of zero, on any of the three cards", () => {
+    // A zero baseline is an absent one: the backend does not divide by it, so the
+    // band is already `no_baseline` while the amount beside it reads "0.00". The
+    // string "0.00" is truthy, so a guard on the amount published "normally €0.00 ·
+    // no baseline yet" -- a figure and a denial of it in one breath. The owner's own
+    // case is a salary dated the 28th read on the 26th, where every Qualifying Month
+    // contributes nothing up to the cutoff.
+    const html = render({
+      ...OCTOBER,
+      monthly_income_baseline: {
+        baseline_amount: "0.00",
+        deviation_percent: null,
+        comparison_status: "no_baseline",
+      },
+      comparable_spend_baseline: {
+        baseline_amount: "0.00",
+        deviation_percent: null,
+        comparison_status: "no_baseline",
+      },
+    });
+
+    expect(html).not.toContain("normally €0.00");
+    expect(html).not.toContain("no baseline yet");
+  });
+
+  // Both hero modes carry the net baseline, and the owner picks the mode -- so both
+  // are checked. They were two separate call sites of the same formatter.
+  it.each(["dial", "bar"] as const)("signs a net cash flow baseline that is a deficit (%s)", (heroMode) => {
+    // An owner whose usual month ends in the red is explicitly allowed to carry a
+    // negative net baseline -- it is the one baseline published as an amount with no
+    // band for exactly that reason. Rendered unsigned it read "normally €-450.00
+    // kept", a minus sign smuggled in by the number formatter rather than stated.
+    const html = render({ ...OCTOBER, net_cash_flow_baseline_amount: "-450.00" }, heroMode);
+
+    expect(html).toContain("normally \u2212\u20ac450.00 kept");
+    expect(html).not.toContain("\u20ac-450.00");
   });
 
   it("does not disclose an uncomparable total when there is none", () => {

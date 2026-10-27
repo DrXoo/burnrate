@@ -36,7 +36,12 @@ export type BaselineComparisonStatus =
 /** One whole-month figure against its own normal.
 
     Net cash flow has no entry of this shape on purpose: a ratio on a figure that can
-    cross zero means nothing, so it carries an amount and no verdict. */
+    cross zero means nothing, so it carries an amount and no verdict.
+
+    `comparison_status` is the field that says whether there is a baseline at all.
+    The amount is not: it can read "0.00" where the band says `no_baseline`, because
+    a baseline of zero or less is one the backend refuses to divide by. Read it
+    through `baselineFigure`, never with a truthiness check on the amount. */
 export interface FigureBaseline {
   baseline_amount: string | null;
   deviation_percent: number | null;
@@ -51,7 +56,9 @@ export interface CategoryBaseline {
   // `budget_usage` when a standing order falls later in the month.
   spend_amount: string;
   // Null when the category is below the presence floor, or when there is too little
-  // history for any baseline. Never a zero, which would read as "normally nothing".
+  // history for any baseline. It can also be "0.00" -- two months whose movements
+  // cancel out will do it -- in which case `comparison_status` is `no_baseline` and
+  // this field must not be printed. See `baselineFigure`.
   baseline_amount: string | null;
   deviation_percent: number | null;
   comparison_status: BaselineComparisonStatus;

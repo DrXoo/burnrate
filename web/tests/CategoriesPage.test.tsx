@@ -326,6 +326,22 @@ describe("the comparison against what is normal", () => {
     expect(html).not.toContain("usual");
   });
 
+  it("prints no figure for a baseline of zero", () => {
+    // Reachable with two months whose movements cancel out -- a refund will do it.
+    // The band is already `no_baseline`; the amount is not, and "0.00" is truthy, so
+    // a guard on the amount printed "normally €0.00 · no baseline yet".
+    const html = render({
+      summary: withBaselines({
+        category_baselines: [
+          { ...foodBelow, baseline_amount: "0.00", deviation_percent: null, comparison_status: "no_baseline" },
+        ],
+      }),
+    });
+
+    expect(html).toContain("no baseline yet");
+    expect(html).not.toContain("normally");
+  });
+
   it("claims nothing at all when there is too little trustworthy history", () => {
     // One qualifying month is not a baseline. The rows still show the owner's spend;
     // what they do not get is a comparison, and the page must not invent one from a

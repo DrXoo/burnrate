@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from burnrate.db.base import Base
-from burnrate.db.models import Account, Category, SyncSession, Transaction
+from burnrate.db.models import Account, Budget, Category, SyncSession, Transaction
 from burnrate.services.summary_service import SummaryService
 
 # Every fixture pins its own "today". Nothing here reads the wall clock: this whole
@@ -112,6 +112,21 @@ class Fixture:
                 status="booked",
                 category_id=self.category(category, type_="income").id,
                 imported_at=datetime(2026, 10, 26, 9, 0, tzinfo=timezone.utc),
+            )
+        )
+        self.db.flush()
+
+    def fixed_budget(self, *, category: str, amount: str, active_from: date) -> None:
+        """An open-ended Fixed Budget, the kind a rent or a utility bill carries."""
+        self.db.add(
+            Budget(
+                category_id=self.category(category).id,
+                amount=Decimal(amount),
+                currency="EUR",
+                period_type="monthly",
+                active_from=active_from,
+                active_to=None,
+                is_fixed=True,
             )
         )
         self.db.flush()
@@ -841,3 +856,139 @@ def test_with_too_little_history_the_whole_month_is_reported_as_uncomparable() -
     assert summary["comparable_spend_baseline"]["comparison_status"] == "no_baseline"
     assert summary["monthly_income_baseline"]["baseline_amount"] is None
     assert summary["net_cash_flow_baseline_amount"] is None
+
+
+def test_a_hold_on_a_fixed_bill_counts_towards_the_comparison_as_little_as_elsewhere() -> None:
+    """The two bases have to be the same one, or the residual goes negative.
+
+    Uncomparable Spend is defined as the month's spending less the comparable half,
+    so the two halves reconcile against the headline rather than against a third
+    total of their own. That only holds while both count the same money -- and a
+    hold on a Fixed Budget's category is money the headline does not count, per
+    ADR-0003: the budgeted estimate already stands for the whole commitment.
+
+    Rent is 500 in each of the two Qualifying Months and held, not booked, on the
+    1st of the month on screen. Counting that hold on the comparison side alone
+    gave 0.00 spent, 500.00 comparable and *minus* 500.00 that cannot be compared --
+    a figure the dashboard hid and the bot published.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 8, 1))
+    fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00")
+    fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00")
+    fixture.spend(category="Rent", on=date(2026, 10, 1), amount="500.00", status="pending")
+
+    summary = fixture.summary()
+
+    assert summary["monthly_spending_amount"] == "0.00"
+    assert summary["comparable_spend_amount"] == "0.00"
+    assert summary["uncomparable_spend_amount"] == "0.00"
+    rent = row_for(summary, "Rent")
+    assert rent["spend_amount"] == "0.00"
+    assert rent["baseline_amount"] == "500.00"
+
+
+def test_a_qualifying_months_own_hold_on_a_fixed_bill_is_excluded_too() -> None:
+    """The rule is the same rule in every month, which is the point of fixing it.
+
+    A baseline measured on a wider basis than the figure it is compared against is
+    the defect above wearing a different hat: the month on screen would be judged
+    against history that counted holds it does not count itself.
+
+    Rent booked in August, still only held in September, booked in the month on
+    screen. September therefore contributes nothing, which leaves Rent present in
+    one Qualifying Month out of two -- below the presence floor, so there is no
+    normal monthly cost to report. Counting September's hold would have published a
+    500.00 baseline instead.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 8, 1))
+    fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00")
+    fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00", status="pending")
+    fixture.spend(category="Rent", on=date(2026, 10, 1), amount="500.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_months_count"] == 2
+    rent = row_for(summary, "Rent")
+    assert rent["spend_amount"] == "500.00"
+    assert rent["baseline_amount"] is None
+    assert rent["comparison_status"] == "no_baseline"
+    # Disclosed rather than dropped: the headline still counts the rent.
+    assert summary["monthly_spending_amount"] == "500.00"
+    assert summary["uncomparable_spend_amount"] == "500.00"
+
+
+def test_each_month_is_asked_whether_the_category_was_fixed_in_that_month() -> None:
+    """A budget window is month-granular, so "fixed" is a fact about a month.
+
+    Rent became a Fixed Budget in October. August and September were not covered by
+    it, so a hold in either of them was ordinary committed spend and counted -- which
+    is what their own figures said at the time. Reading the month on screen's budgets
+    across the whole window would retroactively disqualify both holds and leave Rent
+    present in no Qualifying Month at all, publishing no baseline where there is one.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 10, 1))
+    fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00", status="pending")
+    fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00", status="pending")
+    fixture.spend(category="Rent", on=date(2026, 10, 1), amount="500.00", status="pending")
+
+    summary = fixture.summary()
+
+    rent = row_for(summary, "Rent")
+    assert rent["baseline_amount"] == "500.00"
+    # October's own hold is excluded, because October is the month Rent is fixed in.
+    assert rent["spend_amount"] == "0.00"
+    assert summary["monthly_spending_amount"] == "0.00"
+    assert summary["uncomparable_spend_amount"] == "0.00"
+
+
+def test_a_hold_on_a_variable_category_still_counts_on_both_sides() -> None:
+    """The exclusion is about Fixed Budgets, not about pending spend.
+
+    Pending spend is load-bearing in the variable slice -- it is money the owner has
+    committed -- so a hold on a category with no Fixed Budget counts in the headline
+    and in the comparison alike. Without this, the fix above would quietly become
+    "the comparison ignores pending".
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="200.00", status="pending")
+
+    summary = fixture.summary()
+
+    assert summary["monthly_spending_amount"] == "200.00"
+    assert summary["comparable_spend_amount"] == "200.00"
+    assert summary["uncomparable_spend_amount"] == "0.00"
+    assert row_for(summary, "Food")["spend_amount"] == "200.00"
+
+
+def test_a_bonus_month_is_not_an_anomaly() -> None:
+    """Income is banded, and never fired on.
+
+    ``comparison_status`` is given the flag here, not a figure it can judge for
+    itself, so this is the seam where the income path could silently start firing
+    again. 3000 against a 2000 normal is twice the anomaly ratio's distance past
+    the in_line band; both clients word an anomaly "unusually high", and there is
+    nothing wrong with being paid more than usual.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    for month in (8, 9):
+        fixture.income(category="Salary", on=date(2026, month, 5), amount="2000.00")
+        fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
+    fixture.income(category="Salary", on=date(2026, 10, 5), amount="3000.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    income = summary["monthly_income_baseline"]
+    assert income["baseline_amount"] == "2000.00"
+    assert income["deviation_percent"] == 50.0
+    assert income["comparison_status"] == "above"

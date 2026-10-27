@@ -138,6 +138,29 @@ the proof the design was necessary.
 | Page does not withhold the comparison | its own test |
 | Minimum-months guard disabled | **survived**, then fixed; now `'300.00' is None` |
 
+### Review findings, absorbed here
+
+**The anomaly ratio was applied to income as well as to spend.** This ticket's own
+mutation table records "anomaly fired downward too" being killed by two band
+examples, and the module's docstring says an anomaly fires upward *on spend* -- but
+`comparison_status` had no notion of which figure it was banding, so ticket 04's
+income baseline went through the same ratio. A bonus month, 3000 against a 2000
+normal, banded `anomalous` and both clients worded it "unusually high". There is
+nothing wrong with being paid more than usual.
+
+`comparison_status` now takes `fires_anomalies`, required rather than defaulted
+because getting it wrong is silent: the income path is the only caller that passes
+false, and the default would have been the bug. Every other band applies to income
+unchanged, so a month well below the usual income still reads `below` -- which is the
+direction that actually deserves words, and the roadmap's alerting phase can decide
+later whether it deserves firing.
+
+The pure-domain examples could not have caught this on their own. The signature had
+no parameter to vary, which is the shape `AGENTS.md` warns about: a test double, or a
+function signature, that cannot be asked the question cannot disagree with the code.
+The service-seam test is where the flag is observable, so that is where the bonus
+month is pinned.
+
 ### For the tickets that follow
 
 * **Ticket 03** inherits a working `_month_qualifies` with one of its two tests in

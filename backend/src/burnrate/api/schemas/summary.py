@@ -51,7 +51,10 @@ class CategoryBaselineResponse(BaseModel):
     spend_amount: str
     # Null rather than zero when the category is below the presence floor or there is
     # too little history: a zero reads as a real figure, which is the reason ADR-0002
-    # already records for the allowance.
+    # already records for the allowance. It is "0.00" in the one case the floor does
+    # not reach -- two months whose movements cancel out -- and ``comparison_status``
+    # is then ``no_baseline``, which is the field a client must read. A client keying
+    # on the amount published "normally 0.00 · no baseline yet".
     baseline_amount: str | None
     deviation_percent: float | None
     comparison_status: BaselineComparisonStatus

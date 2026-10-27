@@ -24,9 +24,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
+from burnrate.db.budget_windows import budget_month_status
+from burnrate.db.counted_spend import spend_counts
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
-from burnrate.db.models import Account, Category, SyncSession, Transaction
+from burnrate.db.models import Account, Budget, Category, SyncSession, Transaction
 from burnrate.domain.metrics import MonthTense
 # ``as_utc`` lives under connection expiry rather than beside the clock, which is
 # the wrong home for it -- but it is the repo's one answer for a datetime read back
@@ -159,16 +161,38 @@ class BaselineService:
         # with no time term flipped an on-plan month to a warning around day 26.
         cutoff_day = reference_day.day if month_tense == "current" else None
 
+        # Which categories a Fixed Budget covered, month by month: the rule that a
+        # hold on a fixed bill counts towards nothing is the month's own, because the
+        # owner can make a category fixed, or cancel it, between two months. Read
+        # once per month and handed to both spend queries, so the per-category rows
+        # and the month's total cannot disagree about what counted.
+        fixed_categories = self._fixed_categories_by_month([month_value, *qualifying])
+
         # Income and total spending for the month on screen and every Qualifying
         # Month, read once each: the income baseline and the net cash flow baseline
         # are both built from them.
         monthly = {
-            month: self._month_totals(month, cutoff_day=cutoff_day)
+            month: self._month_totals(
+                month,
+                cutoff_day=cutoff_day,
+                fixed_category_ids=fixed_categories[month],
+            )
             for month in [month_value, *qualifying]
         }
 
-        this_month = self._category_spend(month_value, cutoff_day=cutoff_day)
-        past_months = [self._category_spend(month, cutoff_day=cutoff_day) for month in qualifying]
+        this_month = self._category_spend(
+            month_value,
+            cutoff_day=cutoff_day,
+            fixed_category_ids=fixed_categories[month_value],
+        )
+        past_months = [
+            self._category_spend(
+                month,
+                cutoff_day=cutoff_day,
+                fixed_category_ids=fixed_categories[month],
+            )
+            for month in qualifying
+        ]
 
         reached = set(this_month) | {category for month in past_months for category in month}
         names = self._category_names(reached)
@@ -192,7 +216,11 @@ class BaselineService:
                     spend_amount=spend,
                     baseline_amount=baseline,
                     deviation_percent=deviation_percent(spend=spend, baseline=baseline),
-                    comparison_status=comparison_status(spend=spend, baseline=baseline),
+                    comparison_status=comparison_status(
+                        spend=spend,
+                        baseline=baseline,
+                        fires_anomalies=True,
+                    ),
                 )
             )
 
@@ -205,11 +233,18 @@ class BaselineService:
             qualifying_months_count=len(qualifying),
             categories=tuple(comparisons),
             comparable_spend=totals.spend,
-            comparable=_figure_baseline(spend=totals.spend, baseline=totals.baseline),
+            comparable=_figure_baseline(
+                spend=totals.spend,
+                baseline=totals.baseline,
+                fires_anomalies=True,
+            ),
+            # The one figure here that is not spend, and so the one that is banded
+            # without being fired on.
             income=self._aggregate_baseline(
                 this_month=monthly[month_value].income,
                 past_months=[monthly[month].income for month in qualifying],
                 offered=status == "ok",
+                fires_anomalies=False,
             ),
             net_cash_flow_baseline=(
                 figure_baseline_amount(
@@ -308,7 +343,49 @@ class BaselineService:
         ) or NO_SPEND
         return (-Decimal(total)).quantize(Decimal("0.01"))
 
-    def _category_spend(self, month_value: str, *, cutoff_day: int | None) -> dict[UUID, Decimal]:
+    def _fixed_categories_by_month(self, months: Sequence[str]) -> dict[str, set[UUID]]:
+        """The categories a Fixed Budget covered, answered per month.
+
+        Each month is asked in its own right rather than taking the month on screen's
+        answer for the whole window: a budget's window is month-granular (ADR-0005),
+        so a category the owner made fixed in September was not fixed in August and
+        its August hold counted at the time.
+
+        One query for every month, then the window rule applied in Python, rather
+        than a query per month: there are few Fixed Budgets and several months, and
+        this service is already the expensive half of the summary request. The rule
+        is ``budget_covers_month``'s own pure twin, which is why the two live
+        together -- a second spelling of it here is the defect this whole fix is
+        about.
+        """
+        windows = self.db.execute(
+            select(Budget.category_id, Budget.active_from, Budget.active_to).where(
+                Budget.is_fixed.is_(True)
+            )
+        ).all()
+        by_month = {}
+        for month_value in months:
+            month_start, month_end = month_window(month_value)
+            by_month[month_value] = {
+                category_id
+                for category_id, active_from, active_to in windows
+                if budget_month_status(
+                    active_from=active_from,
+                    active_to=active_to,
+                    month_start=month_start,
+                    month_end=month_end,
+                )
+                == "active"
+            }
+        return by_month
+
+    def _category_spend(
+        self,
+        month_value: str,
+        *,
+        cutoff_day: int | None,
+        fixed_category_ids: set[UUID],
+    ) -> dict[UUID, Decimal]:
         """Spend per category for one month, to the cutoff day where there is one.
 
         Archived Categories are excluded here rather than filtered later: they keep
@@ -331,6 +408,7 @@ class BaselineService:
                 Category.type == "expense",
                 Category.active.is_(True),
                 not_ignored(),
+                spend_counts(fixed_category_ids=fixed_category_ids),
             )
             .group_by(Transaction.category_id)
         ).all()
@@ -355,23 +433,46 @@ class BaselineService:
         this_month: Decimal,
         past_months: Sequence[Decimal],
         offered: bool,
+        fires_anomalies: bool,
     ) -> FigureBaseline:
         """One whole-month figure against its mean, or no claim at all."""
         baseline = figure_baseline_amount(amounts_by_qualifying_month=past_months) if offered else None
-        return _figure_baseline(spend=this_month, baseline=baseline)
+        return _figure_baseline(
+            spend=this_month,
+            baseline=baseline,
+            fires_anomalies=fires_anomalies,
+        )
 
-    def _month_totals(self, month_value: str, *, cutoff_day: int | None) -> MonthTotals:
+    def _month_totals(
+        self,
+        month_value: str,
+        *,
+        cutoff_day: int | None,
+        fixed_category_ids: set[UUID],
+    ) -> MonthTotals:
         """A month's income and total spending, on the same basis the summary uses."""
         income = self._month_income(month_value, cutoff_day=cutoff_day)
-        spending = self._month_spending(month_value, cutoff_day=cutoff_day)
+        spending = self._month_spending(
+            month_value,
+            cutoff_day=cutoff_day,
+            fixed_category_ids=fixed_category_ids,
+        )
         return MonthTotals(income=income, spending=spending)
 
-    def _month_spending(self, month_value: str, *, cutoff_day: int | None) -> Decimal:
+    def _month_spending(
+        self,
+        month_value: str,
+        *,
+        cutoff_day: int | None,
+        fixed_category_ids: set[UUID],
+    ) -> Decimal:
         """Total spending for one month, matching the month's own spending figure.
 
         Committed statuses, every expense category, archived included -- the filters
         of the figure this feeds rather than those of the per-category list, which
-        excludes archived categories because it is a list the owner reads.
+        excludes archived categories because it is a list the owner reads. A hold on
+        a fixed bill is left out here as well, because the figure this is compared
+        against leaves it out.
         """
         month_start, month_end = _month_window_to_cutoff(month_value, cutoff_day=cutoff_day)
         total = self.db.scalar(
@@ -385,6 +486,7 @@ class BaselineService:
                 func.lower(Transaction.status).in_(COMMITTED_STATUSES),
                 Category.type == "expense",
                 not_ignored(),
+                spend_counts(fixed_category_ids=fixed_category_ids),
             )
         ) or NO_SPEND
         return (-Decimal(total)).quantize(Decimal("0.01"))
@@ -448,11 +550,20 @@ def _month_window_to_cutoff(month_value: str, *, cutoff_day: int | None) -> tupl
     return month_start, month_start + timedelta(days=min(cutoff_day, days_in_month))
 
 
-def _figure_baseline(*, spend: Decimal, baseline: Decimal | None) -> FigureBaseline:
+def _figure_baseline(
+    *,
+    spend: Decimal,
+    baseline: Decimal | None,
+    fires_anomalies: bool,
+) -> FigureBaseline:
     """Band one figure against its baseline, or state that there is none to band."""
     return FigureBaseline(
         baseline_amount=baseline,
         deviation_percent=deviation_percent(spend=spend, baseline=baseline),
-        comparison_status=comparison_status(spend=spend, baseline=baseline),
+        comparison_status=comparison_status(
+            spend=spend,
+            baseline=baseline,
+            fires_anomalies=fires_anomalies,
+        ),
     )
 

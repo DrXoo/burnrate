@@ -6,6 +6,7 @@ import {
   TONE_COLOR,
   TONE_DIM,
   TONE_LABEL,
+  baselineFigure,
   capitalize,
   categoryColor,
   comparisonPhrase,
@@ -56,6 +57,9 @@ interface CategoryStat {
       a month with no outcome yet, or a category the owner spends in too rarely to
       have a normal monthly cost. */
   comparison: CategoryBaseline | null;
+  /** What the category normally costs, when there is a figure to print. Read off
+      the comparison's band rather than its amount -- see ``baselineFigure``. */
+  baseline: string | null;
   budget: number | null;
   spent: number;
   tone: Tone;
@@ -227,17 +231,20 @@ export function CategoriesPage({
       // than this page inventing a threshold of its own.
       const tone: Tone = category.type === "expense" && usage ? usageTone(usage.status) : "neutral";
 
+      // Withheld unless the backend says a comparison is on offer. A month with too
+      // little history, or one that has not started, has none -- and inferring that
+      // from a null amount here is the re-derivation ADR-0002's amendment exists to
+      // stop.
+      const comparison =
+        summary?.baseline_status === "ok"
+          ? comparisonById.get(category.category_id) ?? null
+          : null;
+
       return {
         category,
         usage,
-        // Withheld unless the backend says a comparison is on offer. A month with too
-        // little history, or one that has not started, has none -- and inferring that
-        // from a null amount here is the re-derivation ADR-0002's amendment exists to
-        // stop.
-        comparison:
-          summary?.baseline_status === "ok"
-            ? comparisonById.get(category.category_id) ?? null
-            : null,
+        comparison,
+        baseline: comparison ? baselineFigure(comparison) : null,
         budget,
         spent,
         tone,
@@ -372,10 +379,10 @@ export function CategoriesPage({
                             </div>
                             {stat.comparison ? (
                               <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
-                                {stat.comparison.baseline_amount ? (
+                                {stat.baseline != null ? (
                                   <>
                                     <span className="num">
-                                      normally {eurPlain(stat.comparison.baseline_amount)}
+                                      normally {eurPlain(stat.baseline)}
                                     </span>
                                     {" · "}
                                   </>

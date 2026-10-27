@@ -195,7 +195,43 @@ def test_comparison_status_bands_the_month_against_what_is_normal(
     baseline: str,
     expected: str,
 ) -> None:
-    status = comparison_status(spend=Decimal(spend), baseline=Decimal(baseline))
+    status = comparison_status(
+        spend=Decimal(spend),
+        baseline=Decimal(baseline),
+        fires_anomalies=True,
+    )
+
+    assert status == expected
+
+
+# An anomaly fires upward on spend, and income is not spend. A month in which more
+# money came in than usual -- a bonus, a refund, a late invoice finally paid -- is
+# reported in full and flagged as nothing, because "unusually high" is the wording
+# both clients give an anomaly and there is nothing wrong with being paid.
+#
+# The band above the anomaly ratio collapses into ``above``; every other band is
+# untouched, which is what the second and third rows pin.
+#
+# figure, baseline, verdict
+INCOME_EXAMPLES = [
+    ("3000.00", "2000.00", "above"),     # a bonus month: high, and not a warning
+    ("9000.00", "2000.00", "above"),     # far past the ratio, still just above
+    ("1000.00", "2000.00", "below"),     # the direction that would be worth saying
+    ("2000.00", "2000.00", "in_line"),
+]
+
+
+@pytest.mark.parametrize(("figure", "baseline", "expected"), INCOME_EXAMPLES)
+def test_comparison_status_never_fires_an_anomaly_on_a_figure_that_is_not_spend(
+    figure: str,
+    baseline: str,
+    expected: str,
+) -> None:
+    status = comparison_status(
+        spend=Decimal(figure),
+        baseline=Decimal(baseline),
+        fires_anomalies=False,
+    )
 
     assert status == expected
 
@@ -219,6 +255,7 @@ def test_comparison_status_makes_no_claim_without_a_baseline(
     status = comparison_status(
         spend=Decimal(spend),
         baseline=Decimal(baseline) if baseline is not None else None,
+        fires_anomalies=True,
     )
 
     assert status == "no_baseline"

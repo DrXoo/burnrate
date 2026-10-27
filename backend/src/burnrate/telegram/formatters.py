@@ -107,9 +107,13 @@ def _comparison_lines(payload: dict[str, Any], currency: str | None) -> list[str
     if payload.get("baseline_status") != "ok":
         return []
     comparison = payload["comparable_spend_baseline"]
-    baseline = comparison["baseline_amount"]
-    if baseline is None:
+    # Read off the band, never off the amount beside it. A baseline of zero or less
+    # is one the backend refuses to divide by, so the band already says
+    # ``no_baseline`` while the amount still reads "0.00" -- and keyed on the amount
+    # this line published "normally 0.00 EUR · no baseline yet".
+    if comparison["comparison_status"] == "no_baseline":
         return []
+    baseline = comparison["baseline_amount"]
     months = payload["baseline_months_count"]
     lines = [
         f"   ↳ {_money(payload['comparable_spend_amount'], currency)} comparable"

@@ -119,6 +119,67 @@ theirs rather than the code's.
 | Residual computed backwards | `-8400.00` vs `8400.00`, 2 tests |
 | Dashboard silent instead of stating the reason | its own test |
 
+### Review findings, absorbed here
+
+Verified after the fixes: **471 backend** and **61 web** pass, `tsc -b` exits 0 and
+`npm run build` succeeds. The web suite runs in a `node:22` container -- there is no
+node on the host, since the web app only ever builds in Docker, and the repo's
+`node_modules` lacks the platform-specific rollup binary, so it takes a clean
+`npm ci` in a copy of `web/` rather than a mount of the existing tree.
+
+| Mutation | Result |
+|---|---|
+| `spend_counts` drops every pending row | the variable-category test |
+| The month on screen's budgets used across the window | the per-month test |
+| `counted_spend` counts a fixed hold | 5 pre-existing summary tests |
+| `fires_anomalies` ignored | 2 domain examples and the bonus-month test |
+| `baselineFigure` keyed on the amount | both zero-baseline page tests |
+| Net baseline rendered unsigned | both hero modes, separately |
+
+
+Three of five `/code-review` findings on the feature branch landed in this ticket,
+all of them in the acceptance criterion about an absent baseline being null rather
+than zero. The criterion was right; it was read too narrowly.
+
+**The two spend bases were not the same base.** Uncomparable Spend is defined as the
+residual -- monthly spending less the comparable half -- and that only reconciles
+while both count the same money. The headline excludes a hold on a Fixed Budget's
+category (ADR-0003: the budgeted estimate already stands for the whole commitment);
+`BaselineService` counted holds everywhere. A fixed Rent with 500 booked in each of
+two Qualifying Months and 500 held on the 1st published 0.00 spent, 500.00 comparable
+and **minus 500.00** that cannot be compared. The dashboard hid it (`> 0`) and the bot
+printed it (`!= 0`), which is the disclosure working exactly backwards.
+
+Fixed by giving the rule one home, `burnrate/db/counted_spend.py`, in the two forms
+its callers need -- the same arrangement as `budget_windows.py`, for the same reason:
+three readers, and the two that were written independently disagreed. The baselines
+now apply it per month, because a budget window is month-granular and a category the
+owner made fixed in September was not fixed in August. That costs **one** extra query
+for the whole window, not one per month: the Fixed Budget windows are read once and
+`budget_month_status` -- `budget_covers_month`'s own pure twin, which is why the two
+live together -- decides each month in Python. Ticket 06 should see one statement
+more, not `window + 1`.
+
+The per-month lookup passed every test on arrival and was mutation-checked: reading
+the month on screen's budgets across the whole window survived the suite, so
+`test_each_month_is_asked_whether_the_category_was_fixed_in_that_month` was written
+for it and kills both that mutation and the refactor to one query getting the month
+wrong.
+
+**"0.00" is a truthy string.** A baseline of zero or less is one the backend refuses
+to divide by, so it publishes `no_baseline` with 0.00 still in the amount -- and every
+card keyed its guard on the amount. The income card rendered "normally €0.00 · no
+baseline yet", a figure and a denial of it in one breath. A salary dated the 28th read
+on the 26th is all it takes; a category can reach it too, with two months whose
+movements cancel out. Now read off the band, through one helper (`baselineFigure`)
+because three cards ask the same question, and the Telegram formatter's own
+`baseline is None` guard had the same hole.
+
+**The net cash flow baseline was rendered unsigned.** It is the one baseline published
+as an amount with no band precisely because it can be a deficit, and `eurPlain` let
+the formatter smuggle the minus in as "€-450.00" where every other signed figure uses
+`eur`.
+
 ### For ticket 06
 
 The month on screen and every Qualifying Month now each cost two more aggregate

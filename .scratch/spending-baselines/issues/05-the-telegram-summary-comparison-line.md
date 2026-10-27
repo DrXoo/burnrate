@@ -68,3 +68,23 @@ these two clients deliberately differ.
 | Status guard removed | both omission tests, exactly |
 | Band derived from the figures | the status test and the anomalous test |
 | Uncomparable line always printed | its own test |
+
+### Review findings, absorbed here
+
+**The bot was pinned to a three-month window.** The criterion says the two interfaces
+must never disagree about what is normal, and this ticket met it for the *verdict*
+while missing it for the *window the verdict rests on*. `TelegramCommandRouter` built
+`SummaryService` without `baseline_window_months`, so the bot took the service default
+of 3 while the API passes `settings.baseline_window_months`. With
+`BASELINE_WINDOW_MONTHS=6` the two surfaces publish different baselines, different
+month counts and the same wording -- the worst shape this disagreement could take,
+because nothing on either surface says they are measuring differently.
+
+The router now carries the setting and `telegram_bot.main` passes it. The test reads
+the window off behaviour rather than off the constructor: one month of reach is too
+little history to compare at all and two is enough, so the comparison line's presence
+is the assertion.
+
+Also fixed here: the omission guard read `baseline_amount is None`, which lets a
+baseline of 0.00 through and prints "normally 0.00 EUR · no baseline yet". It reads
+the band now, like the dashboard. See ticket 04 for the full finding.

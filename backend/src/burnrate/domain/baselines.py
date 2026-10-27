@@ -135,7 +135,12 @@ def baseline_status(*, qualifying_months_count: int) -> BaselineStatus:
     return "ok"
 
 
-def comparison_status(*, spend: Decimal, baseline: Decimal | None) -> BaselineComparisonStatus:
+def comparison_status(
+    *,
+    spend: Decimal,
+    baseline: Decimal | None,
+    fires_anomalies: bool,
+) -> BaselineComparisonStatus:
     """Which side of normal this figure is, and whether it is worth raising.
 
     Comparing and firing are deliberately different acts. The deviation is reported
@@ -144,6 +149,13 @@ def comparison_status(*, spend: Decimal, baseline: Decimal | None) -> BaselineCo
     upward: the product exists to stop them overspending, and a month 38% below
     normal -- which the owner's live October is, in Food -- is not something to
     interrupt them for.
+
+    ``fires_anomalies`` is which figures that applies to, and it is required rather
+    than defaulted because getting it wrong is silent. An anomaly fires upward *on
+    spend*, and income is not spend: a bonus month bands ``above`` and stops there,
+    since "unusually high" is the wording both clients give an anomaly and there is
+    nothing wrong with being paid more than usual. Every other band is unaffected,
+    so an income month well below normal still reads ``below``.
 
     A baseline of zero or less is treated as absent rather than divided by. The
     presence floor makes it nearly unreachable, needing two months whose movements
@@ -154,7 +166,7 @@ def comparison_status(*, spend: Decimal, baseline: Decimal | None) -> BaselineCo
         return "no_baseline"
 
     ratio = spend / baseline
-    if ratio >= BASELINE_ANOMALY_RATIO:
+    if fires_anomalies and ratio >= BASELINE_ANOMALY_RATIO:
         return "anomalous"
 
     tolerance = BASELINE_IN_LINE_TOLERANCE_PERCENT / 100

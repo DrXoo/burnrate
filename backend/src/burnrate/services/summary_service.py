@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
 from burnrate.db.budget_windows import budget_covers_month
+from burnrate.db.counted_spend import counted_spend
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
@@ -573,10 +574,16 @@ class SummaryService:
 
         A variable category counts pending spend; a fixed one does not, because a
         hold on a bill is not the bill being paid and its row has to keep reading as
-        not yet paid. Both the rows and the totals beside them read this, so the two
-        cannot drift apart.
+        not yet paid. The rule itself lives in ``burnrate.db.counted_spend``, with
+        the baselines reading the same one in its query form: they meet in
+        Uncomparable Spend, and two spellings of this is how that residual came to
+        be able to go negative.
         """
-        return spend.booked if is_fixed else spend.total
+        return counted_spend(
+            booked=spend.booked,
+            pending=spend.pending,
+            is_fixed=is_fixed,
+        )
 
     def _budget_usage_sort_key(self, row: dict[str, Any]) -> tuple[int, float, str]:
         priority: dict[MetricStatus, int] = {"over": 0, "watch": 1, "on_track": 2}
