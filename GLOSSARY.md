@@ -43,6 +43,20 @@ decision rather than a property of the data, so it survives a re-import and only
 the owner lifts it.
 _Avoid_: Hidden, deleted, archived
 
+**Exceptional Charge**:
+_Proposed, not implemented; see `docs/technical/roadmap.md`._
+A charge the owner has declared an event rather than a habit: real money that is
+neither a rate nor a budget overrun. It counts in the actuals, enters the pace and
+the projection as a step rather than a daily rate, and is excluded from every
+baseline -- the third disposition, between Ignored, which removes a row from every
+figure, and nothing. Not the `anomalous` comparison status, which is a verdict the
+product computes against a baseline; this is the owner's declaration, and it is
+what keeps the charge out of the baselines a later month would compute. It
+attaches to a charge, or to a category whose charges are all events, and never to
+a window of time: a budget's default is that it continues, an event's is that it
+does not.
+_Avoid_: One-off, outlier, anomaly, extraordinary, non-recurring
+
 **Cancelled**:
 The status of a transaction the bank cancelled or rejected. Not Ignored above and
 not the owner's decision at all, although the import stores it in `status` under

@@ -668,6 +668,10 @@ Spend:
 > **Exceptional Charge** — counted in the actuals. A step in the pace and the
 > projection, never a rate. Excluded from every baseline.
 
+The term is fixed in `GLOSSARY.md`, beside `Ignored`, and marked there as proposed.
+It is kept distinct from the `anomalous` comparison status on purpose: that is a
+verdict the product computes against a baseline, this is the owner's declaration.
+
 One concept, three rules. It fixes the burn rate and the projection for the month in
 progress, and it is the only thing above that also stops October 2026 from becoming
 the owner's normal in December.
