@@ -225,8 +225,8 @@ Notes:
   `BASELINE_WINDOW_MONTHS`, which this design invites: twelve months comes to roughly
   seventy statements per request. That is the trigger for revisiting this, and the
   cheap mitigation then is the expression index or the stored `effective_date` column
-  named above rather than a snapshot table. Figures and reasoning in the Phase 9a
-  spec's Recorded Measurement.
+  named above rather than a snapshot table. Figures, method and the rejected options
+  in `docs/adr/0008-baselines-are-derived-every-request.md`.
 * The first version can stay coupled to Enable Banking transaction identifiers.
 
 ---

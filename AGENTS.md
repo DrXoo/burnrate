@@ -132,7 +132,7 @@ Avoid:
 * Heavy mocking that hides broken behavior
 * Brittle tests tied to internal implementation details
 
-### Two failure modes worth naming
+### Three failure modes worth naming
 
 **A test double that agrees with the code cannot disagree with it.** Phase 8 hit
 this four times. A fake bank client that returns its payload whatever window was
@@ -149,6 +149,21 @@ have teeth. Break the implementation deliberately and confirm the test fails.
 Phase 8 found a real gap this way that no natural fixture could reach, and found
 one test that passed *under* its own mutation because the fixture's dates happened
 to work out against the month the suite ran in.
+
+**Two rules that mask each other make a test pass for the wrong reason.** Phase 9a
+survived three mutations, every one of them invisible to reading, and two were this
+shape. The minimum-qualifying-months rule was not tested at all: disabling it
+changed nothing, because with one Qualifying Month a category can have spend in at
+most one of them and the *presence floor* already refused the baseline. The
+per-month Fixed Budget lookup was likewise unobserved, because every fixture month
+had the same budgets, so reading the month on screen's budgets across the whole
+window gave identical answers. In both cases a test existed and looked like it
+covered the rule.
+
+The tell is that two constants, or two lookups, can each independently refuse the
+same outcome. Isolate them: lower one so that the other is the only thing standing
+between the input and the wrong answer, or build a fixture in which they disagree.
+A rule that cannot be made the sole cause of a failure is a rule with no test.
 
 If TDD is not practical for a specific change, explain why in the final summary and still add the highest-value tests possible.
 

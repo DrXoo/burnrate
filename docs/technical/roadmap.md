@@ -496,6 +496,12 @@ closed for six phases.
   categories, which is why the comparison travels in a list of its own.
 * **Nothing yet is proactive**, by design. 9a makes the comparison visible; Phase 10
   is what makes the product speak first.
+* **`as_utc` is a clock concern living in a consent module.** Baseline sync coverage
+  imports it from `services/connection_expiry.py`, where its own docstring says it is
+  for a datetime read back naive from SQLite. It was imported rather than duplicated
+  or moved, because `AGENTS.md` forbids riding a refactor along on a feature; the
+  review stage was where it should have been picked up and was not. Two readers now,
+  so the next one is the trigger.
 
 ### The gap that is not in the code (9a)
 
