@@ -138,15 +138,20 @@ def test_month_qualifies_refuses_a_month_with_no_outgoing_money_at_all() -> None
 #
 # The state is named here rather than left to each interface to infer from a null
 # amount, following the amendment ADR-0002 records for the allowance's status: one
-# interface inferring it is one interface that can infer it differently. Two months
-# is the floor, which is what the owner has today -- the feature works from the day
-# it ships, by one month's margin.
+# interface inferring it is one interface that can infer it differently.
+#
+# The floor was two, chosen so the feature would work from the day it shipped by one
+# month's margin. It is three, because what two months bought was a mean of two
+# events: the owner's first reachable pair was a divorce and one ordinary month, and
+# every answer that pair could produce was measured and false. A mean of two is not
+# history, it is a line through two points. See "Revised: what a baseline is for" in
+# the roadmap.
 #
 # qualifying months, status
 MINIMUM_HISTORY_EXAMPLES = [
     (0, "insufficient_history"),
     (1, "insufficient_history"),
-    (2, "ok"),
+    (2, "insufficient_history"),
     (3, "ok"),
     (12, "ok"),
 ]

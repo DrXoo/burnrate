@@ -205,7 +205,7 @@ def test_unknown_scopes_to_the_month_the_owner_is_in(
 
 
 def seed_three_clean_months(session_factory: sessionmaker) -> None:
-    """August and September fully classified behind an October on screen.
+    """July, August and September fully classified behind an October on screen.
 
     Enough history for a comparison to be offered at all, and dated like the rest of
     this feature's fixtures rather than against the wall clock.
@@ -223,7 +223,7 @@ def seed_three_clean_months(session_factory: sessionmaker) -> None:
     session.add(food)
     session.flush()
 
-    for month, amount in ((8, "300.00"), (9, "300.00"), (10, "200.00")):
+    for month, amount in ((7, "300.00"), (8, "300.00"), (9, "300.00"), (10, "200.00")):
         session.add(
             Transaction(
                 account_id=account.id,
@@ -264,8 +264,9 @@ def test_the_bot_honours_the_configured_baseline_window() -> None:
     answer on the dashboard and a different one in the chat -- different baselines
     under the same wording.
 
-    One month of reach is too little history to compare at all, two is enough, so
-    the comparison line's presence is what the window is read off here.
+    Two months of reach is too little history to compare at all -- the minimum is
+    three -- and three is enough, so the comparison line's presence is what the
+    window is read off here.
     """
     factory = make_session_factory()
     seed_three_clean_months(factory)
@@ -274,13 +275,13 @@ def test_the_bot_honours_the_configured_baseline_window() -> None:
     narrow = TelegramCommandRouter(
         session_factory=factory,
         clock=clock,
-        baseline_window_months=1,
+        baseline_window_months=2,
     ).handle("/summary")
     wide = TelegramCommandRouter(
         session_factory=factory,
         clock=clock,
-        baseline_window_months=2,
+        baseline_window_months=3,
     ).handle("/summary")
 
     assert "usual" not in narrow
-    assert "normally 300.00 EUR · 33% below usual (2-month avg)" in wide
+    assert "normally 300.00 EUR · 33% below usual (3-month avg)" in wide

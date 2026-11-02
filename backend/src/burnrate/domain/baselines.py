@@ -58,12 +58,23 @@ as two months, so there is no dispersion to set a tighter threshold from, and th
 roadmap is explicit that the alerting phase fails by over-firing.
 """
 
-BASELINE_MINIMUM_MONTHS = 2
+BASELINE_MINIMUM_MONTHS = 3
 """Qualifying Months the window needs before any comparison is offered.
 
-Distinct from the presence floor below, which happens to share its value: this
-one is about the window, that one about one category within it. They are kept
-apart so either can move without dragging the other.
+Distinct from the presence floor below: this one is about the window, that one
+about one category within it. They are kept apart so either can move without
+dragging the other, and this is the move that proved it -- they shared the value 2
+until this one left.
+
+It was two, chosen so the feature would work from the day it shipped by one
+month's margin. What two bought was a mean of two **events**. The owner's first
+reachable pair, measured rather than imagined, was a divorce month and one
+ordinary month; widening to five reached a severance as well, and the three
+answers available on the day it would first have spoken were -4,888.66, -2,289.20
+and +395.41 -- the last of them telling an owner burning 1,600 a month that they
+normally save. A mean of two is not history, it is a line through two points, and
+a product with nothing true to say should say that instead. See "Revised: what a
+baseline is for" in ``docs/technical/roadmap.md``.
 """
 
 BASELINE_PRESENCE_FLOOR = 2

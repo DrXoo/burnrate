@@ -150,8 +150,10 @@ class Fixture:
         )
         self.db.flush()
 
-    def summary(self, *, month: str = "2026-10", today: date = TODAY) -> dict:
-        return SummaryService(db=self.db).get_summary(month=month, today=today)
+    def summary(self, *, month: str = "2026-10", today: date = TODAY, window: int = 3) -> dict:
+        return SummaryService(db=self.db, baseline_window_months=window).get_summary(
+            month=month, today=today
+        )
 
 
 def row_for(summary: dict, name: str) -> dict:
@@ -160,15 +162,19 @@ def row_for(summary: dict, name: str) -> dict:
     return rows[0]
 
 
-def test_a_category_with_spend_in_two_qualifying_months_gets_a_baseline() -> None:
-    """The tracer bullet: two clean months behind the one on screen produce a mean.
+def test_a_category_with_spend_in_three_qualifying_months_gets_a_baseline() -> None:
+    """The tracer bullet: three clean months behind the one on screen produce a mean.
 
-    August and September are fully classified and so both qualify; October is the
-    month on screen and is never its own baseline input. 600 and 300 over the two of
-    them is 450, and the 200 spent this month is well under it.
+    July, August and September are fully classified and so all qualify; October is
+    the month on screen and is never its own baseline input. 450, 600 and 300 over
+    the three of them is 450, and the 200 spent this month is well under it.
+
+    Three and not two: ``BASELINE_MINIMUM_MONTHS`` was raised when the owner's first
+    reachable pair turned out to be a divorce month and one ordinary month.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="450.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="600.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="200.00")
@@ -176,7 +182,7 @@ def test_a_category_with_spend_in_two_qualifying_months_gets_a_baseline() -> Non
     summary = fixture.summary()
 
     assert summary["baseline_status"] == "ok"
-    assert summary["baseline_months_count"] == 2
+    assert summary["baseline_months_count"] == 3
     food = row_for(summary, "Food")
     assert food["baseline_amount"] == "450.00"
     assert food["spend_amount"] == "200.00"
@@ -195,6 +201,7 @@ def test_coverage_is_the_share_of_money_unfiled_not_the_share_of_rows() -> None:
     Three months behind the one on screen, built so that the two measures qualify
     *different* months while agreeing on how many:
 
+    * June is clean and qualifies either way. Food: 450.
     * July is clean and qualifies either way. Food: 300.
     * August hides 905 of its 1000 in a single unfiled row among twenty. By money it
       is 90.5% unfiled and disqualified; by rows it is 5% unfiled and admitted.
@@ -202,13 +209,16 @@ def test_coverage_is_the_share_of_money_unfiled_not_the_share_of_rows() -> None:
     * September has ten unfiled rows of 2.00 beside one Food charge of 600. By money
       it is 3.2% unfiled and admitted; by rows it is 90.9% unfiled and disqualified.
 
-    So both measures find exactly two qualifying months and the count cannot tell
-    them apart -- but by money the baseline is (300 + 600) / 2 = 450, and by rows it
-    would be (300 + 95) / 2 = 197.50. The baseline is the discriminating assertion.
+    So both measures find exactly three qualifying months and the count cannot tell
+    them apart -- but by money the baseline is (450 + 300 + 600) / 3 = 450, and by
+    rows it would be (450 + 300 + 95) / 3 = 281.67. The baseline is the
+    discriminating assertion. The window is four so that a month can be disqualified
+    by each measure and three still remain, which is the minimum.
     """
     db = make_session()
     fixture = Fixture(db)
 
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="450.00")
     fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
 
     for _ in range(19):
@@ -221,10 +231,10 @@ def test_coverage_is_the_share_of_money_unfiled_not_the_share_of_rows() -> None:
 
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="450.00")
 
-    summary = fixture.summary()
+    summary = fixture.summary(window=4)
 
     assert summary["baseline_status"] == "ok"
-    assert summary["baseline_months_count"] == 2
+    assert summary["baseline_months_count"] == 3
     assert row_for(summary, "Food")["baseline_amount"] == "450.00"
 
 
@@ -259,12 +269,13 @@ def test_a_qualifying_month_the_category_was_absent_from_still_divides() -> None
 def test_the_month_on_screen_is_never_its_own_baseline() -> None:
     """A comparison partly against itself is not a comparison.
 
-    August and September both hold 300 of Food, so the baseline is 300. October holds
-    900. Were the month on screen folded into its own window the baseline would be
-    500, and a month three times the usual would report itself as merely above.
+    July, August and September each hold 300 of Food, so the baseline is 300. October
+    holds 900. Were the month on screen folded into its own window the baseline would
+    be 450, and a month three times the usual would report itself as merely above.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="900.00")
@@ -281,9 +292,9 @@ def test_the_current_month_is_compared_against_the_same_part_of_past_months() ->
     """A part-month measured against whole ones is favourable for most of the month.
 
     On the 26th, August contributes only what the owner had spent by *its* 26th: the
-    100 on the 5th, not the 900 on the 30th. With September's 100 the baseline is
-    100. Comparing against whole months instead would make it 550, and a month
-    spending exactly its usual would read as far below.
+    100 on the 5th, not the 900 on the 30th. With July's and September's 100 the
+    baseline is 100. Comparing against whole months instead would make it 366.67, and
+    a month spending exactly its usual would read as far below.
 
     This is the defect Phase 8 fixed in the budget pacing, where a comparison with no
     time term flipped an on-plan month to a warning around day 26. Summing past
@@ -293,6 +304,7 @@ def test_the_current_month_is_compared_against_the_same_part_of_past_months() ->
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="100.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="100.00")
     fixture.spend(category="Food", on=date(2026, 8, 30), amount="900.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="100.00")
@@ -311,10 +323,11 @@ def test_the_cutoff_clamps_to_a_shorter_months_own_length() -> None:
     September has thirty days, so a cutoff of "the first 31 days" has to clamp. Left
     unclamped the window would run to the 2nd of October and swallow the 100 the
     owner spent on the 1st, which belongs to the month on screen: September would
-    contribute 300 and the baseline would be 250 rather than 200.
+    contribute 300 and the baseline would be 233.33 rather than 200.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 10), amount="200.00")
     fixture.spend(category="Food", on=date(2026, 8, 10), amount="200.00")
     fixture.spend(category="Food", on=date(2026, 9, 10), amount="200.00")
     fixture.spend(category="Food", on=date(2026, 10, 1), amount="100.00")
@@ -330,11 +343,12 @@ def test_a_closed_month_is_compared_whole_against_whole() -> None:
     """The cutoff is for the month in progress, not for a month with an outcome.
 
     September is closed, so July contributes all 1000 of itself rather than the 100
-    it had reached by its 26th. Applying the cutoff here would make the baseline 550
+    it had reached by its 26th. Applying the cutoff here would make the baseline 700
     and understate every finished month the owner pages back to.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="1000.00")
     fixture.spend(category="Food", on=date(2026, 7, 5), amount="100.00")
     fixture.spend(category="Food", on=date(2026, 7, 30), amount="900.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="1000.00")
@@ -395,13 +409,14 @@ def test_an_archived_category_is_absent_from_the_comparison() -> None:
 def test_an_ignored_transaction_reaches_neither_the_month_nor_the_baseline() -> None:
     """A decision the owner already made is not undone by the comparison.
 
-    Food is 300 in each of August and September, so the baseline is 300. The 900
-    reimbursement the owner excluded in August would make it 750 if it counted, and
-    the 600 excluded this month would treble the figure on screen. GLOSSARY.md
+    Food is 300 in each of July, August and September, so the baseline is 300. The
+    900 reimbursement the owner excluded in August would make it 600 if it counted,
+    and the 600 excluded this month would treble the figure on screen. GLOSSARY.md
     defines Ignored as excluded from every metric, and a baseline is a metric.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 6), amount="900.00", excluded=True)
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
@@ -449,6 +464,7 @@ def test_a_category_with_spend_and_no_budget_still_gets_a_comparison() -> None:
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Parking", on=date(2026, 7, 5), amount="20.00")
     fixture.spend(category="Parking", on=date(2026, 8, 5), amount="20.00")
     fixture.spend(category="Parking", on=date(2026, 9, 5), amount="20.00")
     fixture.spend(category="Parking", on=date(2026, 10, 5), amount="20.00")
@@ -489,9 +505,14 @@ def test_one_qualifying_month_is_not_enough_to_claim_anything() -> None:
 def test_the_window_bounds_how_far_back_a_baseline_reaches() -> None:
     """The reach is a setting, because the owner's history grows and the mean should.
 
-    Four months of Food: 900 in July, then 300 in each of August and September. A
-    three-month window reaches all three and averages 500; a two-month window reaches
-    only August and September and averages 300.
+    Food: 900 in June, then 300 in each of July, August and September. A four-month
+    window reaches all four and averages 450; a three-month window leaves June out of
+    reach and averages 300.
+
+    The contrast used to be three against two. Two is now below
+    ``BASELINE_MINIMUM_MONTHS``, so the narrower window would report no baseline at
+    all rather than a narrower one -- which would have made this test about the
+    minimum instead of about the reach.
 
     The window is a parameter over source data rather than anything stored, which is
     what keeps the *shape* cheap to change later: moving to a widening window or to
@@ -500,22 +521,23 @@ def test_the_window_bounds_how_far_back_a_baseline_reaches() -> None:
     """
     db = make_session()
     fixture = Fixture(db)
-    fixture.spend(category="Food", on=date(2026, 7, 5), amount="900.00")
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="900.00")
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
 
+    over_four = SummaryService(db=db, baseline_window_months=4).get_summary(
+        month="2026-10", today=TODAY
+    )
     over_three = SummaryService(db=db, baseline_window_months=3).get_summary(
         month="2026-10", today=TODAY
     )
-    over_two = SummaryService(db=db, baseline_window_months=2).get_summary(
-        month="2026-10", today=TODAY
-    )
 
+    assert over_four["baseline_months_count"] == 4
+    assert row_for(over_four, "Food")["baseline_amount"] == "450.00"
     assert over_three["baseline_months_count"] == 3
-    assert row_for(over_three, "Food")["baseline_amount"] == "500.00"
-    assert over_two["baseline_months_count"] == 2
-    assert row_for(over_two, "Food")["baseline_amount"] == "300.00"
+    assert row_for(over_three, "Food")["baseline_amount"] == "300.00"
 
 
 def test_the_window_setting_reaches_the_service_through_the_dependency() -> None:
@@ -524,26 +546,27 @@ def test_the_window_setting_reaches_the_service_through_the_dependency() -> None
     Neither test above would notice the wiring being absent, because both construct
     the service directly. This one goes through the dependency the route actually
     uses, and asserts the behaviour rather than the attribute: with the window set to
-    two months, July's 900 is out of reach and the baseline is 300 rather than 500.
+    four months, June's 900 comes into reach and the baseline is 450 rather than 300.
     """
     from burnrate.api.dependencies import get_summary_service
     from burnrate.config import Settings
 
     db = make_session()
     fixture = Fixture(db)
-    fixture.spend(category="Food", on=date(2026, 7, 5), amount="900.00")
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="900.00")
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
 
-    settings = Settings(BANK_TOKEN_ENCRYPTION_KEY="x" * 44, BASELINE_WINDOW_MONTHS=2)
+    settings = Settings(BANK_TOKEN_ENCRYPTION_KEY="x" * 44, BASELINE_WINDOW_MONTHS=4)
     assert Settings(BANK_TOKEN_ENCRYPTION_KEY="x" * 44).baseline_window_months == 3
 
     service = get_summary_service(db=db, settings=settings)
     summary = service.get_summary(month="2026-10", today=TODAY)
 
-    assert summary["baseline_months_count"] == 2
-    assert row_for(summary, "Food")["baseline_amount"] == "300.00"
+    assert summary["baseline_months_count"] == 4
+    assert row_for(summary, "Food")["baseline_amount"] == "450.00"
 
 
 def test_too_little_history_withholds_a_baseline_the_presence_floor_would_allow(
@@ -583,33 +606,35 @@ def test_too_little_history_withholds_a_baseline_the_presence_floor_would_allow(
 def test_a_month_with_a_sync_hole_is_excluded_though_it_looks_fully_classified() -> None:
     """The test classification coverage is blind to, and that is the whole point.
 
-    All three months behind the one on screen are fully classified -- every row they
+    All four months behind the one on screen are fully classified -- every row they
     hold is filed, so coverage by amount reads 0% unfiled for each. August is
     nevertheless missing transactions, because syncs stopped on the 2nd and did not
     resume until the 20th of September, so the 3rd of August to the 20th was never
     asked about.
 
-    Food is 600 in July, 100 in the gap-ridden August and 300 in September. Excluding
-    August gives a baseline of 450; admitting it on its classification alone gives
-    333.33, understated by a month whose figures were never complete. An understated
+    Food is 450 in June, 600 in July, 100 in the gap-ridden August and 300 in
+    September. Excluding August gives a baseline of 450; admitting it on its
+    classification alone gives 362.50, understated by a month whose figures were
+    never complete. An understated
     baseline is the one that makes ordinary spend look like an anomaly.
     """
     db = make_session()
     fixture = Fixture(db, synced=False)
-    # Covers July in full: the window reaching back from 2 August spans it.
-    fixture.sync_daily(date(2026, 7, 1), date(2026, 8, 2))
+    # Covers June and July in full: the windows reaching back from 2 August span them.
+    fixture.sync_daily(date(2026, 6, 1), date(2026, 8, 2))
     # Then nothing until late September. [Jul 21, Aug 2] and [Aug 21, Sep 20] leave
     # the 3rd to the 20th of August unasked, while September is covered from here on.
     fixture.sync_daily(date(2026, 9, 20), date(2026, 10, 26))
 
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="450.00")
     fixture.spend(category="Food", on=date(2026, 7, 5), amount="600.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="100.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="450.00")
 
-    summary = fixture.summary()
+    summary = fixture.summary(window=4)
 
-    assert summary["baseline_months_count"] == 2
+    assert summary["baseline_months_count"] == 3
     assert row_for(summary, "Food")["baseline_amount"] == "450.00"
 
 
@@ -627,18 +652,19 @@ def test_an_expired_consent_leaves_session_rows_that_are_not_coverage() -> None:
     """
     db = make_session()
     fixture = Fixture(db, synced=False)
-    fixture.sync_daily(date(2026, 7, 1), date(2026, 8, 2))
+    fixture.sync_daily(date(2026, 6, 1), date(2026, 8, 2))
     fixture.sync_daily(date(2026, 8, 3), date(2026, 9, 19), status="skipped")
     fixture.sync_daily(date(2026, 9, 20), date(2026, 10, 26))
 
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="450.00")
     fixture.spend(category="Food", on=date(2026, 7, 5), amount="600.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="100.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="450.00")
 
-    summary = fixture.summary()
+    summary = fixture.summary(window=4)
 
-    assert summary["baseline_months_count"] == 2
+    assert summary["baseline_months_count"] == 3
     assert row_for(summary, "Food")["baseline_amount"] == "450.00"
 
 
@@ -666,7 +692,7 @@ def test_a_sync_hole_can_leave_too_little_history_to_compare_at_all() -> None:
 def test_the_aggregate_comparison_leaves_out_what_it_cannot_compare() -> None:
     """The month this whole split exists for.
 
-    Shaped after the owner's live October. Food and Invoices both have two clean
+    Shaped after the owner's live October. Food and Invoices both have three clean
     months behind them -- 400 and 180 usual, respectively -- and both come in under
     that: 250 and 45, so 295 spent where 580 is normal, a notably quiet month. A
     one-off legal expense of 8400 has no history and so no baseline.
@@ -682,6 +708,8 @@ def test_the_aggregate_comparison_leaves_out_what_it_cannot_compare() -> None:
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="400.00")
+    fixture.spend(category="Invoices", on=date(2026, 7, 5), amount="180.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="500.00")
     fixture.spend(category="Invoices", on=date(2026, 8, 5), amount="200.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
@@ -704,8 +732,8 @@ def test_the_aggregate_comparison_leaves_out_what_it_cannot_compare() -> None:
 def test_income_is_shown_against_what_the_owner_normally_earns() -> None:
     """A short payslip should be visible the month it happens, not at year end.
 
-    Two thousand in each of August and September, fourteen hundred this month: 30%
-    down, which for a salaried owner is the single most consequential thing that can
+    Two thousand in each of July, August and September, fourteen hundred this month:
+    30% down, which for a salaried owner is the single most consequential thing that can
     change about their month.
 
     Income needs no comparable split. That split exists because per-category spend
@@ -718,9 +746,11 @@ def test_income_is_shown_against_what_the_owner_normally_earns() -> None:
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.income(category="Salary", on=date(2026, 7, 25), amount="2000.00")
     fixture.income(category="Salary", on=date(2026, 8, 25), amount="2000.00")
     fixture.income(category="Salary", on=date(2026, 9, 25), amount="2000.00")
     fixture.income(category="Salary", on=date(2026, 10, 25), amount="1400.00")
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
@@ -741,13 +771,15 @@ def test_an_aggregate_figure_has_no_presence_floor() -> None:
     nothing came in is a fact about the owner's year, and dropping it would report a
     salary as normal to someone who was paid once in three months.
 
-    August and September each saw 2000 and October nothing, so the usual figure is
-    2000 and this month is 100% down.
+    July, August and September each saw 2000 and October nothing, so the usual figure
+    is 2000 and this month is 100% down.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.income(category="Salary", on=date(2026, 7, 25), amount="2000.00")
     fixture.income(category="Salary", on=date(2026, 8, 25), amount="2000.00")
     fixture.income(category="Salary", on=date(2026, 9, 25), amount="2000.00")
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
@@ -776,7 +808,7 @@ def test_net_cash_flow_gets_a_baseline_amount_and_deliberately_no_verdict() -> N
     """
     db = make_session()
     fixture = Fixture(db)
-    for month in (8, 9, 10):
+    for month in (7, 8, 9, 10):
         fixture.income(category="Salary", on=date(2026, month, 25), amount="2000.00")
         fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
     fixture.spend(category="Divorce", on=date(2026, 10, 6), amount="8400.00")
@@ -810,20 +842,21 @@ def test_paging_back_to_a_closed_month_compares_it_against_the_months_before_it(
     """The baseline is not only ever about today.
 
     Viewed from the 26th of October, September is closed: its window reaches June,
-    July and August, of which July and August hold spend and qualify. Food's usual
-    figure there is 500, September spent 300, so the month that has already happened
-    reads 40% below -- compared whole against whole, since the cutoff is for a month
+    July and August, all three of which hold spend and qualify. Food's usual figure
+    there is 500, September spent 300, so the month that has already happened reads
+    40% below -- compared whole against whole, since the cutoff is for a month
     still in progress.
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 6, 5), amount="500.00")
     fixture.spend(category="Food", on=date(2026, 7, 5), amount="600.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="400.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
 
     summary = fixture.summary(month="2026-09", today=date(2026, 10, 26))
 
-    assert summary["baseline_months_count"] == 2
+    assert summary["baseline_months_count"] == 3
     assert summary["comparable_spend_amount"] == "300.00"
     assert summary["comparable_spend_baseline"]["baseline_amount"] == "500.00"
     assert summary["comparable_spend_baseline"]["deviation_percent"] == -40.0
@@ -867,14 +900,15 @@ def test_a_hold_on_a_fixed_bill_counts_towards_the_comparison_as_little_as_elsew
     hold on a Fixed Budget's category is money the headline does not count, per
     ADR-0003: the budgeted estimate already stands for the whole commitment.
 
-    Rent is 500 in each of the two Qualifying Months and held, not booked, on the
+    Rent is 500 in each of the three Qualifying Months and held, not booked, on the
     1st of the month on screen. Counting that hold on the comparison side alone
     gave 0.00 spent, 500.00 comparable and *minus* 500.00 that cannot be compared --
     a figure the dashboard hid and the bot published.
     """
     db = make_session()
     fixture = Fixture(db)
-    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 8, 1))
+    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 7, 1))
+    fixture.spend(category="Rent", on=date(2026, 7, 1), amount="500.00")
     fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00")
     fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00")
     fixture.spend(category="Rent", on=date(2026, 10, 1), amount="500.00", status="pending")
@@ -896,22 +930,32 @@ def test_a_qualifying_months_own_hold_on_a_fixed_bill_is_excluded_too() -> None:
     the defect above wearing a different hat: the month on screen would be judged
     against history that counted holds it does not count itself.
 
-    Rent booked in August, still only held in September, booked in the month on
-    screen. September therefore contributes nothing, which leaves Rent present in
-    one Qualifying Month out of two -- below the presence floor, so there is no
-    normal monthly cost to report. Counting September's hold would have published a
-    500.00 baseline instead.
+    Rent held in July, booked in August, held again in September, booked in the month
+    on screen. July and September therefore contribute nothing, which leaves Rent
+    present in one Qualifying Month out of three -- below the presence floor, so
+    there is no normal monthly cost to report. Counting those holds would have
+    published a 500.00 baseline instead.
+
+    One of three and not one of two, and the difference is the point: with two
+    Qualifying Months the window itself was below ``BASELINE_MINIMUM_MONTHS``, so
+    *nothing* got a baseline and this test passed without the presence floor being
+    consulted at all. Lowering the floor to 1 changed nothing and the mutation
+    survived -- the two rules masked each other, which is the shape ``AGENTS.md``
+    names. With three months the window is satisfied and the floor is the only thing
+    left standing between the hold and a baseline.
     """
     db = make_session()
     fixture = Fixture(db)
-    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 8, 1))
+    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 7, 1))
+    fixture.spend(category="Rent", on=date(2026, 7, 1), amount="500.00", status="pending")
     fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00")
     fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00", status="pending")
     fixture.spend(category="Rent", on=date(2026, 10, 1), amount="500.00")
 
     summary = fixture.summary()
 
-    assert summary["baseline_months_count"] == 2
+    assert summary["baseline_status"] == "ok"
+    assert summary["baseline_months_count"] == 3
     rent = row_for(summary, "Rent")
     assert rent["spend_amount"] == "500.00"
     assert rent["baseline_amount"] is None
@@ -924,15 +968,17 @@ def test_a_qualifying_months_own_hold_on_a_fixed_bill_is_excluded_too() -> None:
 def test_each_month_is_asked_whether_the_category_was_fixed_in_that_month() -> None:
     """A budget window is month-granular, so "fixed" is a fact about a month.
 
-    Rent became a Fixed Budget in October. August and September were not covered by
-    it, so a hold in either of them was ordinary committed spend and counted -- which
-    is what their own figures said at the time. Reading the month on screen's budgets
-    across the whole window would retroactively disqualify both holds and leave Rent
-    present in no Qualifying Month at all, publishing no baseline where there is one.
+    Rent became a Fixed Budget in October. July, August and September were not
+    covered by it, so a hold in any of them was ordinary committed spend and counted
+    -- which is what their own figures said at the time. Reading the month on
+    screen's budgets across the whole window would retroactively disqualify all three
+    holds and leave Rent present in no Qualifying Month at all, publishing no
+    baseline where there is one.
     """
     db = make_session()
     fixture = Fixture(db)
     fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 10, 1))
+    fixture.spend(category="Rent", on=date(2026, 7, 1), amount="500.00", status="pending")
     fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00", status="pending")
     fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00", status="pending")
     fixture.spend(category="Rent", on=date(2026, 10, 1), amount="500.00", status="pending")
@@ -957,6 +1003,7 @@ def test_a_hold_on_a_variable_category_still_counts_on_both_sides() -> None:
     """
     db = make_session()
     fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 8, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 9, 5), amount="300.00")
     fixture.spend(category="Food", on=date(2026, 10, 5), amount="200.00", status="pending")
@@ -980,7 +1027,7 @@ def test_a_bonus_month_is_not_an_anomaly() -> None:
     """
     db = make_session()
     fixture = Fixture(db)
-    for month in (8, 9):
+    for month in (7, 8, 9):
         fixture.income(category="Salary", on=date(2026, month, 5), amount="2000.00")
         fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
     fixture.income(category="Salary", on=date(2026, 10, 5), amount="3000.00")
