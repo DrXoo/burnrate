@@ -27,6 +27,7 @@ class FakeSummaryService:
             "monthly_spending_amount": "260.00",
             "pending_spend_amount": "25.00",
             "monthly_income_amount": "2000.00",
+            "inbound_transfer_amount": "0.00",
             "net_cash_flow_amount": "1740.00",
             "savings_rate_percent": 87.0,
             "savings_status": "on_track",

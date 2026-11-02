@@ -24,6 +24,7 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "current_balance_currency": "EUR",
         "monthly_spending_amount": "120.00",
         "monthly_income_amount": "0.00",
+        "inbound_transfer_amount": "0.00",
         "net_cash_flow_amount": "-120.00",
         "unbudgeted_spending_amount": "0.00",
         "monthly_budget_amount": "200.00",
@@ -155,6 +156,38 @@ def test_format_summary_hides_income_line_without_income() -> None:
 
     assert "Income:" not in text
     assert "unbudgeted" not in text
+
+
+def test_format_summary_discloses_money_moved_in_beside_the_net() -> None:
+    text = format_summary(
+        make_summary(
+            monthly_income_amount="1055.20",
+            inbound_transfer_amount="7841.00",
+            net_cash_flow_amount="-8195.88",
+        )
+    )
+
+    assert "Net: -8195.88 EUR" in text
+    assert "7841.00 EUR moved in from an unsynced account" in text
+
+
+def test_format_summary_reports_the_net_of_a_month_funded_entirely_by_a_transfer() -> None:
+    """Income alone cannot gate the net, or the worst month goes silent.
+
+    The block was shown only when income was above zero. A month whose every inflow
+    was the owner moving their own money in has no income at all -- and that is
+    exactly the month whose deficit they need told, so gating on income hid it.
+    """
+    text = format_summary(
+        make_summary(
+            monthly_income_amount="0.00",
+            inbound_transfer_amount="2000.00",
+            net_cash_flow_amount="-120.00",
+        )
+    )
+
+    assert "Net: -120.00 EUR" in text
+    assert "2000.00 EUR moved in from an unsynced account" in text
 
 
 def test_format_summary_hides_budget_lines_when_no_budget() -> None:

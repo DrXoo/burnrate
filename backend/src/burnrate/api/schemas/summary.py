@@ -75,6 +75,9 @@ class SummaryResponse(BaseModel):
     monthly_spending_amount: str
     pending_spend_amount: str
     monthly_income_amount: str
+    # Neither income nor spend: money the owner moved in from an account BurnRate
+    # cannot see. Published beside the net it funded, never folded into it.
+    inbound_transfer_amount: str
     net_cash_flow_amount: str
     savings_rate_percent: float
     savings_status: MetricStatus

@@ -159,6 +159,13 @@ class SummaryService:
         # too: monthly spending less this is what the bank has actually settled.
         pending_spending = (monthly_spend.pending - fixed_pending_spend).quantize(Decimal("0.01"))
         monthly_income = self._get_monthly_income(month_start=month_start, month_end=month_end)
+        # Neither income nor spend, and disclosed because it is what funded whatever
+        # the month spent. Counting it as income is what let a month that drained the
+        # owner's savings report as very nearly break-even.
+        inbound_transfers = self._get_monthly_inbound_transfers(
+            month_start=month_start,
+            month_end=month_end,
+        )
         # Net cash flow this month: what landed in income categories minus what left
         # in expense categories. Transfers are excluded on both sides, and it feeds no
         # projection. Spending counts committed money, pending included, while income
@@ -303,6 +310,7 @@ class SummaryService:
             "monthly_spending_amount": self._format_decimal(monthly_spending),
             "pending_spend_amount": self._format_decimal(pending_spending),
             "monthly_income_amount": self._format_decimal(monthly_income),
+            "inbound_transfer_amount": self._format_decimal(inbound_transfers),
             "net_cash_flow_amount": self._format_decimal(net_cash_flow),
             "savings_rate_percent": float(savings.rate_percent),
             "savings_status": savings.status,
@@ -450,6 +458,43 @@ class SummaryService:
             )
         ) or Decimal("0.00")
         # Income transactions are credits (positive amounts), so no sign flip.
+        return Decimal(total_amount).quantize(Decimal("0.01"))
+
+    def _get_monthly_inbound_transfers(self, *, month_start: date, month_end: date) -> Decimal:
+        """What arrived this month from an account BurnRate cannot see.
+
+        Credit legs only, in transfer categories, which is why the sign is filtered
+        in SQL rather than netted afterwards: the same categories carry the money
+        going the other way, and summing them whole reports an outgoing month as
+        *negative* money arriving.
+
+        Booked only, matching the income figure this is read against. A credit the
+        bank has not settled is not money received, which is the asymmetry
+        ``docs/adr/0003-pending-spend-is-load-bearing.md`` records for income.
+
+        **It assumes every transfer in came from outside.** True while one account is
+        linked, which restricted production is: a transfer between two *linked*
+        accounts would land as a credit here and a debit there, and this figure would
+        report the credit leg as money from outside when nothing entered the owner's
+        world at all. Closing that needs the two legs recognised as one movement --
+        amount, date window and the opposite sign -- which is real work and has no
+        case to test against today. **The trigger is the second linked account**, and
+        nothing else; there is no partial version of this that helps.
+        """
+        total_amount = self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), Decimal("0.00")))
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Category, Category.id == Transaction.category_id)
+            .where(
+                Account.included_in_calculations.is_(True),
+                within_month(month_start=month_start, month_end=month_end),
+                func.lower(Transaction.status) == "booked",
+                Category.type == "transfer",
+                Transaction.amount > 0,
+                not_ignored(),
+            )
+        ) or Decimal("0.00")
         return Decimal(total_amount).quantize(Decimal("0.01"))
 
     def _get_active_budgets(self, *, month_start: date, month_end: date) -> list[ActiveBudgetWindow]:

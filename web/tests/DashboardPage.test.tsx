@@ -132,6 +132,26 @@ describe("the dashboard's comparison against what is normal", () => {
     expect(html).not.toContain("\u20ac-450.00");
   });
 
+  // Both hero modes carry it, for the same reason the net baseline above is checked
+  // in both: the owner picks the mode, not the data.
+  it.each(["dial", "bar"] as const)(
+    "discloses the money moved in that funded the deficit (%s)",
+    (heroMode) => {
+      // The owner's live October: a net of -7295 paid for by 7841 moved in from an
+      // account BurnRate cannot see. The deficit without its cause beside it is a
+      // worse screen than the wrong figure it replaces.
+      const html = render({ ...OCTOBER, inbound_transfer_amount: "7841.00" }, heroMode);
+
+      expect(html).toContain("\u20ac7,841.00 moved in from an unsynced account");
+    },
+  );
+
+  it("says nothing about money moved in when none was", () => {
+    const html = render({ ...OCTOBER, inbound_transfer_amount: "0.00" });
+
+    expect(html).not.toContain("moved in");
+  });
+
   it("does not disclose an uncomparable total when there is none", () => {
     const html = render({ ...OCTOBER, uncomparable_spend_amount: "0.00" });
 

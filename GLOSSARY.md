@@ -147,6 +147,15 @@ Income minus spending for the month, transfers excluded on both sides. This is
 the same figure as money saved in the month; the product names it once.
 _Avoid_: Saved, savings, surplus, net income, net
 
+**Inbound Transfer**:
+Money that arrived this month from an account BurnRate cannot see, so it is
+neither income nor spend. Disclosed beside Net Cash Flow because it is what
+funded a deficit rather than part of it: the loss is counted once, in the net,
+and this says which pocket paid for it. Named for what the product can know --
+that the money came from outside its view -- and not for savings, which it has no
+way to designate.
+_Avoid_: Savings draw, deposit, top-up, incoming income, external income
+
 **Savings Rate**:
 Net cash flow as a share of the month's income, carrying the same on-track /
 watch / over verdict the budgets use. Decided in the backend, so any interface

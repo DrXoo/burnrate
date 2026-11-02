@@ -145,10 +145,22 @@ def format_summary(payload: dict[str, Any]) -> str:
 
     lines.extend(_comparison_lines(payload, currency))
 
-    if Decimal(payload.get("monthly_income_amount", "0.00")) > 0:
+    # Income alone used to gate this block, which went silent on exactly the month it
+    # matters most: one whose every inflow was the owner moving their own money in has
+    # no income at all, and a deficit with nothing beside it is the thing to report.
+    inbound = Decimal(payload.get("inbound_transfer_amount", "0.00"))
+    if Decimal(payload.get("monthly_income_amount", "0.00")) > 0 or inbound != 0:
         net_icon = "📈" if Decimal(payload["net_cash_flow_amount"]) >= 0 else "📉"
         lines.append(f"💵 Income: {_money(payload['monthly_income_amount'], currency)}")
         lines.append(f"{net_icon} Net: {_money(payload['net_cash_flow_amount'], currency)}")
+        if inbound != 0:
+            # Neither income nor spend: it funded the net above rather than forming
+            # part of it, so it reads as the net's cause and never as a figure of
+            # its own.
+            lines.append(
+                f"   ↳ {_money(payload['inbound_transfer_amount'], currency)}"
+                " moved in from an unsynced account"
+            )
 
     # A month that has not started has no elapsed day, so every figure that describes
     # progress has nothing to describe: the usage bar reads 20% used of a month nobody

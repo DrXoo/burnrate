@@ -186,6 +186,7 @@ export function summaryFor(month: string): SummaryDashboard {
     current_balance_currency: "EUR",
     monthly_spending_amount: "0.00",
     monthly_income_amount: "0.00",
+    inbound_transfer_amount: "0.00",
     net_cash_flow_amount: "0.00",
     savings_rate_percent: 0,
     savings_status: "on_track",

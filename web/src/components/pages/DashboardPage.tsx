@@ -274,8 +274,15 @@ function useSavingsModel(summary: SummaryDashboard) {
     // its own, so the dashboard and the bot cannot disagree.
     const saved = num(summary.net_cash_flow_amount);
     const tone = usageTone(summary.savings_status);
+    // Money the owner moved in from an account BurnRate cannot see. It funded the
+    // net rather than forming part of it, so it reads as that figure's cause and is
+    // never added to it. The phrase is built here, once, because both hero modes
+    // render it -- formatting the net baseline at two call sites is exactly how it
+    // came to be signed in one mode and unsigned in the other.
+    const movedIn = num(summary.inbound_transfer_amount);
 
     return {
+      movedInNote: movedIn !== 0 ? ` · ${eurPlain(movedIn)} moved in from an unsynced account` : "",
       income: num(summary.monthly_income_amount),
       spending: num(summary.monthly_spending_amount),
       saved,
@@ -711,8 +718,8 @@ function DashboardContent({
                 // the amount is published without a band for exactly that reason --
                 // and an unsigned formatter smuggled the minus in as "€-450.00".
                 summary.net_cash_flow_baseline_amount != null
-                  ? `of ${eurPlain(savings.income)} income · normally ${eur(summary.net_cash_flow_baseline_amount)} kept`
-                  : `of ${eurPlain(savings.income)} income`
+                  ? `of ${eurPlain(savings.income)} income · normally ${eur(summary.net_cash_flow_baseline_amount)} kept${savings.movedInNote}`
+                  : `of ${eurPlain(savings.income)} income${savings.movedInNote}`
               }
               footLeft="saved"
               footRight={`${savings.ratePct} rate`}
@@ -753,6 +760,7 @@ function DashboardContent({
                   {summary.net_cash_flow_baseline_amount != null ? (
                     <> · normally {eur(summary.net_cash_flow_baseline_amount)} kept</>
                   ) : null}
+                  {savings.movedInNote}
                 </>
               }
               fillPct={`${(savings.savedFrac * 100).toFixed(1)}%`}

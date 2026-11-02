@@ -212,6 +212,9 @@ export interface SummaryDashboard {
   current_balance_currency: string | null;
   monthly_spending_amount: string;
   monthly_income_amount: string;
+  // Neither income nor spend: money the owner moved in from an account BurnRate
+  // cannot see. Shown beside the net it funded, never folded into it.
+  inbound_transfer_amount: string;
   net_cash_flow_amount: string;
   savings_rate_percent: number;
   savings_status: BudgetUsageStatus;

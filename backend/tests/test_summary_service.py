@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -545,6 +545,9 @@ def test_summary_service_reports_every_figure_of_the_seeded_month_to_the_cent() 
         "current_balance_amount": "2000.00",
         "expected_daily_spend_amount": "13.33",
         "fixed_overrun_amount": "0.00",
+        # The seed's only transfer is the 100.00 going out, so nothing arrived from
+        # an account BurnRate cannot see.
+        "inbound_transfer_amount": "0.00",
         "money_left_amount": "115.00",
         "monthly_budget_amount": "400.00",
         "monthly_income_amount": "2000.00",
@@ -1437,3 +1440,107 @@ def test_summary_service_discloses_a_future_months_committed_spend_with_no_budge
     # No budget to overshoot, so there is no overspend to report -- that is the
     # no_budget state, not a claim that the month is fine.
     assert summary["projected_overspend_amount"] == "0.00"
+
+
+def _inbound_transfer(*, account_id, category_id, amount: str, status: str, day: int) -> Transaction:
+    """A credit from one of the owner's own accounts, in a transfer category."""
+    return Transaction(
+        account_id=account_id,
+        enable_banking_transaction_id=f"tx-inbound-{day}-{status}",
+        booking_date=date(2026, 6, day),
+        value_date=date(2026, 6, day),
+        amount=Decimal(amount),
+        currency="EUR",
+        description="Transferencia recibida",
+        merchant_name=None,
+        counterparty_name="Owner",
+        direction="credit",
+        status=status,
+        category_id=category_id,
+        matched_rule_id=None,
+        raw_payload=None,
+        imported_at=datetime(2026, 6, day, 8, 0, tzinfo=timezone.utc),
+    )
+
+
+def test_summary_service_discloses_money_moved_in_from_an_account_it_cannot_see() -> None:
+    """Money the owner moved in is neither income nor spend, and has to be said anyway.
+
+    It funded whatever the month spent, so a deficit beside it has a cause the owner
+    can read. Counting it as income is what made a month that drained the savings
+    report as very nearly break-even.
+    """
+    db = make_session()
+    seed_summary_data(db)
+    account = db.scalars(select(Account).where(Account.display_name == "Main account")).one()
+    transfers = db.scalars(select(Category).where(Category.type == "transfer")).one()
+    db.add(
+        _inbound_transfer(
+            account_id=account.id,
+            category_id=transfers.id,
+            amount="300.00",
+            status="booked",
+            day=9,
+        )
+    )
+    db.flush()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["inbound_transfer_amount"] == "300.00"
+    # The three figures it must not touch. Each is the seeded value, unchanged.
+    assert summary["monthly_income_amount"] == "2000.00"
+    assert summary["monthly_spending_amount"] == "285.00"
+    assert summary["net_cash_flow_amount"] == "1715.00"
+
+
+def test_summary_service_reports_nothing_moved_in_when_only_a_transfer_left() -> None:
+    """The seed's one transfer is a 100.00 debit, so nothing came in.
+
+    This is the half the test above cannot show: with both legs present a figure
+    summing the transfer categories whole still reports 200.00, but with only the
+    outgoing leg it reports -100.00 -- the product telling the owner that money
+    arrived from an account it cannot see, in a month where none did.
+    """
+    db = make_session()
+    seed_summary_data(db)
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["inbound_transfer_amount"] == "0.00"
+
+
+def test_summary_service_counts_only_settled_money_as_moved_in() -> None:
+    """Booked only, matching the income figure it sits beside.
+
+    A credit the bank has not settled is not money received, which is the asymmetry
+    ADR-0003 records for income -- and this figure is read against the same month's
+    income and net.
+    """
+    db = make_session()
+    seed_summary_data(db)
+    account = db.scalars(select(Account).where(Account.display_name == "Main account")).one()
+    transfers = db.scalars(select(Category).where(Category.type == "transfer")).one()
+    db.add_all(
+        [
+            _inbound_transfer(
+                account_id=account.id,
+                category_id=transfers.id,
+                amount="300.00",
+                status="booked",
+                day=9,
+            ),
+            _inbound_transfer(
+                account_id=account.id,
+                category_id=transfers.id,
+                amount="500.00",
+                status="pending",
+                day=11,
+            ),
+        ]
+    )
+    db.flush()
+
+    summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
+
+    assert summary["inbound_transfer_amount"] == "300.00"

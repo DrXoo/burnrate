@@ -252,7 +252,13 @@ Suggested constraints:
 
 Notes:
 
-* `type` should support values such as `expense`, `income`, and `transfer`.
+* `type` should support values such as `expense`, `income`, and `transfer`. It is
+  what decides which side of every figure a category's money lands on, and it is
+  deliberately **not editable through the API**: correcting one rewrites what every
+  past month reported, so it is done by a migration rather than a control to click
+  past. `0009_from_savings_is_a_transfer` is the worked example, and
+  `docs/adr/0010-a-savings-draw-is-a-transfer.md` records why a credit from the
+  owner's own account is a `transfer` and not `income`.
 * `name` is editable after creation and is the only label any surface shows for a
   category, so nothing stores a copy of it. Uniqueness is enforced
   case-insensitively by the application, which is stricter than the exact database

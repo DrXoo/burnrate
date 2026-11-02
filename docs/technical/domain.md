@@ -269,6 +269,18 @@ The current pace of spending, typically represented as daily average spending an
 
 ---
 
+### Inbound Transfer
+
+Money that arrived in the month from an account BurnRate cannot see: the booked credit legs of transfer categories. It is neither income nor spend, so it reaches neither side of net cash flow -- it is **disclosed beside** that figure as the funding the deficit came from, and never added to it. The loss is counted once, in the net; this says which pocket paid.
+
+The category carrying such credits was once typed `income`, which made a month that drained the owner's savings report as very nearly break-even: October 2026 read a net of -354.88 where the real figure was -8,195.88, the difference being 7,841.00 moved in from savings. The product's rule was already right -- both income queries select on `Category.type == "income"` -- so the correction was a retype, not a code change.
+
+The sign is filtered in SQL rather than netted afterwards, because the same categories carry money going the other way and summing them whole reports an outgoing month as *negative* money arriving. Booked only, matching the income figure it is read against.
+
+It **assumes every transfer in came from outside**, which holds while one account is linked and stops at the second: a transfer between two linked accounts lands as a credit on one and a debit on the other, and the credit leg would be reported as money from outside when nothing entered the owner's world at all. The trigger for pairing the two legs is the second linked account. See `docs/adr/0010-a-savings-draw-is-a-transfer.md`.
+
+---
+
 ### Runway
 
 The estimated time remaining before designated savings are exhausted, based on the current monthly deficit.
