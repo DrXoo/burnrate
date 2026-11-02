@@ -43,20 +43,6 @@ decision rather than a property of the data, so it survives a re-import and only
 the owner lifts it.
 _Avoid_: Hidden, deleted, archived
 
-**Exceptional Charge**:
-_Proposed, not implemented; see `docs/technical/roadmap.md`._
-A charge the owner has declared an event rather than a habit: real money that is
-neither a rate nor a budget overrun. It counts in the actuals, enters the pace and
-the projection as a step rather than a daily rate, and is excluded from every
-baseline -- the third disposition, between Ignored, which removes a row from every
-figure, and nothing. Not the `anomalous` comparison status, which is a verdict the
-product computes against a baseline; this is the owner's declaration, and it is
-what keeps the charge out of the baselines a later month would compute. It
-attaches to a charge, or to a category whose charges are all events, and never to
-a window of time: a budget's default is that it continues, an event's is that it
-does not.
-_Avoid_: One-off, outlier, anomaly, extraordinary, non-recurring
-
 **Cancelled**:
 The status of a transaction the bank cancelled or rejected. Not Ignored above and
 not the owner's decision at all, although the import stores it in `status` under
@@ -87,6 +73,20 @@ _Avoid_: Limit, cap, allocation, envelope
 A budget for a scheduled lump commitment such as rent or utilities. It is
 charged as a step, so it is never paced day by day or rate-extrapolated.
 _Avoid_: Recurring budget, bill, committed budget
+
+**Event Budget**:
+_Proposed, not implemented; see `docs/technical/roadmap.md`._
+A Fixed Budget whose window covers exactly one month, which is how the owner says
+that month's spend in its category was an event and not a habit -- a divorce, a
+boiler, a move. It counts in the actuals and steps the pace as any Fixed Budget
+does, and it is excluded from every baseline, so an event cannot become what a
+later month reports as normal. The bounded window is the whole declaration and
+there is nothing else to set: a budget's default is that it continues and an
+event's is that it does not, and because both edges of a window sit on month
+boundaries, "exactly one month" is an exact question. Not the `anomalous`
+comparison status, which is a verdict the product computes rather than something
+the owner said.
+_Avoid_: Exceptional charge, one-off, outlier, anomaly, extraordinary
 
 **Variable Budget**:
 A budget for spend that accrues day by day, and therefore the only slice a
