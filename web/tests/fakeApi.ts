@@ -4,6 +4,7 @@ import type {
   Category,
   Connection,
   FiltersState,
+  ManualSyncResult,
   PagingState,
   Rule,
   SummaryDashboard,
@@ -32,7 +33,16 @@ const categoryStore = new Map<string, Category>();
 const heldMonths = new Set<string>();
 const resumers = new Map<string, (() => void)[]>();
 const failures = new Map<string, string>();
+const connectionStore = new Map<string, Connection>();
+const syncFailures = new Map<string, string>();
+const syncRequests: string[] = [];
+let syncImports = 2;
 let currentMonth = "2026-10";
+
+/** What a sync that reaches the bank sets `last_synced_at` to. Only this fake's own
+    store learns it, so a UI that claims a sync landed without refetching cannot
+    print it. */
+export const SYNCED_AT = "2026-10-30T10:30:09Z";
 
 function emptyLedger(): MonthLedger {
   return { transactions: [], unknownQueue: [], summary: {}, budgets: [] };
@@ -52,6 +62,10 @@ export const fakeApi = {
     heldMonths.clear();
     resumers.clear();
     failures.clear();
+    connectionStore.clear();
+    syncFailures.clear();
+    syncRequests.length = 0;
+    syncImports = 2;
     currentMonth = "2026-10";
     unscopedLedgerReads = 0;
   },
@@ -81,6 +95,23 @@ export const fakeApi = {
   },
   healReads(month: string): void {
     failures.delete(month);
+  },
+  setConnection(row: Connection): void {
+    connectionStore.set(row.connection_id, row);
+  },
+  /** How many transactions the next sync reports importing. */
+  setSyncImports(count: number): void {
+    syncImports = count;
+  },
+  /** Make the bank refuse the next sync of this connection. The stored row is left
+      exactly as it was, which is what a failed sync does. */
+  failSync(connectionId: string, message: string): void {
+    syncFailures.set(connectionId, message);
+  },
+  /** The connection ids sync was asked for, in order. A UI that syncs something other
+      than the row whose button was pressed is otherwise unobservable. */
+  syncRequests(): string[] {
+    return [...syncRequests];
   },
   /** How many times the three month-windowed ledger views were asked for every month
       ever. The answer the backend gives such a read is correct and useless, so the only
@@ -201,6 +232,30 @@ export function budget(categoryName: string, overrides: Partial<Budget> = {}): B
   };
 }
 
+export function connection(overrides: Partial<Connection> = {}): Connection {
+  return {
+    connection_id: "conn-1",
+    aspsp_name: "ING",
+    aspsp_country: "ES",
+    psu_type: "personal",
+    session_status: "AUTHORIZED",
+    active: true,
+    authorized_at: "2026-07-16T10:19:13Z",
+    last_synced_at: "2026-10-28T22:00:21Z",
+    expires_at: "2027-01-12T10:11:48Z",
+    days_until_expiry: 74,
+    expiry_status: "active",
+    linked_account_count: 1,
+    latest_sync_status: "success",
+    latest_sync_started_at: "2026-10-28T22:00:00Z",
+    latest_sync_finished_at: "2026-10-28T22:00:21Z",
+    latest_sync_accounts_count: 1,
+    latest_sync_transactions_count: 0,
+    latest_sync_error_summary: null,
+    ...overrides,
+  };
+}
+
 export function transaction(
   transactionId: string,
   description: string,
@@ -244,7 +299,7 @@ export function setUnauthorizedHandler(): void {
 }
 
 export async function getConnections(): Promise<Connection[]> {
-  return [];
+  return [...connectionStore.values()].map((row) => ({ ...row }));
 }
 
 export async function getAccounts(): Promise<Account[]> {
@@ -293,6 +348,39 @@ export async function getUncategorizedCount(_apiBase: string, filters: FiltersSt
 
 export async function categorizeTransaction(): Promise<void> {
   // Accepted immediately; the refresh it triggers is what these tests stage.
+}
+
+/** Answers the connection it was asked for rather than a fixed payload: an id the
+    store does not hold is refused the way the backend refuses it, and a sync that
+    succeeds advances `last_synced_at` in the store only. */
+export async function syncEnableBankingConnection(
+  _apiBase: string,
+  connectionId: string,
+): Promise<ManualSyncResult> {
+  syncRequests.push(connectionId);
+  const stored = connectionStore.get(connectionId);
+  if (!stored) {
+    throw new Error(`Request failed (404): Enable Banking connection not found for id ${connectionId}`);
+  }
+  const failure = syncFailures.get(connectionId);
+  if (failure) {
+    throw new Error(failure);
+  }
+  connectionStore.set(connectionId, {
+    ...stored,
+    last_synced_at: SYNCED_AT,
+    latest_sync_status: "success",
+    latest_sync_accounts_count: 1,
+    latest_sync_transactions_count: syncImports,
+  });
+  return {
+    connection_id: connectionId,
+    sync_session_id: "sync-1",
+    session_status: "AUTHORIZED",
+    accounts_synced: 1,
+    transactions_imported: syncImports,
+    message: null,
+  };
 }
 
 function notExercised(name: string) {
@@ -414,7 +502,6 @@ export const excludeTransaction = notExercised("excludeTransaction");
 export const login = notExercised("login");
 export const logout = notExercised("logout");
 export const restoreTransaction = notExercised("restoreTransaction");
-export const syncEnableBankingConnection = notExercised("syncEnableBankingConnection");
 export const toggleRule = notExercised("toggleRule");
 export const uncategorizeTransaction = notExercised("uncategorizeTransaction");
 export const updateAccountControls = notExercised("updateAccountControls");

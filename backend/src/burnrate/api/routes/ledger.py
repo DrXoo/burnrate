@@ -46,6 +46,9 @@ def list_transactions(
     month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     status_filter: str | None = Query(default=None, alias="status"),
     categorized: bool | None = Query(default=None),
+    # Needs ``month``: see ``LedgerService._build_filters``, which answers the pair
+    # without one with a 400 rather than with a different question.
+    budgeted: bool | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     service: LedgerService = Depends(get_ledger_service),
@@ -57,6 +60,7 @@ def list_transactions(
             month=month,
             status=status_filter,
             categorized=categorized,
+            budgeted=budgeted,
             limit=limit,
             offset=offset,
         )

@@ -23,7 +23,8 @@ class FakeLedgerService:
             }
         ]
 
-    def list_transactions(self, **_: object):
+    def list_transactions(self, **kwargs: object):
+        self.last_kwargs = kwargs
         return {
             "transactions": [
                 {
@@ -103,3 +104,24 @@ def test_app_exposes_phase_3_ledger_paths() -> None:
     assert "/api/v1/accounts/{account_id}" in paths
     assert "/api/v1/transactions" in paths
     assert "/api/v1/transactions/uncategorized/count" in paths
+
+
+def test_transactions_route_forwards_the_unbudgeted_filter() -> None:
+    service = FakeLedgerService()
+
+    list_transactions(
+        account_id=None,
+        category_id=None,
+        month="2026-06",
+        status_filter=None,
+        categorized=None,
+        budgeted=False,
+        limit=100,
+        offset=0,
+        service=service,
+    )
+
+    # The whole filter is dead if the query parameter stops reaching the service, and
+    # nothing else in the response would look wrong: the endpoint would answer with
+    # every transaction in the month, which is a perfectly valid-looking page.
+    assert service.last_kwargs["budgeted"] is False

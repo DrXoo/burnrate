@@ -14,12 +14,15 @@ const FILTERS: FiltersState = {
   categoryId: "",
   status: "",
   categorized: "",
+  budgeted: "",
 };
 
 interface PageOptions {
   items?: Transaction[];
   categories?: Category[];
   assignableCategories?: Category[];
+  filters?: FiltersState;
+  applyFilters?: (filters: FiltersState) => void;
 }
 
 /** The page as the owner reaches it, with one row and whatever categories exist. */
@@ -30,8 +33,8 @@ function page(options: PageOptions = {}) {
       categories={options.categories ?? [FOOD, GYM_ARCHIVED]}
       assignableCategories={options.assignableCategories ?? [FOOD]}
       rules={[]}
-      filters={FILTERS}
-      applyFilters={() => {}}
+      filters={options.filters ?? FILTERS}
+      applyFilters={options.applyFilters ?? (() => {})}
       items={options.items ?? [transaction("t-1", "Supermarket")]}
       total={1}
       loading={false}
@@ -155,5 +158,46 @@ describe("TransactionsPage rows in archived categories", () => {
     // Matched as a substring: the archived label carries a suffix, so an exact
     // comparison would pass however many archived options were offered.
     expect(optionsOf(assignSelects(dom)[0]).some((label) => label?.includes("Gym"))).toBe(false);
+  });
+});
+
+
+describe("TransactionsPage and the unbudgeted filter", () => {
+  it("asks for the month's spend that no budget covers", () => {
+    const applied: FiltersState[] = [];
+    const dom = renderDom(page({ applyFilters: (next) => applied.push(next) }));
+
+    fireEvent.change(filterSelect(dom), { target: { value: "unbudgeted" } });
+
+    // Which spend has no budget is the backend's answer -- budgets are month-scoped
+    // and the list is paged, so a page filtered in the browser would both miss rows
+    // and print a count that contradicts itself.
+    expect(applied).toEqual([{ ...FILTERS, budgeted: "false" }]);
+  });
+
+  it("reads back as the selection in force", () => {
+    const dom = renderDom(page({ filters: { ...FILTERS, budgeted: "false" } }));
+
+    expect((filterSelect(dom) as HTMLSelectElement).value).toBe("unbudgeted");
+  });
+
+  it("drops the unbudgeted filter whenever another option is picked", () => {
+    // Each branch of the picker clears it separately, and a branch that forgets to
+    // leaves the owner filtering by a category *and* by the lack of a budget, which
+    // is reliably empty and reads as "no transactions here".
+    ["all", "cat-food"].forEach((value) => {
+      const applied: FiltersState[] = [];
+      const dom = renderDom(
+        page({
+          filters: { ...FILTERS, budgeted: "false" },
+          applyFilters: (next) => applied.push(next),
+        }),
+      );
+
+      fireEvent.change(filterSelect(dom), { target: { value } });
+
+      expect(applied[0].budgeted).toBe("");
+      cleanup();
+    });
   });
 });

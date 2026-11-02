@@ -257,6 +257,10 @@ export interface FiltersState {
   categoryId: string;
   status: string;
   categorized: "" | "true" | "false";
+  /** Whether the month holds a budget for the transaction's category. "false" is the
+      Unbudgeted Spend of `GLOSSARY.md`: spend in an expense category this month has
+      no budget for. The backend decides it, and it needs `month` to mean anything. */
+  budgeted: "" | "true" | "false";
 }
 
 export interface PagingState {
