@@ -1201,3 +1201,38 @@ def test_a_fixed_budget_spanning_two_months_is_not_an_event() -> None:
 
     assert summary["baseline_months_count"] == 3
     assert row_for(summary, "Rent")["baseline_amount"] == "333.33"
+
+
+def test_one_exceptional_month_does_not_become_the_owners_normal() -> None:
+    """The aggregate baselines are medians, observed where the product serves them.
+
+    Every other fixture in this module seeds months with identical figures, where a
+    median and a mean agree -- which is why a plain mean survived in the one place it
+    did the most damage. This one puts an outlier in the window.
+
+    Shaped after the owner's real July: a 5500 severance among two ordinary months of
+    1000. The median says a typical month brings in 1000, so October's 1000 is in
+    line. The mean would say 2500, and the month their income returned to normal
+    would be published as 60% down -- a product telling someone out of work that
+    their income had collapsed.
+
+    An exceptional *income* is the case no budget and no Event Budget can reach,
+    because there is no window to bound. This is what covers it.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.income(category="Salary", on=date(2026, 7, 25), amount="5500.00")
+    for month in (8, 9, 10):
+        fixture.income(category="Salary", on=date(2026, month, 25), amount="1000.00")
+    for month in (7, 8, 9, 10):
+        fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_months_count"] == 3
+    income = summary["monthly_income_baseline"]
+    assert income["baseline_amount"] == "1000.00"
+    assert income["deviation_percent"] == 0.0
+    assert income["comparison_status"] == "in_line"
+    # Net cash flow over the same three months: 5200, 700, 700. The mean is 2200.
+    assert summary["net_cash_flow_baseline_amount"] == "700.00"

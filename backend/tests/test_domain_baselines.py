@@ -11,6 +11,7 @@ from burnrate.domain.baselines import (
     category_baseline,
     comparison_status,
     deviation_percent,
+    figure_baseline_amount,
     month_qualifies,
     month_sync_covered,
 )
@@ -432,3 +433,64 @@ def test_comparable_totals_add_up_only_the_categories_that_can_be_compared(
 
     assert totals.spend == Decimal(spend)
     assert totals.baseline == (Decimal(baseline) if baseline is not None else None)
+
+
+# Worked examples for the aggregate baseline, which is a **median** and not a mean.
+# This function had no test of its own at all until the median replaced the mean --
+# it was only ever exercised through the service, which is how a plain mean with no
+# outlier handling survived into the one figure that needed it most.
+#
+# 9a rejected a median with a reason that was correct at the time: "at the two
+# Qualifying Months the minimum allows, a median *is* the mean. Robust statistics
+# need a distribution." At three months it is no longer the mean -- a median of three
+# rejects exactly one outlier, which is the whole problem -- so raising
+# BASELINE_MINIMUM_MONTHS to 3 is what made this available.
+#
+# amounts per qualifying month, baseline
+AGGREGATE_BASELINE_EXAMPLES = [
+    # The owner's own net cash flow over July, October and November 2026: a severance
+    # month, a divorce month and an ordinary one. The mean is -2289.20, which is none
+    # of the three and reads as a plausible deficit. The median is the ordinary month.
+    (["2909.73", "-8208.87", "-1568.45"], "-1568.45"),
+    # Their income over the same three. The mean is 2653.38, so an ordinary 1055.20
+    # month would then report 60% down -- the product telling someone their income
+    # collapsed in the month it returned to normal.
+    (["5924.75", "1055.20", "980.20"], "1055.20"),
+    # Nothing exceptional, which is the case that must not be disturbed: median and
+    # mean agree, and the owner sees the same figure as before.
+    (["1700.00", "1700.00", "1700.00"], "1700.00"),
+    # A month in which nothing came in is a real zero and is ordered with the rest
+    # rather than skipped, which is the decision this function has always existed to
+    # state. Two months of 2000 and one of nothing is a typical month of 2000.
+    (["2000.00", "0.00", "2000.00"], "2000.00"),
+    # And the other way round, which is the behaviour change worth naming: someone
+    # paid once in three months has a typical month of nothing, and the median says
+    # so where the mean reported 666.67 of phantom monthly income.
+    (["2000.00", "0.00", "0.00"], "0.00"),
+    # An even count, which a widened window produces: the two middle months averaged.
+    (["100.00", "200.00", "300.00", "400.00"], "250.00"),
+    # An even middle pair that does not divide cleanly, so the rounding is pinned.
+    (["0.00", "1.00", "2.00", "100.00"], "1.50"),
+    # Order must not matter. Same three months as the first row, shuffled.
+    (["-1568.45", "2909.73", "-8208.87"], "-1568.45"),
+    # One month. BASELINE_MINIMUM_MONTHS gates the caller, not this function, so it
+    # answers rather than guessing at a policy that is not its own.
+    (["450.00"], "450.00"),
+]
+
+
+@pytest.mark.parametrize(("amounts", "expected"), AGGREGATE_BASELINE_EXAMPLES)
+def test_an_aggregate_baseline_is_the_typical_month_and_not_the_average_one(
+    amounts: list[str],
+    expected: str,
+) -> None:
+    baseline = figure_baseline_amount(
+        amounts_by_qualifying_month=[Decimal(amount) for amount in amounts]
+    )
+
+    assert baseline == Decimal(expected)
+
+
+def test_an_aggregate_baseline_is_absent_with_no_qualifying_months() -> None:
+    """Absent rather than zero: there is no typical month to report."""
+    assert figure_baseline_amount(amounts_by_qualifying_month=[]) is None

@@ -175,8 +175,11 @@ _Avoid_: Runway, time left, survival time
 ### Baselines
 
 **Baseline**:
-What a figure normally is for the owner: its mean over the Qualifying Months a
-window reaches. Recomputed from transactions on every request and never stored,
+What a figure normally is for the owner, over the Qualifying Months a
+window reaches: the mean for a category, which a presence floor protects, and the
+**median** for a whole-month figure, which has no floor to protect it and so needs a
+statistic that rejects an outlier instead. Recomputed from transactions on every
+request and never stored,
 so correcting the past corrects it. A figure is only ever compared against its
 own baseline, never against another owner's or an external norm.
 _Avoid_: Average, normal, trend, expected

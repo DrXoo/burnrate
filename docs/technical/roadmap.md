@@ -446,7 +446,7 @@ Eight dashboard figures, named, each with its answer fixed in advance:
 |---|---|---|
 | Monthly income | **yes** | the one figure no budget states, so history is the only possible source of normal |
 | Monthly spending | **yes**, on the Comparable Spend basis | with its uncomparable residual disclosed beside it |
-| Net cash flow | **yes, once protected** | not until `figure_baseline_amount` stops being a mean with no presence floor and no outlier handling |
+| Net cash flow | **yes** | met 2026-11-02: `figure_baseline_amount` is a median, which is the protection it had none of. Published as an amount with no band, because a ratio on a figure that crosses zero means nothing |
 | Safe to Spend Today | no | comparing an allowance across months mixes a budget, a month length and a fixed overrun, all of which moved |
 | Budget left | no | a budget the owner changed; the budget *is* the statement of normal |
 | Projected spend | no | a plan, not an outcome |
@@ -697,12 +697,25 @@ Per-category baselines **are** protected: `BASELINE_PRESENCE_FLOOR` denies a mea
 category with spend in fewer than two Qualifying Months, so an event in a new category
 never becomes a normal.
 
-The aggregates have **no protection at all**. `figure_baseline_amount` is a plain
-mean — no presence floor, no outlier handling — and the exemption is deliberate and
+The aggregates had **no protection at all**. `figure_baseline_amount` was a plain
+mean — no presence floor, no outlier handling — and the exemption was deliberate and
 documented. That exemption is the hole October walks through, and no budget and no
 window rule closes all of it, because an exceptional *income* has no budget to bound.
 The owner's July is the proof: a €5,500.00 severance, €4,821.00 of it moved straight
 to savings, giving a **+€2,909.73** month.
+
+> **Closed 2026-11-02, by a median.** 9a rejected a median and was right to on the
+> floor it had: *"at the two Qualifying Months the minimum allows, a median is the
+> mean."* A median of **three** is not the mean — it rejects exactly one outlier — so
+> raising `BASELINE_MINIMUM_MONTHS` to 3 is what made it available, and the two
+> changes only work together. The function had **no test of its own at all** until
+> then; it was exercised only through the service, which is how a plain mean survived
+> in the one figure that needed robustness most. Over {July, October, November} it now
+> reads **−€1,568.45** where the mean read −€2,289.20, and income reads **€1,055.20**
+> where the mean read €2,653.38. "Normally" now means typical rather than average,
+> which is the claim the product was making in words all along. ADR-0012 records it,
+> including why a category keeps its mean and the trap that **lowering the minimum
+> back to 2 silently turns this median back into a mean** with nothing to say so.
 
 **Half the system is protected and the half that is not is the half that is lying.**
 
@@ -777,9 +790,10 @@ a patch on N=2 and should be recorded as one.
    applied in `_month_spending` and `_category_spend` and nowhere else. It does not
    rescue December, and it makes every month after it clean with no new gesture from
    the owner. Owes an ADR at implementation.
-3. **Protect the aggregates**, which is the defect this section exists to name. Left
-   unspecified on purpose: a presence floor is wrong for income, and the right answer
-   needs the window above first.
+3. ~~**Protect the aggregates**~~, which is the defect this section exists to name.
+   **Done 2026-11-02**: a median, which needed the minimum of three above it and
+   nothing else. The guess that it "needs the window first" was wrong — the window
+   would have helped a median, but three months were already enough for one.
 4. **Then the window**, with the snapshot-table decision reopened against measurement
    rather than against the estimate 9a made.
 
@@ -1195,12 +1209,14 @@ In rough order of value:
    this item — "a decision, either way, on Current balance, Budget left, Projected
    spend and Burn rate" — **is decided**, in the revised Definition of Done: all four
    carry no baseline, with the reason named per figure.
-5. **Protect the aggregate baselines.** `figure_baseline_amount` is a mean with no
-   presence floor and no outlier handling, which is the hole October walks through and
-   the one no budget can close, because an exceptional *income* has no budget to bound
-   — the owner's €5,500.00 severance in July is the worked example. Deliberately
-   unspecified: a presence floor is wrong for income, and the right answer needs the
-   window below first.
+5. ~~**Protect the aggregate baselines.**~~ **Shipped 2026-11-02.**
+   `figure_baseline_amount` is a **median**, which is the hole October walked through
+   closed, and the one no budget could close — an exceptional *income* has no window
+   to bound, and the owner's €5,500.00 severance in July was the worked example. It
+   needed the minimum of three and nothing more; the note that it "needs the window
+   first" was a wrong guess. It also gained the first tests it has ever had, including
+   one at the service seam, because every other fixture in that module seeds identical
+   months — where a median and a mean agree, which is how the mean survived.
 6. **Widen the window, and reopen the snapshot-table decision.** Twelve months with a
    median is the target shape, and 9a named widening as the trigger to revisit the
    no-snapshot-table decision. Blocked on history: five months exist and two are dead.

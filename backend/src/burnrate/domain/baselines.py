@@ -282,15 +282,46 @@ def comparable_totals(
 
 
 def figure_baseline_amount(*, amounts_by_qualifying_month: Sequence[Decimal]) -> Decimal | None:
-    """The mean of a whole-month figure over the Qualifying Months given.
+    """The **median** of a whole-month figure over the Qualifying Months given.
 
-    No presence floor, unlike ``category_baseline``, and that is the decision this
-    function exists to state. The floor is for a category the owner spends in too
-    rarely to have a normal monthly cost; an aggregate figure has no such notion. A
-    month in which nothing came in is a fact about the owner's year, and skipping it
-    would report a salary as normal to someone who was paid once in three months.
+    A median and not a mean, which is the decision this function exists to state.
+    ``category_baseline`` is protected by a presence floor and this has none -- an
+    aggregate figure has no notion of a category spent in too rarely -- so without
+    robustness here one event becomes the owner's normal. It did: October 2026's
+    divorce entered their net cash flow whole, and July's severance entered their
+    income whole in the other direction.
+
+    9a rejected a median and was right to, on the floor it had: *"at the two
+    Qualifying Months the minimum allows, a median is the mean. Robust statistics
+    need a distribution."* A median of **three** is not the mean -- it rejects
+    exactly one outlier -- so raising ``BASELINE_MINIMUM_MONTHS`` to 3 is what made
+    this available, and the two changes only work together.
+
+    **A month in which nothing came in is still ordered with the rest, not skipped**,
+    which is the older decision this one has to keep. Two months of 2000 and one of
+    nothing is a typical month of 2000. The behaviour that changes is the other way
+    round: someone paid once in three months now has a typical month of **nothing**,
+    where the mean reported a third of a payslip as monthly income. That is the
+    honest answer and it is a real change -- "normally" now means typical rather than
+    average, which is the claim the product was making in words all along.
+
+    A median of zero is therefore reachable where a mean of zero was not.
+    ``deviation_percent`` and ``comparison_status`` already treat a baseline of zero
+    or less as absent, so that lands as "nothing to compare against" rather than as a
+    division. Net cash flow publishes its amount with no band at all, so a negative
+    typical month -- which this owner has -- is reported as the figure it is.
+
+    The mean is not kept anywhere as a second answer: two statistics for one figure
+    is how two readers come to disagree about what normal is.
     """
     if not amounts_by_qualifying_month:
         return None
-    total = sum(amounts_by_qualifying_month, Decimal("0.00"))
-    return (total / Decimal(len(amounts_by_qualifying_month))).quantize(_CENTS)
+    ordered = sorted(amounts_by_qualifying_month)
+    middle = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[middle].quantize(_CENTS)
+    # An even count, which only a widened window produces: the two middle months
+    # averaged, so the answer still moves with the data rather than favouring one of
+    # the pair by position.
+    pair = ordered[middle - 1] + ordered[middle]
+    return (pair / Decimal(2)).quantize(_CENTS)
