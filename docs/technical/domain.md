@@ -269,6 +269,16 @@ The current pace of spending, typically represented as daily average spending an
 
 ---
 
+### Event Budget
+
+A Fixed Budget whose window covers exactly one month -- `active_from` on the 1st, `active_to` on that month's last day -- which is how the owner says that month's spend in its category was an event and not a habit. Its spend counts in the actuals and steps the pace as any Fixed Budget does, and it is **excluded from every baseline**, so a divorce or a boiler cannot become what a later month reports as normal.
+
+The bounded window is the whole declaration. An open `active_to` is the default and means the commitment continues; a window spanning two months is a commitment that ran and stopped, not an event. Because both edges of a window sit on month boundaries (ADR-0005), "exactly one month" is two equalities and no arithmetic over days.
+
+The exclusion reaches baseline *input* and nothing else: the month on screen counts every euro that left it, which is the same figure-specific inclusion rule ADR-0003 established for Pending Spend rather than a disposition like `Ignored`. A flag on the charge was designed first and declined; see `docs/adr/0011-a-one-month-fixed-budget-declares-an-event.md` for why the window replaced it, and what it cannot reach.
+
+---
+
 ### Inbound Transfer
 
 Money that arrived in the month from an account BurnRate cannot see: the booked credit legs of transfer categories. It is neither income nor spend, so it reaches neither side of net cash flow -- it is **disclosed beside** that figure as the funding the deficit came from, and never added to it. The loss is counted once, in the net; this says which pocket paid.

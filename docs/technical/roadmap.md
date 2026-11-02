@@ -1152,25 +1152,44 @@ cancellation rule wrote was still being read as a budget the month held in full.
 
 In rough order of value:
 
-1. **`BASELINE_MINIMUM_MONTHS` to 3, before 2026-12-01.** One line, and the only item
-   with a date. On that day the window reaches two Qualifying Months — a divorce and
-   one ordinary month — and publishes **−€4,888.66** as the owner's normal. Every
-   other reachable answer that day is also false, including the one the event rule
-   produces. See **Revised: what a baseline is for**.
+1. ~~**`BASELINE_MINIMUM_MONTHS` to 3, before 2026-12-01.**~~ **Shipped 2026-11-02.**
+   Not one line, as this list first called it: it is a domain constant in
+   `burnrate.domain.baselines`, and only `BASELINE_WINDOW_MONTHS` is configuration.
+   On 2026-12-01 the window would have reached two Qualifying Months — a divorce and
+   one ordinary month — and published **−€4,888.66** as the owner's normal. Every
+   other reachable answer that day was also false, including the event rule's. The
+   product now says *"not enough history to compare yet"*, which is the honest
+   output. See **Revised: what a baseline is for**.
+
+   It cost twenty-one fixtures across two files, because the floor of two was baked
+   into every one of them. And it exposed a test passing for the wrong reason:
+   `test_a_qualifying_months_own_hold_on_a_fixed_bill_is_excluded_too` claimed to
+   cover the presence floor at the service seam, but with two Qualifying Months the
+   window itself was below the minimum, so nothing earned a baseline and lowering
+   `BASELINE_PRESENCE_FLOOR` to 1 changed nothing. Two rules masking each other,
+   visible only to the mutation.
+
+   **One consequence to carry**: a 3-month window with a 3-month minimum means all
+   three months must be clean, so a single sync hole anywhere in the window silences
+   the comparison entirely. Widening the window is not the fix — window 5 reaches
+   July's severance. Item 2 is the fix.
 2. **Close the sync gap, and alert on the next one.** Unchanged in substance and now
    the most valuable item on the list rather than the first of several. The 36-day hole
    killed **August and September** — the owner's only two ordinary months — so the
    baseline has nothing normal to average, and nothing in the product reports a gap.
    This is both the cheapest Phase 10 alert and the one protecting every figure
    Phase 9 produces.
-3. **The event rule.** A one-month Fixed Budget window -- an **Event Budget** in
-   `GLOSSARY.md` -- declares that month's spend in its category an event, excluded
-   from every baseline and from nothing else. A
-   predicate beside `budget_covers_month`, applied in `_month_spending` and
-   `_category_spend`. It reads a gesture the owner already makes — they bounded
-   `Divorce` and `Relocation` to `2026-10-31` unprompted — which is why it replaced the
-   Exceptional Charge rather than losing to it. It does **not** rescue December. Owes
-   an ADR, and a test that fails with `BASELINE_PRESENCE_FLOOR` neutralised.
+3. ~~**The event rule.**~~ **Shipped 2026-11-02**, with item 1. A one-month Fixed
+   Budget window — an **Event Budget** in `GLOSSARY.md` — declares that month's
+   spend in its category an event, excluded from every baseline and from nothing
+   else. `is_event_budget` lives beside `budget_covers_month`; the transaction filter
+   is private to `BaselineService`, because the rule is "excluded from every
+   baseline" and a shared predicate would sooner or later be added to a figure.
+   ADR-0011 records it, with the three neighbours that must answer the other way: an
+   open window, a two-month window, and the month on screen's own figures. Five
+   mutations confirmed, one per rule. It does **not** rescue December — that is
+   item 1, and the reason is July's severance, which is an exceptional *income* and
+   has no budget to bound. Which makes item 5 the one that is left.
 4. **Close 9a's cheap gaps**, now narrower than they were: the dashboard's Budget pulse
    rows, and one line per figure saying which kind of blank it is. The fourth part of
    this item — "a decision, either way, on Current balance, Budget left, Projected

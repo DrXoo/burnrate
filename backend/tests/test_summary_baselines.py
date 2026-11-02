@@ -131,6 +131,28 @@ class Fixture:
         )
         self.db.flush()
 
+    def bounded_fixed_budget(
+        self, *, category: str, amount: str, active_from: date, active_to: date
+    ) -> None:
+        """A Fixed Budget with both edges set, which an Event Budget is one case of.
+
+        Takes the end date rather than deriving a month from it, so a test can bound a
+        window to two months and show that the rule does not fire -- deriving it would
+        make "exactly one month" unobservable from here.
+        """
+        self.db.add(
+            Budget(
+                category_id=self.category(category).id,
+                amount=Decimal(amount),
+                currency="EUR",
+                period_type="monthly",
+                active_from=active_from,
+                active_to=active_to,
+                is_fixed=True,
+            )
+        )
+        self.db.flush()
+
     def sync_daily(self, first: date, last: date, *, status: str = "success") -> None:
         """One sync run per day across the range, as the cron would produce."""
         day = first
@@ -1039,3 +1061,143 @@ def test_a_bonus_month_is_not_an_anomaly() -> None:
     assert income["baseline_amount"] == "2000.00"
     assert income["deviation_percent"] == 50.0
     assert income["comparison_status"] == "above"
+
+
+def test_an_event_budgets_spend_reaches_no_baseline() -> None:
+    """A Fixed Budget bounded to one month says that month's spend was an event.
+
+    Shaped so the event rule is the only thing that can produce the answer. Divorce
+    has spend in **two** Qualifying Months -- 8400 in August and 1200 in September,
+    each under a budget bounded to its own month -- so it clears
+    ``BASELINE_PRESENCE_FLOOR`` on its own and the floor cannot be what refuses it.
+    Without the rule the owner would be told a divorce normally costs them 3200 a
+    month.
+
+    The aggregate is the discriminating half. Net cash flow over the three months is
+    1700, 1700 and 1700 with the rule and 1700, -6700 and 500 without it, so the
+    baseline is 1700 against -1500: the product either reports the owner normally
+    keeps 1700 a month or that they normally run a deficit, from the same data.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    for month in (7, 8, 9, 10):
+        fixture.income(category="Salary", on=date(2026, month, 25), amount="2000.00")
+        fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
+    fixture.bounded_fixed_budget(
+        category="Divorce",
+        amount="8400.00",
+        active_from=date(2026, 8, 1),
+        active_to=date(2026, 8, 31),
+    )
+    fixture.spend(category="Divorce", on=date(2026, 8, 9), amount="8400.00")
+    fixture.bounded_fixed_budget(
+        category="Divorce",
+        amount="1200.00",
+        active_from=date(2026, 9, 1),
+        active_to=date(2026, 9, 30),
+    )
+    fixture.spend(category="Divorce", on=date(2026, 9, 9), amount="1200.00")
+    # And once more in the month on screen, so the row exists to be asserted on. Its
+    # spend is a figure and counts; only the months behind it are baseline input.
+    fixture.bounded_fixed_budget(
+        category="Divorce",
+        amount="500.00",
+        active_from=date(2026, 10, 1),
+        active_to=date(2026, 10, 31),
+    )
+    fixture.spend(category="Divorce", on=date(2026, 10, 9), amount="500.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_status"] == "ok"
+    assert summary["baseline_months_count"] == 3
+    divorce = row_for(summary, "Divorce")
+    assert divorce["spend_amount"] == "500.00"
+    assert divorce["baseline_amount"] is None
+    assert divorce["comparison_status"] == "no_baseline"
+    assert row_for(summary, "Food")["baseline_amount"] == "300.00"
+    assert summary["net_cash_flow_baseline_amount"] == "1700.00"
+
+
+def test_an_event_budget_still_counts_in_the_month_it_happened() -> None:
+    """Counted in the actuals, excluded from every baseline -- and only the baseline.
+
+    The same phrase ADR-0003 established for Pending Spend: a figure-specific
+    inclusion rule, not a disposition that removes a row from everything. An Event
+    Budget in the month on screen is money that left, so monthly spending and net
+    cash flow carry it whole. Applying the exclusion to ``_get_monthly_spend`` as
+    well would make it a quieter ``excluded_at``, which is a different primitive and
+    one the product already has.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    for month in (7, 8, 9, 10):
+        fixture.income(category="Salary", on=date(2026, month, 25), amount="2000.00")
+        fixture.spend(category="Food", on=date(2026, month, 5), amount="300.00")
+    fixture.bounded_fixed_budget(
+        category="Divorce",
+        amount="8400.00",
+        active_from=date(2026, 10, 1),
+        active_to=date(2026, 10, 31),
+    )
+    fixture.spend(category="Divorce", on=date(2026, 10, 9), amount="8400.00")
+
+    summary = fixture.summary()
+
+    assert summary["monthly_spending_amount"] == "8700.00"
+    assert summary["net_cash_flow_amount"] == "-6700.00"
+    # Nothing to compare it against, so it is disclosed as the residual rather than
+    # folded into a comparison that would read the month as catastrophic.
+    assert summary["comparable_spend_amount"] == "300.00"
+    assert summary["uncomparable_spend_amount"] == "8400.00"
+
+
+def test_an_open_ended_fixed_budget_is_not_an_event() -> None:
+    """Rent is a habit, and the rule must not read every Fixed Budget as an event.
+
+    The one thing that separates them is the bounded window: an open ``active_to``
+    means the commitment continues, which is the whole argument the roadmap makes for
+    reading the window instead of asking the owner to flag a charge. Rent at 500 a
+    month has to keep its baseline.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.fixed_budget(category="Rent", amount="500.00", active_from=date(2026, 7, 1))
+    for month in (7, 8, 9, 10):
+        fixture.spend(category="Rent", on=date(2026, month, 1), amount="500.00")
+
+    summary = fixture.summary()
+
+    assert row_for(summary, "Rent")["baseline_amount"] == "500.00"
+    assert row_for(summary, "Rent")["comparison_status"] == "in_line"
+
+
+def test_a_fixed_budget_spanning_two_months_is_not_an_event() -> None:
+    """"Exactly one month" is the rule, and two is the boundary that proves it.
+
+    A window bounded to August and September is a commitment that ran for two months
+    and stopped -- a sublet, a course, a contract -- not an event. ADR-0005 puts both
+    edges of a window on month boundaries, so the question is exact and this is the
+    nearest input that must answer it the other way.
+
+    Rent is present in both Qualifying Months at 500, so it clears the presence floor
+    and earns a 333.33 baseline across the three months the window reaches. Were the
+    rule reading "bounded" rather than "bounded to one month", it would read None.
+    """
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.bounded_fixed_budget(
+        category="Rent",
+        amount="500.00",
+        active_from=date(2026, 8, 1),
+        active_to=date(2026, 9, 30),
+    )
+    fixture.spend(category="Rent", on=date(2026, 8, 1), amount="500.00")
+    fixture.spend(category="Rent", on=date(2026, 9, 1), amount="500.00")
+    fixture.spend(category="Food", on=date(2026, 7, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    assert summary["baseline_months_count"] == 3
+    assert row_for(summary, "Rent")["baseline_amount"] == "333.33"

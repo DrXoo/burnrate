@@ -22,7 +22,7 @@ covered -- so it is compared against ``month_start``, never against ``month_end`
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import ColumnElement, and_, or_
 
@@ -68,6 +68,41 @@ def budget_covers_month(*, month_start: date, month_end: date) -> ColumnElement[
         Budget.active_from < month_end,
         or_(Budget.active_to.is_(None), Budget.active_to >= month_start),
     )
+
+
+def is_event_budget(
+    *,
+    is_fixed: bool,
+    active_from: date,
+    active_to: date | None,
+    month_start: date,
+    month_end: date,
+) -> bool:
+    """Whether a budget declares this month's spend in its category an event.
+
+    An Event Budget is a Fixed Budget whose window covers exactly this month and no
+    other -- see Event Budget in ``GLOSSARY.md``. Both edges of a window sit on month
+    boundaries (ADR-0005), so the question is two equalities and no arithmetic over
+    days: ``active_from`` is the month's 1st, and ``active_to`` is its last day, which
+    is the day before the half-open ``month_end`` this module reads everywhere.
+
+    Two neighbours must answer the other way, and both are real. A window bounded to
+    *two* months is a commitment that ran and stopped -- a sublet, a course, a
+    contract -- not an event. An **open** window is the ordinary case, and its whole
+    meaning is that the commitment continues.
+
+    That second one is why the declaration costs the owner nothing new: bounding a
+    budget to the month it happened in is a gesture they already make, and it is the
+    gesture. A flag on the charge was proposed first and declined twice, which is
+    recorded under "Declined: the Exceptional Charge" in the roadmap.
+
+    Stated here rather than beside the queries that use it, for the reason the module
+    docstring gives: a second spelling of a window rule is the defect this module
+    exists to prevent.
+    """
+    if not is_fixed or active_to is None:
+        return False
+    return active_from == month_start and active_to == month_end - timedelta(days=1)
 
 
 def budget_month_status(

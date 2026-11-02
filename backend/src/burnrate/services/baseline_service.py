@@ -14,17 +14,17 @@ the pending sweep, and by an Unknown Transaction finally being classified.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select, true
 from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
-from burnrate.db.budget_windows import budget_month_status
+from burnrate.db.budget_windows import budget_month_status, is_event_budget
 from burnrate.db.counted_spend import spend_counts
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
@@ -113,6 +113,19 @@ class Baselines:
     net_cash_flow_baseline: Decimal | None
 
 
+@dataclass(frozen=True)
+class BudgetCategories:
+    """What a month's Fixed Budgets say about it, as two sets of category ids.
+
+    ``fixed`` decides whether a hold counts; ``event`` decides whether the month's
+    spend in that category is baseline input at all. Kept together because they are
+    read off the same windows in one pass.
+    """
+
+    fixed: set[UUID]
+    event: set[UUID]
+
+
 class BaselineService:
     def __init__(self, *, db: Session, timezone_name: str = "UTC") -> None:
         self.db = db
@@ -166,7 +179,16 @@ class BaselineService:
         # owner can make a category fixed, or cancel it, between two months. Read
         # once per month and handed to both spend queries, so the per-category rows
         # and the month's total cannot disagree about what counted.
-        fixed_categories = self._fixed_categories_by_month([month_value, *qualifying])
+        budgets = self._budget_categories_by_month([month_value, *qualifying])
+
+        # An Event Budget's spend is excluded from baseline *input* and from nothing
+        # else, so the exclusion is passed per month rather than applied inside the
+        # queries: empty for the month on screen, whose figures count every euro that
+        # left, and populated for the months behind it, which are what "normal" is
+        # computed from. Applying it to the month on screen too would print a Divorce
+        # row reading 0.00 beside a headline that counts the 8,400, and would make
+        # this a quieter ``excluded_at`` -- a primitive the product already has.
+        NO_EVENTS: set[UUID] = set()
 
         # Income and total spending for the month on screen and every Qualifying
         # Month, read once each: the income baseline and the net cash flow baseline
@@ -175,7 +197,8 @@ class BaselineService:
             month: self._month_totals(
                 month,
                 cutoff_day=cutoff_day,
-                fixed_category_ids=fixed_categories[month],
+                fixed_category_ids=budgets[month].fixed,
+                event_category_ids=NO_EVENTS if month == month_value else budgets[month].event,
             )
             for month in [month_value, *qualifying]
         }
@@ -183,13 +206,15 @@ class BaselineService:
         this_month = self._category_spend(
             month_value,
             cutoff_day=cutoff_day,
-            fixed_category_ids=fixed_categories[month_value],
+            fixed_category_ids=budgets[month_value].fixed,
+            event_category_ids=NO_EVENTS,
         )
         past_months = [
             self._category_spend(
                 month,
                 cutoff_day=cutoff_day,
-                fixed_category_ids=fixed_categories[month],
+                fixed_category_ids=budgets[month].fixed,
+                event_category_ids=budgets[month].event,
             )
             for month in qualifying
         ]
@@ -343,8 +368,8 @@ class BaselineService:
         ) or NO_SPEND
         return (-Decimal(total)).quantize(Decimal("0.01"))
 
-    def _fixed_categories_by_month(self, months: Sequence[str]) -> dict[str, set[UUID]]:
-        """The categories a Fixed Budget covered, answered per month.
+    def _budget_categories_by_month(self, months: Sequence[str]) -> dict[str, BudgetCategories]:
+        """The categories a Fixed Budget covered, and which of those were events, per month.
 
         Each month is asked in its own right rather than taking the month on screen's
         answer for the whole window: a budget's window is month-granular (ADR-0005),
@@ -357,6 +382,11 @@ class BaselineService:
         is ``budget_covers_month``'s own pure twin, which is why the two live
         together -- a second spelling of it here is the defect this whole fix is
         about.
+
+        Both answers come off the same rows because they are answers about the same
+        windows: a category whose budget makes it fixed in a month and one whose
+        budget makes that month an event are read from one fetch, so no later change
+        can move one and leave the other behind.
         """
         windows = self.db.execute(
             select(Budget.category_id, Budget.active_from, Budget.active_to).where(
@@ -366,17 +396,32 @@ class BaselineService:
         by_month = {}
         for month_value in months:
             month_start, month_end = month_window(month_value)
-            by_month[month_value] = {
-                category_id
-                for category_id, active_from, active_to in windows
-                if budget_month_status(
-                    active_from=active_from,
-                    active_to=active_to,
-                    month_start=month_start,
-                    month_end=month_end,
-                )
-                == "active"
-            }
+            by_month[month_value] = BudgetCategories(
+                fixed={
+                    category_id
+                    for category_id, active_from, active_to in windows
+                    if budget_month_status(
+                        active_from=active_from,
+                        active_to=active_to,
+                        month_start=month_start,
+                        month_end=month_end,
+                    )
+                    == "active"
+                },
+                event={
+                    category_id
+                    for category_id, active_from, active_to in windows
+                    # Every row here is already fixed, and the flag is passed anyway
+                    # so the predicate states the whole rule rather than half of it.
+                    if is_event_budget(
+                        is_fixed=True,
+                        active_from=active_from,
+                        active_to=active_to,
+                        month_start=month_start,
+                        month_end=month_end,
+                    )
+                },
+            )
         return by_month
 
     def _category_spend(
@@ -385,6 +430,7 @@ class BaselineService:
         *,
         cutoff_day: int | None,
         fixed_category_ids: set[UUID],
+        event_category_ids: set[UUID],
     ) -> dict[UUID, Decimal]:
         """Spend per category for one month, to the cutoff day where there is one.
 
@@ -409,6 +455,7 @@ class BaselineService:
                 Category.active.is_(True),
                 not_ignored(),
                 spend_counts(fixed_category_ids=fixed_category_ids),
+                _outside_an_event(event_category_ids),
             )
             .group_by(Transaction.category_id)
         ).all()
@@ -449,6 +496,7 @@ class BaselineService:
         *,
         cutoff_day: int | None,
         fixed_category_ids: set[UUID],
+        event_category_ids: set[UUID],
     ) -> MonthTotals:
         """A month's income and total spending, on the same basis the summary uses."""
         income = self._month_income(month_value, cutoff_day=cutoff_day)
@@ -456,6 +504,7 @@ class BaselineService:
             month_value,
             cutoff_day=cutoff_day,
             fixed_category_ids=fixed_category_ids,
+            event_category_ids=event_category_ids,
         )
         return MonthTotals(income=income, spending=spending)
 
@@ -465,6 +514,7 @@ class BaselineService:
         *,
         cutoff_day: int | None,
         fixed_category_ids: set[UUID],
+        event_category_ids: set[UUID],
     ) -> Decimal:
         """Total spending for one month, matching the month's own spending figure.
 
@@ -487,6 +537,7 @@ class BaselineService:
                 Category.type == "expense",
                 not_ignored(),
                 spend_counts(fixed_category_ids=fixed_category_ids),
+                _outside_an_event(event_category_ids),
             )
         ) or NO_SPEND
         return (-Decimal(total)).quantize(Decimal("0.01"))
@@ -534,6 +585,24 @@ def _preceding_months(month_value: str, count: int) -> list[str]:
             year, month = year - 1, 12
         months.append(f"{year:04d}-{month:02d}")
     return sorted(months)
+
+
+def _outside_an_event(event_category_ids: Collection[UUID]) -> ColumnElement[bool]:
+    """Rows a baseline may be computed from: everything bar an Event Budget's spend.
+
+    Private to this module on purpose, and deliberately not beside ``spend_counts``
+    where the other shared spend predicate lives. The rule is "excluded from every
+    baseline", so the only callers that may have it are the two queries that build
+    one. In a shared module it would sooner or later be added to a figure, and an
+    Event Budget that vanished from the month's own spending would be an
+    ``excluded_at`` wearing a different word.
+
+    ``true()`` when nothing is an event, rather than a ``NOT IN ()`` against an empty
+    set, so neither caller needs a branch -- the same shape ``spend_counts`` uses.
+    """
+    if not event_category_ids:
+        return true()
+    return Transaction.category_id.notin_(list(event_category_ids))
 
 
 def _month_window_to_cutoff(month_value: str, *, cutoff_day: int | None) -> tuple[date, date]:

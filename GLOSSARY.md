@@ -75,7 +75,6 @@ charged as a step, so it is never paced day by day or rate-extrapolated.
 _Avoid_: Recurring budget, bill, committed budget
 
 **Event Budget**:
-_Proposed, not implemented; see `docs/technical/roadmap.md`._
 A Fixed Budget whose window covers exactly one month, which is how the owner says
 that month's spend in its category was an event and not a habit -- a divorce, a
 boiler, a move. It counts in the actuals and steps the pace as any Fixed Budget
