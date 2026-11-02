@@ -1217,11 +1217,21 @@ In rough order of value:
    `*_alerted_at` column.
 
    The message is a deadline rather than a fact: a missing day is fetchable for
-   thirty days after it, so `lost` and `expiring` are two different things to say and
-   the backend decides which. A gap the next run will close says nothing, which is the
-   over-firing the roadmap warns Phase 10 fails by. ADR-0013 records it, including the
-   one case left open: a **timely** warning during an outage needs a dead-man's switch
-   outside the process, which is deployment and belongs with Phase 13.
+   thirty days after it, so the backend decides between three states and a gap the
+   next run will close says nothing at all, which is the over-firing the roadmap warns
+   Phase 10 fails by.
+
+   **The first version of this had two states and was wrong**, which the owner caught
+   in a sentence: *"are we going to show this all the time, even in November?"* With
+   the 90-day lookback that banner would have sat above every month's figures until
+   2 December, a permanent notice about August with nothing to do about it. A loss is
+   a fact about the months that lost the days, so `lost_elsewhere` is silent and the
+   worker stops alerting once the loss has hardened past the grace period -- otherwise
+   every redeploy for three months re-sent the same August message.
+
+   ADR-0013 records it, including the one case left open: a **timely** warning during
+   an outage needs a dead-man's switch outside the process, which is deployment and
+   belongs with Phase 13.
 3. ~~**The event rule.**~~ **Shipped 2026-11-02**, with item 1. A one-month Fixed
    Budget window — an **Event Budget** in `GLOSSARY.md` — declares that month's
    spend in its category an event, excluded from every baseline and from nothing

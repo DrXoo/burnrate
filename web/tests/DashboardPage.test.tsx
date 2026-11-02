@@ -190,6 +190,25 @@ describe("the dashboard's comparison against what is normal", () => {
     expect(html).not.toContain("can no longer be recovered");
   });
 
+  it("leaves a loss that belongs to another month to that month", () => {
+    // The owner's August move, read on the November screen: real, permanent, and
+    // nothing to do about it. A notice there every day is how a warning becomes
+    // furniture, so the month that lost the days is where it is said.
+    const html = render({
+      ...OCTOBER,
+      sync_gap: {
+        status: "lost_elsewhere",
+        oldest_missing_day: "2026-08-30",
+        newest_missing_day: "2026-09-03",
+        missing_days: 5,
+        unrecoverable_days: 5,
+        recoverable_until: null,
+      },
+    });
+
+    expect(html).not.toContain("bank data");
+  });
+
   it("says nothing about sync when every day was fetched", () => {
     const html = render({ ...OCTOBER, sync_gap: null });
 

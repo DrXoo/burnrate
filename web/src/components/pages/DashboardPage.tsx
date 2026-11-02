@@ -579,7 +579,10 @@ export function DashboardPage({ summary, loading, error, heroMode, includedAccou
  * why this sits above the figures rather than among them.
  */
 function SyncGapBanner({ gap }: { gap: SyncGap | null }) {
-  if (!gap) {
+  // ``lost_elsewhere`` is a real loss belonging to another month, and the month it
+  // belongs to is where it is said. A permanent notice about August on top of
+  // November is how a warning becomes furniture.
+  if (!gap || gap.status === "lost_elsewhere") {
     return null;
   }
   const days = `${gap.missing_days} ${gap.missing_days === 1 ? "day" : "days"}`;

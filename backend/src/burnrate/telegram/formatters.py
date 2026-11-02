@@ -181,7 +181,9 @@ def _sync_gap_lines(payload: dict[str, Any]) -> list[str]:
     field, which is the amendment ``ADR-0002`` records.
     """
     gap = payload.get("sync_gap")
-    if not gap:
+    # ``lost_elsewhere`` is a real loss in some other month, and saying it here would
+    # be the furniture this scoping exists to remove. The month it belongs to says it.
+    if not gap or gap["status"] == "lost_elsewhere":
         return []
     days = gap["missing_days"]
     plural = "day" if days == 1 else "days"

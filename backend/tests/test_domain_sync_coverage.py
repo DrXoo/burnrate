@@ -116,7 +116,7 @@ def test_a_gap_is_reported_once_some_of_it_can_never_be_recovered() -> None:
     assert gap.unrecoverable_days == 5
     assert gap.recoverable_days == 0
     assert gap.recoverable_until is None
-    assert gap_is_worth_alerting(gap=gap, today=date(2026, 10, 4)) is True
+    assert gap_is_worth_alerting(fetch_window_days=30, gap=gap, today=date(2026, 10, 4)) is True
 
 
 def test_a_gap_still_within_reach_is_reported_with_its_deadline() -> None:
@@ -144,7 +144,7 @@ def test_a_gap_still_within_reach_is_reported_with_its_deadline() -> None:
     assert gap.recoverable_days == 25
     assert gap.recoverable_until == date(2026, 11, 10)
     assert gap.recoverable_until <= date(2026, 11, 5) + timedelta(days=SYNC_GAP_GRACE_DAYS)
-    assert gap_is_worth_alerting(gap=gap, today=date(2026, 11, 5)) is True
+    assert gap_is_worth_alerting(fetch_window_days=30, gap=gap, today=date(2026, 11, 5)) is True
 
 
 def test_a_gap_outside_the_lookback_is_not_reported_for_ever() -> None:
@@ -211,3 +211,62 @@ def test_the_range_never_begins_before_any_sync_could_have_covered_it() -> None:
         )
         is None
     )
+
+
+def test_permanent_loss_stops_being_news_once_it_has_been_news() -> None:
+    """An alert that cannot stop is an alert that gets muted.
+
+    The owner's five August days are gone and no action recovers them, so repeating
+    it is nagging about a fact. A day becomes unrecoverable thirty days after it, so
+    the loss *hardened* on 3 October -- the day before the worker came back -- and is
+    worth saying then and for the grace period after it, and not for ever.
+
+    This is also what keeps a redeploy from re-sending it: the worker reports at
+    startup, and without this every restart for the next three months would have
+    repeated the same August message.
+    """
+    # Healthy again from the day it returned, or the recent days would themselves be
+    # a live gap and this would be testing ``expiring`` instead.
+    def history(until: date) -> list[date]:
+        return [date(2026, 8, 29)] + [
+            date(2026, 10, 4) + timedelta(days=offset)
+            for offset in range((until - date(2026, 10, 4)).days + 1)
+        ]
+
+    on_return = sync_gap(
+        today=date(2026, 10, 4),
+        successful_sync_days=history(date(2026, 10, 4)),
+        fetch_window_days=30,
+        lookback_days=90,
+    )
+    assert on_return is not None
+    assert gap_is_worth_alerting(fetch_window_days=30, gap=on_return, today=date(2026, 10, 4)) is True
+
+    a_month_later = sync_gap(
+        today=date(2026, 11, 3),
+        successful_sync_days=history(date(2026, 11, 3)),
+        fetch_window_days=30,
+        lookback_days=90,
+    )
+    assert a_month_later is not None
+    assert a_month_later.unrecoverable_days == 5
+    # Still a true fact about August, and no longer an unprompted message.
+    assert gap_is_worth_alerting(fetch_window_days=30, gap=a_month_later, today=date(2026, 11, 3)) is False
+
+
+def test_a_hole_still_worth_acting_on_is_always_worth_saying() -> None:
+    """``expiring`` never goes stale while it lasts: it is an ask, not a fact.
+
+    It cannot nag for long by construction -- a recoverable day either gets fetched
+    or turns into a lost one -- so there is no freshness rule on this side.
+    """
+    gap = sync_gap(
+        today=date(2026, 11, 5),
+        successful_sync_days=[date(2026, 9, 15), date(2026, 10, 10)],
+        fetch_window_days=30,
+        lookback_days=90,
+    )
+
+    assert gap is not None
+    assert gap.unrecoverable_days == 0
+    assert gap_is_worth_alerting(fetch_window_days=30, gap=gap, today=date(2026, 11, 5)) is True

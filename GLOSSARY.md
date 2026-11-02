@@ -178,7 +178,10 @@ reached them. Not a failure the owner caused and not one they can always fix: a
 missing day is fetchable for thirty days after it and lost once it falls out of
 that window, so a gap is reported as a deadline rather than a fact -- either days
 already gone, which makes those months' figures understated, or days still worth
-reconnecting for. A gap the next successful sync will close is not reported at all.
+reconnecting for. A loss is reported **on the months that lost the days** and not on
+a later one, and it stops being an unprompted message once it has been one: it is a
+fact, not an ask, and a notice with nothing to do about it becomes furniture. A gap
+the next successful sync will close is not reported at all.
 _Avoid_: Sync failure, sync error, missing transactions, downtime
 
 ### Baselines

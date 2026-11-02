@@ -335,7 +335,11 @@ class SummaryService:
             "projected_month_end_spend_amount": self._format_decimal(projected_month_end_spend),
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "budget_usage": budget_usage,
-            "sync_gap": self._serialize_sync_gap(today=reference_day),
+            "sync_gap": self._serialize_sync_gap(
+                today=reference_day,
+                month_start=month_start,
+                month_end=month_end,
+            ),
             "baseline_status": baselines.status,
             "comparable_spend_amount": self._format_decimal(baselines.comparable_spend),
             # Defined as the residual, so the two halves reconcile against the
@@ -470,21 +474,44 @@ class SummaryService:
         # Income transactions are credits (positive amounts), so no sign flip.
         return Decimal(total_amount).quantize(Decimal("0.01"))
 
-    def _serialize_sync_gap(self, *, today: date) -> dict[str, Any] | None:
+    def _serialize_sync_gap(
+        self, *, today: date, month_start: date, month_end: date
+    ) -> dict[str, Any] | None:
         """Days the bank was never asked about, or ``None`` when there are none.
 
         ``status`` is decided here rather than left for each interface to derive from
         the counts, which is the amendment ``ADR-0002`` records and for the same
-        reason: ``lost`` and ``expiring`` are two different things to say to the owner,
-        and two clients deriving the distinction are two clients that can word it
-        differently. ``lost`` wins when both are present, because the sentence that
-        matters is the one about money already gone.
+        reason: these are three different things to say to the owner, and two clients
+        deriving the distinction are two clients that can word it differently.
+
+        * ``expiring`` -- days can still be fetched. An **ask with a deadline**, and
+          about *today*, so it is reported whatever month is open.
+        * ``lost`` -- days are gone *and belong to the month being viewed*, whose
+          figures are therefore understated.
+        * ``lost_elsewhere`` -- days are gone and belong to some other month.
+
+        That last one exists because the first version of this had only two values and
+        put one banner above every month's figures for as long as the lookback
+        reached. On the owner's data that was a permanent notice about August sitting
+        on top of November, with nothing to do about it -- which is how a warning
+        becomes furniture. A loss is a fact about the months that lost the days, so it
+        is reported on them. The facts stay in the payload in every case, so an
+        interface that wants to surface it somewhere quieter need not re-derive it.
+
+        ``expiring`` wins over a loss in the same window, because it is the only one
+        of the two that can still be acted on.
         """
         gap = self._sync_coverage.current_gap(today=today)
         if gap is None:
             return None
+        if gap.unrecoverable_days == 0:
+            status = "expiring"
+        elif gap.oldest_missing_day < month_end and gap.newest_missing_day >= month_start:
+            status = "lost"
+        else:
+            status = "lost_elsewhere"
         return {
-            "status": "lost" if gap.unrecoverable_days > 0 else "expiring",
+            "status": status,
             "oldest_missing_day": gap.oldest_missing_day.isoformat(),
             "newest_missing_day": gap.newest_missing_day.isoformat(),
             "missing_days": gap.missing_days,

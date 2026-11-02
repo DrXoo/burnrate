@@ -19,6 +19,7 @@ from burnrate.services.connection_expiry import (
 )
 from burnrate.services.ledger_service import LedgerService
 from burnrate.domain.sync_coverage import gap_is_worth_alerting
+from burnrate.services.enable_banking_service import TRANSACTION_WINDOW
 from burnrate.services.sync_coverage_service import SyncCoverageService
 from burnrate.services.sync_service import SyncRunResult
 from burnrate.telegram.formatters import (
@@ -229,7 +230,11 @@ def send_sync_gap_alert(
 
     coverage = SyncCoverageService(db=session, timezone_name=settings.app_timezone)
     gap = coverage.current_gap(today=today)
-    if gap is None or not gap_is_worth_alerting(gap=gap, today=today or coverage.owner_today()):
+    if gap is None or not gap_is_worth_alerting(
+        gap=gap,
+        today=today or coverage.owner_today(),
+        fetch_window_days=TRANSACTION_WINDOW.days,
+    ):
         return 0
 
     text = format_sync_gap_alert(gap=gap)

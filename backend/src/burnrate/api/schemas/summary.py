@@ -71,7 +71,7 @@ class SyncGapResponse(BaseModel):
     amendment ``ADR-0002`` records, for the same reason.
     """
 
-    status: Literal["lost", "expiring"]
+    status: Literal["lost", "lost_elsewhere", "expiring"]
     oldest_missing_day: date
     newest_missing_day: date
     missing_days: int

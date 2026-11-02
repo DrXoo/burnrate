@@ -254,7 +254,7 @@ export interface SummaryDashboard {
     `status` is the backend's call, so the dashboard and the bot cannot word the
     difference between money already lost and a hole worth acting on differently. */
 export interface SyncGap {
-  status: "lost" | "expiring";
+  status: "lost" | "lost_elsewhere" | "expiring";
   oldest_missing_day: string;
   newest_missing_day: string;
   missing_days: number;

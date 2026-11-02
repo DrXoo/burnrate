@@ -720,3 +720,25 @@ def test_format_sync_gap_alert_asks_for_the_fix_while_there_is_still_time() -> N
     assert "2026-11-10" in text
     assert "gone for good" not in text
     assert "reconnect" in text.lower()
+
+
+def test_format_summary_says_nothing_about_a_loss_that_belongs_to_another_month() -> None:
+    """The month that lost the days is where it is said, and nowhere else.
+
+    Otherwise the owner reads a permanent notice about August on top of November,
+    with nothing to do about it, every time they open the bot.
+    """
+    text = format_summary(
+        make_summary(
+            sync_gap={
+                "status": "lost_elsewhere",
+                "oldest_missing_day": "2026-08-30",
+                "newest_missing_day": "2026-09-03",
+                "missing_days": 5,
+                "unrecoverable_days": 5,
+                "recoverable_until": None,
+            }
+        )
+    )
+
+    assert "bank data missing" not in text

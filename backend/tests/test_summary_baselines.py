@@ -1254,9 +1254,12 @@ def test_the_summary_reports_a_sync_hole_the_product_already_knew_about() -> Non
     fixture = Fixture(db, synced=False)
     fixture.sync_daily(date(2026, 8, 1), date(2026, 8, 29))
     fixture.sync_daily(date(2026, 10, 4), date(2026, 10, 26))
-    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 9, 10), amount="300.00")
 
-    summary = fixture.summary()
+    # Viewed on September, which is one of the months that lost the days. October's
+    # own view reports the same facts as ``lost_elsewhere``; that scoping has its own
+    # test below.
+    summary = fixture.summary(month="2026-09")
 
     gap = summary["sync_gap"]
     assert gap is not None
@@ -1296,3 +1299,49 @@ def test_the_summary_reports_a_hole_still_within_reach_with_its_deadline() -> No
     assert gap["oldest_missing_day"] == "2026-10-11"
     assert gap["unrecoverable_days"] == 0
     assert gap["recoverable_until"] == "2026-11-10"
+
+
+def test_a_months_own_loss_is_reported_on_that_month_and_not_on_a_later_one() -> None:
+    """Days lost in August are a fact about August, not about the November screen.
+
+    The first version of this put one banner above every month's figures for as long
+    as the lookback reached, which on the owner's data meant a permanent notice about
+    the move they made in August sitting on top of November. Nothing to do, every
+    time they opened the app -- which is how a warning becomes furniture.
+
+    So the status is scoped here: ``lost`` when the month being viewed holds the
+    missing days, ``lost_elsewhere`` when the loss is real and belongs to another
+    month. The fact stays in the payload either way, because an interface that wants
+    to surface it somewhere quieter should not have to re-derive it.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    fixture.sync_daily(date(2026, 8, 1), date(2026, 8, 29))
+    fixture.sync_daily(date(2026, 10, 4), date(2026, 11, 30))
+    fixture.spend(category="Food", on=date(2026, 9, 10), amount="300.00")
+    fixture.spend(category="Food", on=date(2026, 11, 5), amount="300.00")
+
+    viewing_november = fixture.summary(month="2026-11", today=date(2026, 11, 20))
+    viewing_september = fixture.summary(month="2026-09", today=date(2026, 11, 20))
+
+    assert viewing_november["sync_gap"]["status"] == "lost_elsewhere"
+    assert viewing_september["sync_gap"]["status"] == "lost"
+    # The same five days in both: one fact, two views of it.
+    assert viewing_november["sync_gap"]["unrecoverable_days"] == 5
+    assert viewing_september["sync_gap"]["unrecoverable_days"] == 5
+
+
+def test_a_hole_still_worth_acting_on_is_reported_whatever_month_is_open() -> None:
+    """``expiring`` is about today, so paging back does not silence it.
+
+    Unlike a loss, this is an ask with a deadline, and the deadline does not care
+    which month the owner happens to be looking at.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    fixture.sync_daily(date(2026, 9, 1), date(2026, 10, 10))
+    fixture.spend(category="Food", on=date(2026, 9, 10), amount="300.00")
+
+    viewing_september = fixture.summary(month="2026-09", today=date(2026, 11, 5))
+
+    assert viewing_september["sync_gap"]["status"] == "expiring"

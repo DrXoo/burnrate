@@ -149,26 +149,36 @@ def sync_gap(
     )
 
 
-def gap_is_worth_alerting(*, gap: SyncGap, today: date) -> bool:
-    """Whether a gap earns an unprompted message, as the backend's single answer.
+def gap_is_worth_alerting(*, gap: SyncGap, today: date, fetch_window_days: int) -> bool:
+    """Whether a gap earns an **unprompted** message, as the backend's single answer.
 
-    Two cases earn one, and a third deliberately does not.
+    Two cases earn one, and two deliberately do not.
 
-    Something is **already lost**: no action recovers it, but the owner has been
-    reading figures for those months that were wrong, and that is worth knowing even
-    though it is too late to fix.
+    Something is **about to be lost**, within ``SYNC_GAP_GRACE_DAYS``. There is no
+    freshness rule on this side: it is an ask rather than a fact, and it cannot nag
+    for long by construction, because a recoverable day either gets fetched or turns
+    into a lost one. Reachable only while the worker is alive and its syncs are
+    failing, since a worker that is down cannot send anything.
 
-    Something is **about to be lost**, within ``SYNC_GAP_GRACE_DAYS``. This is
-    reachable only while the worker is alive and its syncs are failing -- a bank
-    error, a lapsed consent -- because a worker that is down cannot send anything. A
-    worker that is *down* and later returns always lands in the first case or in no
-    case at all, which is why both exist.
+    Something has **just become** lost. No action recovers it, but the owner has been
+    reading understated figures for those months and that is worth knowing even
+    though it is too late. A day hardens ``fetch_window_days`` after itself, so the
+    most recent loss hardened at ``newest_missing_day + fetch_window_days`` -- for the
+    owner's real outage, the day before the worker came back.
 
-    A gap the next successful run will close earns nothing. That is the over-firing
-    the roadmap names, and a restart is not news.
+    **Old loss earns nothing**, and that is the rule this function gained after the
+    first version shipped without it. The August days are gone and repeating it is
+    nagging about a fact; worse, the worker reports at *startup*, so every redeploy
+    for three months would have re-sent the same August message. The persistent place
+    for that fact is the affected months' own figures, not an alert.
+
+    And a gap the next successful run will close earns nothing at all, which is the
+    over-firing the roadmap says the alerting phase fails by.
     """
-    if gap.unrecoverable_days > 0:
+    grace = timedelta(days=SYNC_GAP_GRACE_DAYS)
+    if gap.recoverable_until is not None and gap.recoverable_until <= today + grace:
         return True
-    if gap.recoverable_until is None:
+    if gap.unrecoverable_days == 0:
         return False
-    return gap.recoverable_until <= today + timedelta(days=SYNC_GAP_GRACE_DAYS)
+    hardened_on = gap.newest_missing_day + timedelta(days=fetch_window_days)
+    return hardened_on >= today - grace

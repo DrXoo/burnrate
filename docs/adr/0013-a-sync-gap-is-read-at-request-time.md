@@ -41,11 +41,30 @@ falls out of that window.
 So the backend publishes a `status`, and the two values are two different things
 to say:
 
-* **`lost`** — days are already gone. *No action is offered*, because none
-  recovers them; offering a reconnection would be a lie. What the owner needs to
-  know is that figures for those months are understated, which is what they read
-  for two months without being told.
-* **`expiring`** — nothing lost yet, and the message is a date and an ask.
+* **`expiring`** — nothing lost yet, and the message is a date and an ask. About
+  *today*, so it is reported whatever month the owner has open.
+* **`lost`** — days are gone **and belong to the month being viewed**, whose
+  figures are therefore understated. *No action is offered*, because none recovers
+  them; offering a reconnection would be a lie.
+* **`lost_elsewhere`** — gone, and belonging to some other month. **Silent.**
+
+That third value was added after the first version shipped with only two, and the
+owner found the defect in a sentence: *"are we going to show this all the time,
+even in November?"* With a 90-day lookback that banner would have sat on top of
+every month's figures until 2 December — a permanent notice about the days they
+lost moving house in August, with nothing to do about it. **That is how a warning
+becomes furniture.**
+
+A loss is a fact about the months that lost the days, not about today, so it is
+reported on them and nowhere else. The facts stay in the payload in all three
+cases, so an interface that wants to surface it somewhere quieter need not
+re-derive it.
+
+**Permanent loss also stops being an alert.** A day hardens
+`fetch_window_days` after itself, so `gap_is_worth_alerting` reports a loss only
+while it hardened within the grace period. Without that rule the worker — which
+reports at *startup* — would re-send the same August message on every redeploy for
+three months.
 
 A gap the next successful run will close earns **nothing**. That is the
 over-firing the roadmap says the alerting phase fails by, and a restart is not
