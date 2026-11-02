@@ -14,7 +14,7 @@ import {
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
 import type { HeroMode } from "../../lib/viewTypes";
-import type { SafeToSpendStatus, SummaryDashboard } from "../../types";
+import type { SafeToSpendStatus, SummaryDashboard, SyncGap } from "../../types";
 
 interface DashboardPageProps {
   summary: SummaryDashboard | null;
@@ -564,7 +564,41 @@ export function DashboardPage({ summary, loading, error, heroMode, includedAccou
           <FailureBanner>These figures may be out of date — {error}</FailureBanner>
         </div>
       ) : null}
+      <SyncGapBanner gap={summary.sync_gap} />
       <DashboardContent summary={summary} heroMode={heroMode} includedAccountCount={includedAccountCount} />
+    </div>
+  );
+}
+
+/** Days the bank was never asked about, above every figure they invalidate.
+ *
+ * Two sentences, picked by the backend's `status` rather than by counting here: when
+ * days are lost there is nothing to do and the point is that past months are
+ * understated, and when they can still be had the point is the date. The owner read
+ * two months of understated totals in 2026 with nothing anywhere saying so, which is
+ * why this sits above the figures rather than among them.
+ */
+function SyncGapBanner({ gap }: { gap: SyncGap | null }) {
+  if (!gap) {
+    return null;
+  }
+  const days = `${gap.missing_days} ${gap.missing_days === 1 ? "day" : "days"}`;
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <FailureBanner>
+        {gap.status === "lost" ? (
+          <>
+            {days} of bank data were never fetched ({gap.oldest_missing_day} to{" "}
+            {gap.newest_missing_day}) and can no longer be recovered. Figures for those months
+            are understated.
+          </>
+        ) : (
+          <>
+            {days} of bank data are missing since {gap.oldest_missing_day}. Reconnect the bank
+            before {gap.recoverable_until} and they will be fetched.
+          </>
+        )}
+      </FailureBanner>
     </div>
   );
 }

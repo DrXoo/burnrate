@@ -172,6 +172,15 @@ How long the owner could sustain a negative cash flow before designated savings
 run out. Only meaningful, and only shown, while cash flow is actually negative.
 _Avoid_: Runway, time left, survival time
 
+**Sync Gap**:
+Days the bank was never asked about, because no successful sync's trailing window
+reached them. Not a failure the owner caused and not one they can always fix: a
+missing day is fetchable for thirty days after it and lost once it falls out of
+that window, so a gap is reported as a deadline rather than a fact -- either days
+already gone, which makes those months' figures understated, or days still worth
+reconnecting for. A gap the next successful sync will close is not reported at all.
+_Avoid_: Sync failure, sync error, missing transactions, downtime
+
 ### Baselines
 
 **Baseline**:

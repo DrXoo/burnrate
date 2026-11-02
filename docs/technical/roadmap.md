@@ -561,11 +561,28 @@ Two consequences worth carrying into Phase 10 and beyond:
   sync-covered — and setting `BASELINE_WINDOW_MONTHS=5`. That this is an environment
   variable rather than a migration is the return on refusing a stored accumulator
   during design.
-* **Nothing alerts the owner to a sync gap.** A lapsed consent writes a `skipped`
-  session per attempt and the product carries on reporting figures for months it
-  never fully fetched. That silence is now load-bearing for Phase 9's value and is a
-  strong candidate for Phase 10's first alert — it is the one case where the product
-  knows something the owner cannot see.
+* ~~**Nothing alerts the owner to a sync gap.**~~ **Closed 2026-11-03.** The product
+  carried on reporting figures for months it never fully fetched — the one case where
+  it knew something the owner could not see.
+
+  > **Correction, 2026-11-03.** This section attributed the hole to a lapsed consent
+  > writing a `skipped` session per attempt. **That is false, and it mattered**,
+  > because it is the wrong thing to build against. There is exactly **one** `skipped`
+  > session in the whole database, dated 2026-07-09, and the active connection was
+  > authorized on 2026-07-16 and expires 2027-01-12. The consent alert *works*: it
+  > fired on 2026-07-16 for the previous connection, three days before it lapsed.
+  >
+  > **There are no `sync_sessions` rows at all between 2026-08-29 and 2026-10-04.**
+  > The 29th cut off at 33 runs of 48 and the 4th resumed at 27. The worker was not
+  > running for 36 days.
+  >
+  > Which is why the alert could not be only where it was first proposed: **a process
+  > that is not running cannot report itself.** The gap is therefore read at request
+  > time in `/summary`, which is the only path that catches a dead worker, and the
+  > worker reports it at **startup** — the first moment it can speak, and what
+  > debounces it without a stored `*_alerted_at`. A timely warning *during* an outage
+  > needs something outside the process entirely, and that is deployment, not a
+  > feature. See ADR-0013.
 
 ### The leak with a deadline (9a)
 
@@ -1187,12 +1204,24 @@ In rough order of value:
    three months must be clean, so a single sync hole anywhere in the window silences
    the comparison entirely. Widening the window is not the fix — window 5 reaches
    July's severance. Item 2 is the fix.
-2. **Close the sync gap, and alert on the next one.** Unchanged in substance and now
-   the most valuable item on the list rather than the first of several. The 36-day hole
-   killed **August and September** — the owner's only two ordinary months — so the
-   baseline has nothing normal to average, and nothing in the product reports a gap.
-   This is both the cheapest Phase 10 alert and the one protecting every figure
-   Phase 9 produces.
+2. ~~**Close the sync gap, and alert on the next one.**~~ **Shipped 2026-11-03.** The
+   36-day hole killed **August and September** — the owner's only two ordinary months.
+   The old August days are unrecoverable and always were; what shipped is the alerting.
+
+   **The cause recorded under 9a was wrong**, and finding that out changed the design.
+   It was not a lapsed consent: there are no `sync_sessions` rows at all across the
+   hole, so the worker simply was not running, and a process that is not running
+   cannot report itself. So the gap is read at **request** time in `/summary` — the
+   only path that catches a dead worker — and the worker reports it at **startup**,
+   which is the first moment it can speak and what debounces it without a stored
+   `*_alerted_at` column.
+
+   The message is a deadline rather than a fact: a missing day is fetchable for
+   thirty days after it, so `lost` and `expiring` are two different things to say and
+   the backend decides which. A gap the next run will close says nothing, which is the
+   over-firing the roadmap warns Phase 10 fails by. ADR-0013 records it, including the
+   one case left open: a **timely** warning during an outage needs a dead-man's switch
+   outside the process, which is deployment and belongs with Phase 13.
 3. ~~**The event rule.**~~ **Shipped 2026-11-02**, with item 1. A one-month Fixed
    Budget window — an **Event Budget** in `GLOSSARY.md` — declares that month's
    spend in its category an event, excluded from every baseline and from nothing

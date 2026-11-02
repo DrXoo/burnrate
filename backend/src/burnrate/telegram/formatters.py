@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from burnrate.domain.sync_coverage import SyncGap
+
 HELP_TEXT = "\n".join(
     [
         "BurnRate bot — read-only spending visibility.",
@@ -126,6 +128,69 @@ def _comparison_lines(payload: dict[str, Any], currency: str | None) -> list[str
     return lines
 
 
+def format_sync_gap_alert(*, gap: SyncGap) -> str:
+    """The unprompted version of the summary's sync line, sent when the worker returns.
+
+    Two messages, and the difference is whether there is anything to do. When days
+    are already lost, **no action is offered**, because none recovers them -- offering
+    a reconnection would be a lie, and the owner's real cost is that they have been
+    reading understated figures for those months. When the days can still be had, this
+    is an ask with a date on it.
+
+    Takes the gap rather than a payload: this one has no request behind it, so there
+    is no payload to read it off.
+    """
+    days = gap.missing_days
+    plural = "day" if days == 1 else "days"
+    span = (
+        str(gap.oldest_missing_day)
+        if gap.oldest_missing_day == gap.newest_missing_day
+        else f"{gap.oldest_missing_day} to {gap.newest_missing_day}"
+    )
+    lines = [
+        "⚠️ Bank data missing",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        f"{days} {plural} were never fetched: {span}.",
+    ]
+    if gap.unrecoverable_days > 0:
+        lines += [
+            "",
+            "They are gone for good -- the provider only serves the last 30 days.",
+            "Every figure reported for those months is understated.",
+        ]
+    else:
+        lines += [
+            "",
+            f"Still recoverable until {gap.recoverable_until}.",
+            "Reconnect the bank before then and they will be fetched.",
+        ]
+    return "\n".join(lines)
+
+
+def _sync_gap_lines(payload: dict[str, Any]) -> list[str]:
+    """Days the bank was never asked about, worded off the backend's own status.
+
+    Two sentences, because they ask for different things. ``lost`` asks for nothing --
+    no action recovers those days -- but the owner has been reading figures for those
+    months that were understated, and that is worth knowing even though it is too
+    late. ``expiring`` asks for a reconnection, and the date is what makes it an ask
+    rather than a complaint.
+
+    The status is read, never derived: the dashboard says the same thing from the same
+    field, which is the amendment ``ADR-0002`` records.
+    """
+    gap = payload.get("sync_gap")
+    if not gap:
+        return []
+    days = gap["missing_days"]
+    plural = "day" if days == 1 else "days"
+    head = f"⚠️ {days} {plural} of bank data missing since {gap['oldest_missing_day']}"
+    if gap["status"] == "lost":
+        return [head, "   ↳ gone for good -- those months are understated", ""]
+    return [head, f"   ↳ recoverable until {gap['recoverable_until']} -- reconnect the bank", ""]
+
+
 def format_summary(payload: dict[str, Any]) -> str:
     currency = payload["current_balance_currency"]
     tense = _TENSE_SUFFIXES.get(payload["safe_to_spend_status"], "")
@@ -133,6 +198,10 @@ def format_summary(payload: dict[str, Any]) -> str:
         f"📊 Summary for {payload['month']}{tense}",
         "━━━━━━━━━━━━━━━━━━",
         "",
+        # Above every figure, because it qualifies all of them: the owner read two
+        # months of understated totals without anything saying the bank had never
+        # been asked about five of their days.
+        *_sync_gap_lines(payload),
         _allowance_line(payload, currency),
         "",
         f"💰 Balance: {_money(payload['current_balance_amount'], currency)}",

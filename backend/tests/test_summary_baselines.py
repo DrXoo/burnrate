@@ -1236,3 +1236,63 @@ def test_one_exceptional_month_does_not_become_the_owners_normal() -> None:
     assert income["comparison_status"] == "in_line"
     # Net cash flow over the same three months: 5200, 700, 700. The mean is 2200.
     assert summary["net_cash_flow_baseline_amount"] == "700.00"
+
+
+def test_the_summary_reports_a_sync_hole_the_product_already_knew_about() -> None:
+    """The one case the product knows something the owner cannot see.
+
+    This is the failure that actually happened: the worker was not running from 29
+    August to 4 October 2026, so 30 August to 3 September was never fetched. A worker
+    that is down cannot report itself, which is why this is read at **request** time
+    -- the owner opening the app is the only path that catches it.
+
+    The status is decided here rather than derived by each interface, following the
+    amendment ADR-0002 records: a state each client derives is a state each client can
+    derive differently.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    fixture.sync_daily(date(2026, 8, 1), date(2026, 8, 29))
+    fixture.sync_daily(date(2026, 10, 4), date(2026, 10, 26))
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary()
+
+    gap = summary["sync_gap"]
+    assert gap is not None
+    assert gap["status"] == "lost"
+    assert gap["oldest_missing_day"] == "2026-08-30"
+    assert gap["missing_days"] == 5
+    assert gap["unrecoverable_days"] == 5
+    assert gap["recoverable_until"] is None
+
+
+def test_the_summary_says_nothing_about_sync_when_every_day_was_asked_about() -> None:
+    """A healthy history earns silence, not a reassurance nobody asked for."""
+    db = make_session()
+    fixture = Fixture(db)
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    assert fixture.summary()["sync_gap"] is None
+
+
+def test_the_summary_reports_a_hole_still_within_reach_with_its_deadline() -> None:
+    """The worker is alive and its syncs are failing, which is the recoverable case.
+
+    Nothing is lost yet, so the message is a date rather than an apology: the owner
+    can reconnect the bank and the days come back. Distinguished from the lost case by
+    a status, so the dashboard and the bot cannot word it differently.
+    """
+    db = make_session()
+    fixture = Fixture(db, synced=False)
+    fixture.sync_daily(date(2026, 9, 1), date(2026, 10, 10))
+    fixture.spend(category="Food", on=date(2026, 10, 5), amount="300.00")
+
+    summary = fixture.summary(month="2026-11", today=date(2026, 11, 5))
+
+    gap = summary["sync_gap"]
+    assert gap is not None
+    assert gap["status"] == "expiring"
+    assert gap["oldest_missing_day"] == "2026-10-11"
+    assert gap["unrecoverable_days"] == 0
+    assert gap["recoverable_until"] == "2026-11-10"

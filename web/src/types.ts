@@ -245,6 +245,21 @@ export interface SummaryDashboard {
   comparable_spend_baseline: FigureBaseline;
   monthly_income_baseline: FigureBaseline;
   net_cash_flow_baseline_amount: string | null;
+  // Null when every day of the recent past was fetched, which is the normal case and
+  // earns silence rather than a reassurance nobody asked for.
+  sync_gap: SyncGap | null;
+}
+
+/** Days the bank was never asked about, with whether they can still be had.
+    `status` is the backend's call, so the dashboard and the bot cannot word the
+    difference between money already lost and a hole worth acting on differently. */
+export interface SyncGap {
+  status: "lost" | "expiring";
+  oldest_missing_day: string;
+  newest_missing_day: string;
+  missing_days: number;
+  unrecoverable_days: number;
+  recoverable_until: string | null;
 }
 
 export interface TransactionsResponse {

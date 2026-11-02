@@ -35,6 +35,7 @@ from burnrate.domain.metrics import MonthTense
 # naive from SQLite, and duplicating it here would be worse than importing it.
 from burnrate.services.connection_expiry import as_utc
 from burnrate.services.enable_banking_service import TRANSACTION_WINDOW
+from burnrate.services.sync_coverage_service import successful_sync_days
 from burnrate.domain.baselines import (
     BaselineComparisonStatus,
     BaselineStatus,
@@ -303,27 +304,14 @@ class BaselineService:
     def _successful_sync_days(self, *, since: date) -> list[date]:
         """The owner's civil days on which a sync actually succeeded.
 
-        Only ``success`` counts. ``skipped`` is the status an expired consent writes,
-        once per attempt, so it papers over the very gap this rule exists to find;
-        ``failed`` learned nothing and ``running`` has not finished learning.
-
-        Bounded below by the oldest candidate month, less a day for the timezone
-        conversion: a run whose window closed before a month opened cannot cover any
-        part of it.
+        Read through ``sync_coverage_service`` rather than queried here, because the
+        gap alert needs the same history and two readings of it is how two readers
+        come to disagree. The rule about which statuses count lives with the query.
         """
-        floor = datetime(since.year, since.month, since.day, tzinfo=UTC) - timedelta(days=1)
-        instants = self.db.scalars(
-            select(SyncSession.started_at).where(
-                func.lower(SyncSession.status) == "success",
-                SyncSession.started_at >= floor,
-            )
-        ).all()
-        return sorted(
-            {
-                civil_date(timezone_name=self._timezone_name, instant=as_utc(instant))
-                for instant in instants
-                if instant is not None
-            }
+        return successful_sync_days(
+            db=self.db,
+            since=since,
+            timezone_name=self._timezone_name,
         )
 
     def _outgoing_and_unclassified(self, month_value: str) -> tuple[Decimal, Decimal]:

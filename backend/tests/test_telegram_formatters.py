@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import pytest
 
+from burnrate.domain.sync_coverage import SyncGap
 from burnrate.telegram.formatters import (
     HELP_TEXT,
     format_budgets,
     format_expiry_alert,
     format_reconnect_alert,
     format_summary,
+    format_sync_gap_alert,
     format_sync_notification,
     format_unknown,
 )
@@ -25,6 +28,7 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "monthly_spending_amount": "120.00",
         "monthly_income_amount": "0.00",
         "inbound_transfer_amount": "0.00",
+        "sync_gap": None,
         "net_cash_flow_amount": "-120.00",
         "unbudgeted_spending_amount": "0.00",
         "monthly_budget_amount": "200.00",
@@ -188,6 +192,61 @@ def test_format_summary_reports_the_net_of_a_month_funded_entirely_by_a_transfer
 
     assert "Net: -120.00 EUR" in text
     assert "2000.00 EUR moved in from an unsynced account" in text
+
+
+def test_format_summary_leads_with_bank_data_that_is_gone_for_good() -> None:
+    """It qualifies every figure below it, so it goes above them.
+
+    The owner read figures for August and September 2026 for two months without
+    knowing the bank had never been asked about five of their days. Saying it after
+    the allowance would be saying it after the thing it invalidates.
+    """
+    text = format_summary(
+        make_summary(
+            sync_gap={
+                "status": "lost",
+                "oldest_missing_day": "2026-08-30",
+                "newest_missing_day": "2026-09-03",
+                "missing_days": 5,
+                "unrecoverable_days": 5,
+                "recoverable_until": None,
+            }
+        )
+    )
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert "5 days of bank data missing since 2026-08-30" in text
+    assert "gone for good" in text
+    # Above the allowance, which is the first figure the summary otherwise leads with.
+    assert lines.index(next(l for l in lines if "bank data missing" in l)) < lines.index(
+        next(l for l in lines if "Safe to spend today" in l)
+    )
+
+
+def test_format_summary_gives_a_recoverable_hole_its_deadline_instead() -> None:
+    """Nothing lost yet, so the message is a date and an action, not an apology."""
+    text = format_summary(
+        make_summary(
+            sync_gap={
+                "status": "expiring",
+                "oldest_missing_day": "2026-10-11",
+                "newest_missing_day": "2026-11-04",
+                "missing_days": 25,
+                "unrecoverable_days": 0,
+                "recoverable_until": "2026-11-10",
+            }
+        )
+    )
+
+    assert "25 days of bank data missing since 2026-10-11" in text
+    assert "recoverable until 2026-11-10" in text
+    assert "gone for good" not in text
+
+
+def test_format_summary_says_nothing_about_sync_when_there_is_no_hole() -> None:
+    text = format_summary(make_summary())
+
+    assert "bank data missing" not in text
 
 
 def test_format_summary_hides_budget_lines_when_no_budget() -> None:
@@ -617,3 +676,47 @@ def test_format_summary_marks_an_unusually_high_month() -> None:
     )
 
     assert "unusually high · 107% above usual" in text
+
+
+def test_format_sync_gap_alert_names_what_is_gone_and_what_it_cost() -> None:
+    """The unprompted version of the dashboard's line, and it has to carry the cost.
+
+    This is the message nobody ever got: the worker was down from 29 August to 4
+    October 2026 and five days were never fetched, so every figure BurnRate reported
+    for those two months was understated and nothing said so.
+    """
+    text = format_sync_gap_alert(
+        gap=SyncGap(
+            oldest_missing_day=date(2026, 8, 30),
+            newest_missing_day=date(2026, 9, 3),
+            missing_days=5,
+            unrecoverable_days=5,
+            recoverable_days=0,
+            recoverable_until=None,
+        )
+    )
+
+    assert "2026-08-30" in text
+    assert "2026-09-03" in text
+    assert "5 days" in text
+    assert "gone for good" in text
+    # No action is offered, because none recovers them. Offering one would be a lie.
+    assert "reconnect" not in text.lower()
+
+
+def test_format_sync_gap_alert_asks_for_the_fix_while_there_is_still_time() -> None:
+    """Nothing lost yet, so this one is an ask with a deadline on it."""
+    text = format_sync_gap_alert(
+        gap=SyncGap(
+            oldest_missing_day=date(2026, 10, 11),
+            newest_missing_day=date(2026, 11, 4),
+            missing_days=25,
+            unrecoverable_days=0,
+            recoverable_days=25,
+            recoverable_until=date(2026, 11, 10),
+        )
+    )
+
+    assert "2026-11-10" in text
+    assert "gone for good" not in text
+    assert "reconnect" in text.lower()

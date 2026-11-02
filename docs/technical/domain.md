@@ -269,6 +269,16 @@ The current pace of spending, typically represented as daily average spending an
 
 ---
 
+### Sync Gap
+
+Days the bank was never asked about: no successful sync's trailing window reached them. The sweep that decides it is the same one a Qualifying Month's sync-coverage test uses, asked a day at a time instead of a month at a time, because this needs to know *which* days and for how much longer they can still be had.
+
+A missing day is not lost. The provider serves a trailing 30-day window, so a run today still reaches a day missed yesterday and the next pass fetches it; a day is lost exactly when it falls out of that window. So the reported state is a **deadline, not a fact**: `lost` means days are already gone and those months' figures are understated, with no action offered because none recovers them, and `expiring` means a reconnection still works and names the date. A gap the next successful run will close is not reported, which is the over-firing the alerting phase fails by.
+
+It is computed on **every summary request**, because the failure it exists for is the sync worker not running and a process that is not running cannot report itself. The worker also reports it at startup, which is the first moment a returning worker can speak. A timely warning *during* an outage needs something outside the process and is deliberately not built. See `docs/adr/0013-a-sync-gap-is-read-at-request-time.md`.
+
+---
+
 ### Event Budget
 
 A Fixed Budget whose window covers exactly one month -- `active_from` on the 1st, `active_to` on that month's last day -- which is how the owner says that month's spend in its category was an event and not a habit. Its spend counts in the actuals and steps the pace as any Fixed Budget does, and it is **excluded from every baseline**, so a divorce or a boiler cannot become what a later month reports as normal.

@@ -17,6 +17,7 @@ from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.services.baseline_service import BaselineService, FigureBaseline
+from burnrate.services.sync_coverage_service import SyncCoverageService
 from burnrate.domain.metrics import (
     FixedCommitment,
     MetricStatus,
@@ -86,6 +87,14 @@ class SummaryService:
         self._clock = clock or (lambda: datetime.now(UTC))
         self._baseline_window_months = baseline_window_months
         self._baselines = BaselineService(db=db, timezone_name=timezone_name)
+        # Read at request time on purpose: the failure this catches is the worker not
+        # running, and a process that is not running cannot report itself. The owner
+        # opening the app is the only path that reaches it.
+        self._sync_coverage = SyncCoverageService(
+            db=db,
+            timezone_name=timezone_name,
+            clock=self._clock,
+        )
 
     def get_summary(
         self,
@@ -326,6 +335,7 @@ class SummaryService:
             "projected_month_end_spend_amount": self._format_decimal(projected_month_end_spend),
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "budget_usage": budget_usage,
+            "sync_gap": self._serialize_sync_gap(today=reference_day),
             "baseline_status": baselines.status,
             "comparable_spend_amount": self._format_decimal(baselines.comparable_spend),
             # Defined as the residual, so the two halves reconcile against the
@@ -459,6 +469,30 @@ class SummaryService:
         ) or Decimal("0.00")
         # Income transactions are credits (positive amounts), so no sign flip.
         return Decimal(total_amount).quantize(Decimal("0.01"))
+
+    def _serialize_sync_gap(self, *, today: date) -> dict[str, Any] | None:
+        """Days the bank was never asked about, or ``None`` when there are none.
+
+        ``status`` is decided here rather than left for each interface to derive from
+        the counts, which is the amendment ``ADR-0002`` records and for the same
+        reason: ``lost`` and ``expiring`` are two different things to say to the owner,
+        and two clients deriving the distinction are two clients that can word it
+        differently. ``lost`` wins when both are present, because the sentence that
+        matters is the one about money already gone.
+        """
+        gap = self._sync_coverage.current_gap(today=today)
+        if gap is None:
+            return None
+        return {
+            "status": "lost" if gap.unrecoverable_days > 0 else "expiring",
+            "oldest_missing_day": gap.oldest_missing_day.isoformat(),
+            "newest_missing_day": gap.newest_missing_day.isoformat(),
+            "missing_days": gap.missing_days,
+            "unrecoverable_days": gap.unrecoverable_days,
+            "recoverable_until": (
+                gap.recoverable_until.isoformat() if gap.recoverable_until else None
+            ),
+        }
 
     def _get_monthly_inbound_transfers(self, *, month_start: date, month_end: date) -> Decimal:
         """What arrived this month from an account BurnRate cannot see.

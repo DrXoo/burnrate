@@ -15,6 +15,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
 
+from burnrate.domain.sync_coverage import uncovered_days
+
 BaselineStatus = Literal["ok", "insufficient_history", "month_not_started"]
 """Whether a comparison is offered, and if not, why not.
 
@@ -228,18 +230,20 @@ def month_sync_covered(
     case this rule exists to catch: an expired consent writes a session row per
     attempt, so counting rows rather than successes would see an unbroken chain of
     sessions running straight through the gap it is meant to detect.
+
+    The sweep itself lives in ``burnrate.domain.sync_coverage``, which answers it a
+    day at a time because the gap alert needs to know *which* days and for how much
+    longer they can still be fetched. This is that answer asked whether it is empty.
+    Keeping a second copy of the sweep here is the defect both ``budget_windows`` and
+    ``counted_spend`` exist to prevent, and one this product has already paid for
+    once.
     """
-    needed = month_start
-    for sync_day in sorted(successful_sync_days):
-        window_start = sync_day - timedelta(days=fetch_window_days)
-        if window_start > needed:
-            # Sorted ascending, so every window from here on starts later still:
-            # nothing can reach back to ``needed`` and the gap is real.
-            return False
-        needed = max(needed, sync_day + timedelta(days=1))
-        if needed >= month_end:
-            return True
-    return False
+    return not uncovered_days(
+        since=month_start,
+        until=month_end,
+        successful_sync_days=successful_sync_days,
+        fetch_window_days=fetch_window_days,
+    )
 
 
 @dataclass(frozen=True)

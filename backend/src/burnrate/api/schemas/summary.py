@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
+from typing import Literal
+
 from pydantic import BaseModel
 
 from burnrate.domain.baselines import BaselineComparisonStatus, BaselineStatus
@@ -60,6 +63,22 @@ class CategoryBaselineResponse(BaseModel):
     comparison_status: BaselineComparisonStatus
 
 
+class SyncGapResponse(BaseModel):
+    """Days the bank was never asked about, and whether they can still be had.
+
+    ``status`` is the backend's single answer, so no interface derives the
+    distinction between days already lost and a hole still worth acting on -- the
+    amendment ``ADR-0002`` records, for the same reason.
+    """
+
+    status: Literal["lost", "expiring"]
+    oldest_missing_day: date
+    newest_missing_day: date
+    missing_days: int
+    unrecoverable_days: int
+    recoverable_until: date | None = None
+
+
 class SummaryResponse(BaseModel):
     month: str
     # The month the owner is in, on the owner's own clock. A client compares the month
@@ -96,6 +115,9 @@ class SummaryResponse(BaseModel):
     # Whether a comparison is offered and, when it is not, why not -- too little
     # trustworthy history, or a month with no outcome yet. Named here so no client
     # infers the reason from an empty list or from the allowance's own tense.
+    # Absent when every day of the recent past was fetched, which is the normal case
+    # and earns silence rather than a reassurance nobody asked for.
+    sync_gap: SyncGapResponse | None = None
     baseline_status: BaselineStatus
     # How many Qualifying Months the means rest on, so the owner can see how much
     # to trust them. Uniform across categories, which is why it is not repeated on

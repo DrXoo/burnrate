@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -18,10 +18,13 @@ from burnrate.services.connection_expiry import (
     expiry_status,
 )
 from burnrate.services.ledger_service import LedgerService
+from burnrate.domain.sync_coverage import gap_is_worth_alerting
+from burnrate.services.sync_coverage_service import SyncCoverageService
 from burnrate.services.sync_service import SyncRunResult
 from burnrate.telegram.formatters import (
     format_expiry_alert,
     format_reconnect_alert,
+    format_sync_gap_alert,
     format_sync_notification,
 )
 
@@ -189,6 +192,48 @@ def send_reconnect_alerts(
         for connection in due:
             connection.reauth_alerted_at = now
     return sent
+
+
+def send_sync_gap_alert(
+    *,
+    session: Session,
+    client: TelegramClient,
+    settings: Settings,
+    today: date | None = None,
+) -> int:
+    """Tell the owner unprompted that days of bank data were never fetched.
+
+    Sent from the worker's **startup** rather than from each sync pass, and that is
+    the design rather than a shortcut. The failure this exists for is the worker not
+    running -- the owner's was down for 36 days in 2026 and five days were lost with
+    nothing anywhere saying so -- and a process that is not running cannot report
+    itself. Coming back up is the first moment it can speak, so it speaks then.
+
+    Starting up is also what debounces it. A sync pass runs every half hour, so a
+    permanent gap reported per pass would be 48 messages a day for the ninety days of
+    the lookback; starting up happens rarely and needs no stored bookkeeping to go
+    with it, which is why there is no ``*_alerted_at`` column here.
+
+    The case this does **not** reach is a worker that stays up while its syncs fail.
+    That one already has ``send_reconnect_alerts`` and ``send_expiry_alerts`` for its
+    causes, and the summary's own ``sync_gap`` for its consequence.
+
+    Never raises, like every other notifier here. Returns how many chats were told.
+    """
+    if not settings.telegram_notify_on_sync:
+        return 0
+
+    chat_ids = settings.telegram_allowed_chat_id_set
+    if not settings.telegram_bot_token or not chat_ids:
+        return 0
+
+    coverage = SyncCoverageService(db=session, timezone_name=settings.app_timezone)
+    gap = coverage.current_gap(today=today)
+    if gap is None or not gap_is_worth_alerting(gap=gap, today=today or coverage.owner_today()):
+        return 0
+
+    text = format_sync_gap_alert(gap=gap)
+    return _broadcast(client=client, chat_ids=chat_ids, text=text, kind="sync gap alert")
 
 
 def _broadcast(*, client: TelegramClient, chat_ids: set[int], text: str, kind: str) -> int:

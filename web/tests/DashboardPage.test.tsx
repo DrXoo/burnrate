@@ -152,6 +152,50 @@ describe("the dashboard's comparison against what is normal", () => {
     expect(html).not.toContain("moved in");
   });
 
+  it("warns above the figures that bank data was never fetched and is gone", () => {
+    // The owner's real 2026 outage: five days never asked about, and two months of
+    // understated totals read without anything saying so.
+    const html = render({
+      ...OCTOBER,
+      sync_gap: {
+        status: "lost",
+        oldest_missing_day: "2026-08-30",
+        newest_missing_day: "2026-09-03",
+        missing_days: 5,
+        unrecoverable_days: 5,
+        recoverable_until: null,
+      },
+    });
+
+    expect(html).toContain("5 days of bank data were never fetched");
+    expect(html).toContain("can no longer be recovered");
+    // Above the figures it invalidates, not among them.
+    expect(html.indexOf("never fetched")).toBeLessThan(html.indexOf("Saved this month"));
+  });
+
+  it("asks for a reconnection while the missing days can still be had", () => {
+    const html = render({
+      ...OCTOBER,
+      sync_gap: {
+        status: "expiring",
+        oldest_missing_day: "2026-10-11",
+        newest_missing_day: "2026-11-04",
+        missing_days: 25,
+        unrecoverable_days: 0,
+        recoverable_until: "2026-11-10",
+      },
+    });
+
+    expect(html).toContain("Reconnect the bank before 2026-11-10");
+    expect(html).not.toContain("can no longer be recovered");
+  });
+
+  it("says nothing about sync when every day was fetched", () => {
+    const html = render({ ...OCTOBER, sync_gap: null });
+
+    expect(html).not.toContain("bank data");
+  });
+
   it("does not disclose an uncomparable total when there is none", () => {
     const html = render({ ...OCTOBER, uncomparable_spend_amount: "0.00" });
 
