@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
+import { bankRateLimitMessage } from "../lib/format";
 import { getAspsps, startBankAuthorization } from "../lib/api";
 import type { Aspsp } from "../types";
 
@@ -44,6 +45,17 @@ const secondaryButton: CSSProperties = {
   cursor: "pointer",
 };
 
+/** What to put on screen for a refused bank call.
+
+    A spent access budget is reported in the backend's own words. These are the two
+    routes `_bank_error`'s carve-out still serves now that the manual sync is gone --
+    listing a country's banks, and starting an authorization -- and both are attended,
+    so the owner is reading this the moment it happens. "Request failed (503)" would
+    send them looking for a fault that is not there. */
+function errorText(error: unknown): string {
+  return bankRateLimitMessage(error) ?? (error instanceof Error ? error.message : String(error));
+}
+
 export function ConnectBankModal({ apiBase, onClose, prefill }: ConnectBankModalProps) {
   const [country, setCountry] = useState(prefill?.country ?? "ES");
   const [aspsps, setAspsps] = useState<Aspsp[]>([]);
@@ -78,7 +90,7 @@ export function ConnectBankModal({ apiBase, onClose, prefill }: ConnectBankModal
         }
       } catch (nextError) {
         if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : String(nextError));
+          setError(errorText(nextError));
         }
       } finally {
         if (!cancelled) {
@@ -107,7 +119,7 @@ export function ConnectBankModal({ apiBase, onClose, prefill }: ConnectBankModal
         setError(`No banks available for ${normalizedCountry}.`);
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(errorText(nextError));
     } finally {
       setLoadingBanks(false);
     }
@@ -127,7 +139,7 @@ export function ConnectBankModal({ apiBase, onClose, prefill }: ConnectBankModal
       });
       window.location.href = result.url;
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(errorText(nextError));
       setRedirecting(false);
     }
   }

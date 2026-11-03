@@ -33,15 +33,6 @@ class AuthorizationCallbackResponse(BaseModel):
     message: str | None = None
 
 
-class ManualSyncResponse(BaseModel):
-    connection_id: str
-    sync_session_id: str
-    session_status: str
-    accounts_synced: int
-    transactions_imported: int
-    message: str | None = None
-
-
 class AspspListResponse(BaseModel):
     aspsps: list[dict[str, Any]]
 

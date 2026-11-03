@@ -4,7 +4,6 @@ import type {
   Category,
   Connection,
   FiltersState,
-  ManualSyncResult,
   PagingState,
   Rule,
   SummaryDashboard,
@@ -34,14 +33,11 @@ const heldMonths = new Set<string>();
 const resumers = new Map<string, (() => void)[]>();
 const failures = new Map<string, string>();
 const connectionStore = new Map<string, Connection>();
-const syncFailures = new Map<string, { message: string; detail?: unknown }>();
 const syncRequests: string[] = [];
-let syncImports = 2;
 let currentMonth = "2026-10";
+let nextSyncAt: string | null = null;
 
-/** What a sync that reaches the bank sets `last_synced_at` to. Only this fake's own
-    store learns it, so a UI that claims a sync landed without refetching cannot
-    print it. */
+/** The `last_synced_at` the fixture connection carries. */
 export const SYNCED_AT = "2026-10-30T10:30:09Z";
 
 function emptyLedger(): MonthLedger {
@@ -63,10 +59,9 @@ export const fakeApi = {
     resumers.clear();
     failures.clear();
     connectionStore.clear();
-    syncFailures.clear();
     syncRequests.length = 0;
-    syncImports = 2;
     currentMonth = "2026-10";
+    nextSyncAt = null;
     unscopedLedgerReads = 0;
   },
   /** The month the backend considers the owner to be in. */
@@ -99,17 +94,12 @@ export const fakeApi = {
   setConnection(row: Connection): void {
     connectionStore.set(row.connection_id, row);
   },
-  /** How many transactions the next sync reports importing. */
-  setSyncImports(count: number): void {
-    syncImports = count;
+  /** When the backend says the next unattended pass is due, offset included. Null is
+      a backend with no schedule configured, which must not be guessed at. */
+  setNextSync(instant: string | null): void {
+    nextSyncAt = instant;
   },
-  /** Make the bank refuse the next sync of this connection. The stored row is left
-      exactly as it was, which is what a failed sync does. */
-  failSync(connectionId: string, message: string, detail?: unknown): void {
-    syncFailures.set(connectionId, { message, detail });
-  },
-  /** The connection ids sync was asked for, in order. A UI that syncs something other
-      than the row whose button was pressed is otherwise unobservable. */
+  /** Every connection id something in the client asked to sync. Must stay empty. */
   syncRequests(): string[] {
     return [...syncRequests];
   },
@@ -188,6 +178,7 @@ export function summaryFor(month: string): SummaryDashboard {
     monthly_income_amount: "0.00",
     inbound_transfer_amount: "0.00",
     sync_gap: null,
+    next_sync_at: nextSyncAt,
     net_cash_flow_amount: "0.00",
     savings_rate_percent: 0,
     savings_status: "on_track",
@@ -352,40 +343,15 @@ export async function categorizeTransaction(): Promise<void> {
   // Accepted immediately; the refresh it triggers is what these tests stage.
 }
 
-/** Answers the connection it was asked for rather than a fixed payload: an id the
-    store does not hold is refused the way the backend refuses it, and a sync that
-    succeeds advances `last_synced_at` in the store only. */
+/** The client has no sync entry point any more, and this strict double is what keeps
+    the claim testable: it records the attempt and refuses it, so a re-added call shows
+    up in `syncRequests()` instead of quietly working against a tolerant fake. */
 export async function syncEnableBankingConnection(
   _apiBase: string,
   connectionId: string,
-): Promise<ManualSyncResult> {
+): Promise<never> {
   syncRequests.push(connectionId);
-  const stored = connectionStore.get(connectionId);
-  if (!stored) {
-    throw new Error(`Request failed (404): Enable Banking connection not found for id ${connectionId}`);
-  }
-  const failure = syncFailures.get(connectionId);
-  if (failure) {
-    // Carries `detail` the way ApiError does, because the backend sends a structured
-    // body for states a client must recognise rather than string-match. A double that
-    // could only throw a bare message could not tell the two paths apart.
-    throw Object.assign(new Error(failure.message), { detail: failure.detail });
-  }
-  connectionStore.set(connectionId, {
-    ...stored,
-    last_synced_at: SYNCED_AT,
-    latest_sync_status: "success",
-    latest_sync_accounts_count: 1,
-    latest_sync_transactions_count: syncImports,
-  });
-  return {
-    connection_id: connectionId,
-    sync_session_id: "sync-1",
-    session_status: "AUTHORIZED",
-    accounts_synced: 1,
-    transactions_imported: syncImports,
-    message: null,
-  };
+  throw new Error("Nothing in the client may ask for a sync: that is the worker's job (ADR-0015).");
 }
 
 function notExercised(name: string) {

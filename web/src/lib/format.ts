@@ -243,6 +243,25 @@ export function bankRateLimitMessage(error: unknown): string | null {
   return typeof detail.message === "string" ? detail.message : null;
 }
 
+/** The hour the next unattended sync is due, as `21:00`, or null when there is none.
+
+    Read straight out of the backend's offset-bearing instant rather than through
+    `Date`, on purpose: converting would re-render it in whatever zone the browser
+    happens to sit in, and the hour that matters is the one configured in `SYNC_CRON`
+    on the owner's own clock. A browser an hour away would otherwise be shown a time
+    nobody ever set.
+
+    Callers must show this only beside a healthy connection. It says what the schedule
+    intends, and a worker that is not running cannot contradict it -- printing a
+    confident hour during an outage is worse than printing nothing. See ADR-0013. */
+export function nextSyncLabel(instant: string | null | undefined): string | null {
+  if (!instant) {
+    return null;
+  }
+  const hourAndMinute = /T(\d{2}:\d{2})/.exec(instant);
+  return hourAndMinute ? hourAndMinute[1] : null;
+}
+
 export function transactionTitle(transaction: Transaction): string {
   return transaction.description || transaction.merchant_name || transaction.counterparty_name || "No description";
 }

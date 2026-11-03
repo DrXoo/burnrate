@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from apscheduler.schedulers.blocking import BlockingScheduler
-from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
 from burnrate.config import Settings, get_settings
@@ -13,6 +12,7 @@ from burnrate.integrations.telegram.client import TelegramClient
 from burnrate.logging_config import configure_logging
 from burnrate.services.enable_banking_service import EnableBankingService
 from burnrate.services.sync_service import SyncRunResult, SyncService
+from burnrate.sync_schedule import build_sync_trigger
 from burnrate.telegram.notifier import (
     send_expiry_alerts,
     send_reconnect_alerts,
@@ -143,11 +143,15 @@ def build_scheduler(settings: Settings) -> BlockingScheduler:
 
     Raises ``ValueError`` if ``SYNC_CRON`` is not a valid cron expression so a
     misconfigured worker fails fast at startup instead of silently never syncing.
+
+    The trigger is built by ``sync_schedule.build_sync_trigger``, which is also what
+    ``/summary`` reads to tell the owner when the next pass is due. One construction,
+    so what the screen promises and what this fires on cannot drift apart.
     """
     scheduler = BlockingScheduler(timezone=settings.app_timezone)
     scheduler.add_job(
         run_scheduled_sync,
-        trigger=CronTrigger.from_crontab(settings.sync_cron, timezone=settings.app_timezone),
+        trigger=build_sync_trigger(sync_cron=settings.sync_cron, timezone_name=settings.app_timezone),
         id=SYNC_JOB_ID,
         max_instances=1,
         coalesce=True,
@@ -159,8 +163,8 @@ def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     logger.info("Starting sync worker with schedule %s (%s)", settings.sync_cron, settings.app_timezone)
-    # Before the first cron tick, which is up to half an hour away: a worker that has
-    # just returned from an outage has something to say now, not later.
+    # Before the first cron tick, which since ADR-0015 can be most of a day away: a
+    # worker that has just returned from an outage has something to say now, not later.
     report_sync_gap_at_startup(settings)
     scheduler = build_scheduler(settings)
     try:

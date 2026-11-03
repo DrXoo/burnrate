@@ -10,7 +10,6 @@ from burnrate.api.dependencies import enforce_rate_limit, get_enable_banking_ser
 from burnrate.api.schemas.enable_banking import (
     AspspListResponse,
     EnableBankingConnectionListResponse,
-    ManualSyncResponse,
     StartAuthorizationRequest,
     StartAuthorizationResponse,
 )
@@ -29,7 +28,7 @@ BANK_RATE_LIMIT_CODE = "bank_rate_limit"
 """What a client keys on to recognise a spent access budget.
 
 The **status** cannot carry this. A `429` is what BurnRate's own
-`enable_banking_sync` limiter already answers when the owner clicks too fast, and a
+`enable_banking_auth_start` limiter already answers when the owner clicks too fast, and a
 `503` is what the backend answers when no password is configured -- so either one
 reused here would be ambiguous with something that has a different remedy. The status
 is chosen for honest semantics and this code is the discriminator.
@@ -43,6 +42,10 @@ def _bank_error(exc: EnableBankingAPIError) -> HTTPException:
     can carry provider detail we should not echo back, and reusing the upstream
     status would let a bank 401 (lapsed consent) masquerade as "your session
     expired" and log the user out of BurnRate. The detail is logged instead.
+
+    The routes this serves are both attended -- listing banks and starting an
+    authorization -- so whatever it says, the owner is reading it immediately. That is
+    why the wording is worth this much care.
 
     A spent access budget is carved out of that, because it is the one case where the
     generic message is actively misleading. "The bank service returned an error" and
@@ -174,24 +177,3 @@ def enable_banking_callback(
             "imported": int(payload.get("transactions_imported", 0) or 0),
         },
     )
-
-
-@router.post(
-    "/connections/{connection_id}/sync",
-    response_model=ManualSyncResponse,
-    dependencies=[Depends(enforce_rate_limit("enable_banking_sync"))],
-)
-def sync_connection(
-    connection_id: str,
-    service: EnableBankingService = Depends(get_enable_banking_service),
-) -> ManualSyncResponse:
-    try:
-        payload = service.sync_connection(connection_id=connection_id)
-        return ManualSyncResponse.model_validate(payload)
-    except ValueError as exc:
-        message = str(exc)
-        if "not found" in message.lower():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message) from exc
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
-    except EnableBankingAPIError as exc:
-        raise _bank_error(exc) from exc

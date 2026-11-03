@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 
 import { TONE_COLOR, TONE_DIM, eur, expiryBadge, needsReconnect, timeAgo } from "../../lib/format";
 import type { Account, Connection } from "../../types";
@@ -6,7 +6,6 @@ import type { Account, Connection } from "../../types";
 interface SettingsPageProps {
   connections: Connection[];
   accounts: Account[];
-  onSyncConnection: (connectionId: string) => Promise<unknown>;
   onConnect: () => void;
   onReconnect: (connection: Connection) => void;
   onUpdateAccount: (accountId: string, draft: Pick<Account, "included_in_calculations">) => Promise<void>;
@@ -36,27 +35,15 @@ function chip(active: boolean, tone: "accent" | "good"): CSSProperties {
 
 function ConnectionRow({
   connection,
-  onSync,
   onReconnect,
 }: {
   connection: Connection;
-  onSync: (id: string) => Promise<unknown>;
   onReconnect: (connection: Connection) => void;
 }) {
-  const [syncing, setSyncing] = useState(false);
   const healthy = connection.active && !connection.latest_sync_error_summary;
   const statusColor = healthy ? "var(--good)" : "var(--over)";
   const badge = expiryBadge(connection);
   const showReconnect = needsReconnect(connection);
-
-  async function handleSync() {
-    setSyncing(true);
-    try {
-      await onSync(connection.connection_id);
-    } finally {
-      setSyncing(false);
-    }
-  }
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 14, padding: 14, background: "var(--bg-3)", border: "1px solid var(--line)", borderRadius: 12 }}>
@@ -96,19 +83,11 @@ function ConnectionRow({
           Reconnect
         </button>
       ) : null}
-      <button
-        type="button"
-        onClick={handleSync}
-        disabled={syncing}
-        style={{ border: "1px solid var(--line-2)", background: "var(--bg-2)", color: "var(--text)", borderRadius: 8, padding: "6px 12px", font: "500 12px 'Hanken Grotesque', sans-serif", cursor: syncing ? "default" : "pointer", opacity: syncing ? 0.6 : 1 }}
-      >
-        {syncing ? "Syncing…" : "Sync"}
-      </button>
     </div>
   );
 }
 
-export function SettingsPage({ connections, accounts, onSyncConnection, onConnect, onReconnect, onUpdateAccount }: SettingsPageProps) {
+export function SettingsPage({ connections, accounts, onConnect, onReconnect, onUpdateAccount }: SettingsPageProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 760 }}>
       <div style={cardStyle}>
@@ -120,7 +99,7 @@ export function SettingsPage({ connections, accounts, onSyncConnection, onConnec
             </div>
           ) : (
             connections.map((connection) => (
-              <ConnectionRow key={connection.connection_id} connection={connection} onSync={onSyncConnection} onReconnect={onReconnect} />
+              <ConnectionRow key={connection.connection_id} connection={connection} onReconnect={onReconnect} />
             ))
           )}
         </div>

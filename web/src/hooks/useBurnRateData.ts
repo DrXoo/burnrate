@@ -28,7 +28,6 @@ import {
   logout as logoutRequest,
   restoreTransaction,
   setUnauthorizedHandler,
-  syncEnableBankingConnection,
   toggleRule,
   uncategorizeTransaction,
   updateAccountControls,
@@ -596,23 +595,6 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     await refreshLedgerViews();
   }
 
-  async function syncConnectionAction(connectionId: string) {
-    if (!apiBase) {
-      throw new Error("API base not loaded");
-    }
-
-    const result = await syncEnableBankingConnection(apiBase, connectionId);
-    const nextConnections = await getConnections(apiBase);
-    const nextAccounts = await getAccounts(apiBase);
-
-    startTransition(() => {
-      setConnections(nextConnections);
-      setAccounts(nextAccounts);
-    });
-    await refreshLedgerViews();
-    return result;
-  }
-
   async function categorizeTransactionAction(transactionId: string, categoryId: string) {
     if (!apiBase) {
       throw new Error("API base not loaded");
@@ -807,7 +789,6 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     archiveCategory: archiveCategoryAction,
     unarchiveCategory: unarchiveCategoryAction,
     updateAccount: updateAccountAction,
-    syncConnection: syncConnectionAction,
     categorizeTransaction: categorizeTransactionAction,
     uncategorizeTransaction: uncategorizeTransactionAction,
     excludeTransaction: excludeTransactionAction,

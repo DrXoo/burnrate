@@ -18,6 +18,7 @@ from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.services.baseline_service import BaselineService, FigureBaseline
 from burnrate.services.sync_coverage_service import SyncCoverageService
+from burnrate.sync_schedule import next_sync_at
 from burnrate.domain.metrics import (
     FixedCommitment,
     MetricStatus,
@@ -81,11 +82,17 @@ class SummaryService:
         timezone_name: str = "UTC",
         clock: Callable[[], datetime] | None = None,
         baseline_window_months: int = 3,
+        sync_cron: str | None = None,
     ) -> None:
         self.db = db
         self._timezone_name = timezone_name
         self._clock = clock or (lambda: datetime.now(UTC))
         self._baseline_window_months = baseline_window_months
+        # The schedule the sync worker fires on, so the owner can be told when data
+        # refreshes next. Optional because a caller that does not report it -- the
+        # Telegram router builds its own summary for a message with no schedule in
+        # it -- should not have to invent one.
+        self._sync_cron = sync_cron
         self._baselines = BaselineService(db=db, timezone_name=timezone_name)
         # Read at request time on purpose: the failure this catches is the worker not
         # running, and a process that is not running cannot report itself. The owner
@@ -340,6 +347,7 @@ class SummaryService:
                 month_start=month_start,
                 month_end=month_end,
             ),
+            "next_sync_at": self._serialize_next_sync_at(),
             "baseline_status": baselines.status,
             "comparable_spend_amount": self._format_decimal(baselines.comparable_spend),
             # Defined as the residual, so the two halves reconcile against the
@@ -473,6 +481,28 @@ class SummaryService:
         ) or Decimal("0.00")
         # Income transactions are credits (positive amounts), so no sign flip.
         return Decimal(total_amount).quantize(Decimal("0.01"))
+
+    def _serialize_next_sync_at(self) -> str | None:
+        """When the next unattended sync is due, as an instant carrying the offset.
+
+        Answered here rather than left to a client for ADR-0002's reason: the schedule
+        is ``SYNC_CRON`` resolved through ``APP_TIMEZONE``, and a browser knows
+        neither. The offset travels with the value so an interface can show the hour
+        the owner configured without converting into whatever zone it happens to run
+        in.
+
+        It says what the schedule *intends*, not what will happen. A worker that is
+        not running cannot contradict it, so an interface must not print it beside a
+        connection that is unhealthy -- see ``ADR-0013``.
+        """
+        if self._sync_cron is None:
+            return None
+        upcoming = next_sync_at(
+            sync_cron=self._sync_cron,
+            timezone_name=self._timezone_name,
+            after=self._clock(),
+        )
+        return upcoming.isoformat() if upcoming else None
 
     def _serialize_sync_gap(
         self, *, today: date, month_start: date, month_end: date

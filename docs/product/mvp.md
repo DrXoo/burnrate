@@ -146,8 +146,6 @@ Commands:
 
 /runway
 
-/sync
-
 ---
 
 ## Example User Flow

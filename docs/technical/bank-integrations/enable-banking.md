@@ -207,6 +207,10 @@ For the first version, BurnRate should use a simple sync strategy:
 3. Scheduled refresh through the sync worker
 4. Idempotent upsert of accounts, balances, and transactions
 
+**The scheduled refresh is the only refresh.** No endpoint, button or chat command can
+trigger a sync; the initial fetch on connect is the one import a person still causes.
+See `docs/adr/0016-syncing-is-the-workers-job-alone.md`.
+
 BurnRate should assume that transaction imports may be paginated or refreshed incrementally over time, and it should preserve external identifiers needed for safe re-sync behavior.
 
 ### How Often The Scheduled Refresh Runs
@@ -234,7 +238,9 @@ the measurements, what remains unknown, and what would justify a different numbe
 
 An access the owner asked for, while present, is outside the budget. BurnRate does not
 yet send the PSU-presence headers that mark a request as attended, so every call it
-makes is unattended whoever triggered it — including a manual sync from the Web UI.
+makes is unattended whoever triggered it. That is one of the two reasons the manual sync
+was removed rather than rationed (ADR-0016): there was no attended path for it to take,
+so it spent the scheduled passes' budget.
 
 [rts]: https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32018R0389
 [qa]: https://www.eba.europa.eu/single-rule-book-qa/qna/view/publicId/2019_4631
@@ -307,7 +313,9 @@ cadence question being settled.
 
 ### What A Spent Allowance Looks Like To A Client
 
-A sync refused for rate limiting answers **503** with a structured body:
+Since ADR-0016 the routes this reaches are the attended ones — listing a country's
+banks, and starting an authorization — so the owner is reading the message the moment it
+appears. A call refused for rate limiting answers **503** with a structured body:
 
 ```json
 {"detail": {"code": "bank_rate_limit", "message": "This bank's daily allowance ..."}}
@@ -319,9 +327,9 @@ echoed, and a bank `401` reused as BurnRate's own would read as the owner's sess
 expiring and log them out.
 
 **The discriminator is `code`, not the status, and that is forced rather than
-preferred.** This endpoint already answers `429` from BurnRate's own
-`enable_banking_sync` limiter when the owner clicks too fast, and the backend answers
-`503` when no password is configured. Either status reused here would be ambiguous
+preferred.** These endpoints already answer `429` from BurnRate's own
+`enable_banking_auth_start` and `enable_banking_aspsps` limiters when the owner clicks
+too fast, and the backend answers `503` when no password is configured. Either status reused here would be ambiguous
 with something that has a different remedy, so clients match on `code`.
 
 The `message` is written by the backend and not composed by the client, per ADR-0002:
@@ -345,7 +353,7 @@ load-bearing.
 
 ### Expired Or Inactive Sessions
 
-Before a scheduled or manual re-sync, BurnRate fetches the Enable Banking session and checks its status.
+Before a scheduled re-sync, BurnRate fetches the Enable Banking session and checks its status.
 
 If the session is no longer `AUTHORIZED` (for example `EXPIRED`, `REVOKED`, or `CANCELLED`):
 
@@ -373,7 +381,8 @@ Responsibilities:
 
 * Start the authorization flow
 * Receive the callback
-* Expose connection and sync endpoints to the Web UI
+* Expose connection endpoints to the Web UI, and the next scheduled sync on `/summary`
+  (there is no sync endpoint — ADR-0016)
 
 ### Application Layer
 

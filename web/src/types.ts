@@ -101,15 +101,6 @@ export interface StartAuthorizationResult {
   valid_until: string;
 }
 
-export interface ManualSyncResult {
-  connection_id: string;
-  sync_session_id: string;
-  session_status: string;
-  accounts_synced: number;
-  transactions_imported: number;
-  message: string | null;
-}
-
 export interface Account {
   account_id: string;
   display_name: string;
@@ -248,6 +239,11 @@ export interface SummaryDashboard {
   // Null when every day of the recent past was fetched, which is the normal case and
   // earns silence rather than a reassurance nobody asked for.
   sync_gap: SyncGap | null;
+  // When the next unattended sync is due, with the owner's offset, or null when the
+  // backend has no schedule configured. Published rather than derived because it is
+  // `SYNC_CRON` read through `APP_TIMEZONE`, and a browser knows neither. An
+  // intention, not a promise -- see `nextSyncLabel`.
+  next_sync_at: string | null;
 }
 
 /** Days the bank was never asked about, with whether they can still be had.

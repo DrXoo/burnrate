@@ -8,7 +8,6 @@ from burnrate.api.routes.enable_banking import (
     enable_banking_callback,
     list_connections,
     list_aspsps,
-    sync_connection,
     start_authorization,
 )
 from burnrate.api.schemas.enable_banking import StartAuthorizationRequest
@@ -103,7 +102,6 @@ def test_enable_banking_routes_use_service_dependency() -> None:
         service=service,
         settings=make_web_settings(),
     )
-    sync_response = sync_connection(connection_id="conn-1", service=service)
 
     assert connections_response.connections[0].connection_id == "conn-1"
     assert aspsps_response.aspsps[0]["name"] == "Nordea"
@@ -113,7 +111,6 @@ def test_enable_banking_routes_use_service_dependency() -> None:
     assert callback_location.startswith("http://web.test/?")
     assert "connect=success" in callback_location
     assert "imported=2" in callback_location
-    assert sync_response.sync_session_id == "sync-1"
 
 
 def test_enable_banking_callback_redirects_error_to_web_ui() -> None:
@@ -160,17 +157,34 @@ def test_app_exposes_both_enable_banking_callback_paths() -> None:
 
     assert "/api/v1/integrations/enable-banking/connections" in paths
     assert "/api/v1/integrations/enable-banking/callback" in paths
-    assert "/api/v1/integrations/enable-banking/connections/{connection_id}/sync" in paths
+
+def test_no_route_can_trigger_a_sync() -> None:
+    """Syncing is the worker's job alone, and this is what keeps it that way.
+
+    The manual endpoint promised an immediacy no bank here delivers -- neither of this
+    owner's banks has ever returned a pending transaction, and a booked row takes one
+    to three days -- while spending accesses out of the four-per-day budget the
+    scheduled passes need (ADR-0015). Asserted against the served routes rather than
+    the source, because a route re-added anywhere would show up here.
+    """
+    paths = set(create_app().openapi()["paths"].keys())
+
+    assert not [path for path in paths if path.endswith("/sync")]
     assert "/enable_banking_items/callback" in paths
 
 
 class RefusingBankService(FakeRouteService):
-    """A bank that refuses the sync with a status of the test's choosing."""
+    """A bank that refuses an attended call with a status of the test's choosing.
+
+    Exercised through ``start_authorization`` because that is one of the two routes
+    ``_bank_error`` still serves now that the manual sync is gone -- and the owner is
+    standing in front of it when it fails, which is what makes the wording matter.
+    """
 
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
 
-    def sync_connection(self, *, connection_id):
+    def start_authorization(self, request):
         raise EnableBankingAPIError(
             status_code=self.status_code,
             detail={"error": "ASPSP_RATE_LIMIT_EXCEEDED", "psu_reference": "do-not-echo"},
@@ -192,7 +206,7 @@ def test_a_spent_access_budget_is_not_reported_as_a_broken_bank() -> None:
     chosen for honest semantics and the `code` is what a client keys on.
     """
     with pytest.raises(HTTPException) as exc_info:
-        sync_connection(connection_id="conn-1", service=RefusingBankService(429))
+        _start_authorization_against(RefusingBankService(429))
 
     detail = exc_info.value.detail
     assert detail["code"] == "bank_rate_limit"
@@ -208,7 +222,19 @@ def test_a_spent_access_budget_is_not_reported_as_a_broken_bank() -> None:
 def test_every_other_bank_failure_still_reports_as_a_bad_gateway() -> None:
     """The rate limit is carved out of `_bank_error`, not substituted for it."""
     with pytest.raises(HTTPException) as exc_info:
-        sync_connection(connection_id="conn-1", service=RefusingBankService(503))
+        _start_authorization_against(RefusingBankService(503))
 
     assert exc_info.value.status_code == 502
     assert "do-not-echo" not in str(exc_info.value.detail)
+
+
+def _start_authorization_against(service) -> None:
+    start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        ),
+        service=service,
+    )

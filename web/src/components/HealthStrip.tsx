@@ -1,13 +1,12 @@
-import { useState } from "react";
-
-import { IconSync } from "./icons";
-import { TONE_COLOR, TONE_DIM, expiryBadge, needsReconnect, timeAgo } from "../lib/format";
+import { TONE_COLOR, TONE_DIM, expiryBadge, needsReconnect, nextSyncLabel, timeAgo } from "../lib/format";
 import type { Tone } from "../lib/format";
 import type { Connection } from "../types";
 
 interface HealthStripProps {
   connection: Connection;
-  onSync: (connectionId: string) => Promise<unknown>;
+  /** When the backend says the next unattended sync is due, offset included. With no
+      Sync button left, this is the owner's only answer to "when does this refresh?" */
+  nextSyncAt: string | null | undefined;
   onReconnect: (connection: Connection) => void;
 }
 
@@ -31,8 +30,7 @@ function connectionLabel(connection: Connection, tone: Tone): string {
   return "Healthy";
 }
 
-export function HealthStrip({ connection, onSync, onReconnect }: HealthStripProps) {
-  const [syncing, setSyncing] = useState(false);
+export function HealthStrip({ connection, nextSyncAt, onReconnect }: HealthStripProps) {
   const tone = connectionTone(connection);
   const color = TONE_COLOR[tone];
   const label = connectionLabel(connection, tone);
@@ -43,14 +41,13 @@ export function HealthStrip({ connection, onSync, onReconnect }: HealthStripProp
       ? `${connection.latest_sync_transactions_count} imported last sync — booked only`
       : "Booked transactions only";
 
-  async function handleSync() {
-    setSyncing(true);
-    try {
-      await onSync(connection.connection_id);
-    } finally {
-      setSyncing(false);
-    }
-  }
+  // Only while healthy, and the suppression is the point rather than tidiness: the
+  // schedule says what the worker *intends*, and a worker that is not running cannot
+  // contradict it. Printing "next at 21:00" above "Needs attention" would reassure the
+  // owner at exactly the moment it should not. ADR-0013 records the half of this that
+  // is still open -- a worker that dies between successful passes leaves this line
+  // standing until the sync-gap alert notices.
+  const nextSync = tone === "good" ? nextSyncLabel(nextSyncAt) : null;
 
   return (
     <div className="br-health" style={{ padding: "12px 30px 0" }}>
@@ -70,7 +67,10 @@ export function HealthStrip({ connection, onSync, onReconnect }: HealthStripProp
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}` }} />
           {connection.aspsp_name} · {label}
         </span>
-        <span style={{ fontSize: 12.5, color: "var(--text-2)" }}>Synced {timeAgo(connection.last_synced_at)}</span>
+        <span style={{ fontSize: 12.5, color: "var(--text-2)" }}>
+          Synced {timeAgo(connection.last_synced_at)}
+          {nextSync ? ` · next at ${nextSync}` : ""}
+        </span>
         <span style={{ fontSize: 12, color: "var(--text-3)" }}>{pendingCopy}</span>
         {badge ? (
           <span
@@ -105,27 +105,6 @@ export function HealthStrip({ connection, onSync, onReconnect }: HealthStripProp
               Reconnect
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              border: "1px solid var(--line-2)",
-              background: "var(--bg-3)",
-              color: "var(--text)",
-              borderRadius: 8,
-              padding: "5px 11px",
-              font: "500 12px 'Hanken Grotesque', sans-serif",
-              cursor: syncing ? "default" : "pointer",
-              opacity: syncing ? 0.6 : 1,
-            }}
-          >
-            <IconSync />
-            {syncing ? "Syncing…" : "Sync now"}
-          </button>
         </div>
       </div>
     </div>

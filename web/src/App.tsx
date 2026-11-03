@@ -14,25 +14,9 @@ import { RulesBudgetsPage } from "./components/pages/RulesBudgetsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { TransactionsPage } from "./components/pages/TransactionsPage";
 import { useBurnRateData } from "./hooks/useBurnRateData";
-import { bankRateLimitMessage, formatMonthLabel, summarizeApiError } from "./lib/format";
+import { formatMonthLabel, summarizeApiError } from "./lib/format";
 import type { HeroMode, Section, Theme } from "./lib/viewTypes";
-import type { Connection, ManualSyncResult } from "./types";
-
-/** What a finished sync brought in. The count is the only thing that separates a sync
-    that ran and found nothing -- the usual answer, since the bank is polled every half
-    hour -- from one that did not run at all. */
-function syncOutcome(result: ManualSyncResult | undefined): string {
-  if (result?.message) {
-    // The backend sets this only when the sync found no linked accounts, which is a
-    // state to report rather than a confirmation.
-    return result.message;
-  }
-  const imported = result?.transactions_imported ?? 0;
-  if (imported === 0) {
-    return "Synced — nothing new";
-  }
-  return `Synced — ${imported} new transaction${imported === 1 ? "" : "s"}`;
-}
+import type { Connection } from "./types";
 
 interface ToastState {
   message: string;
@@ -217,38 +201,6 @@ export default function App() {
     await data.updateAccount(accountId, draft);
     showToast("Account updated");
   }
-  async function syncConnection(connectionId: string) {
-    try {
-      const result = await data.syncConnection(connectionId);
-      showToast(syncOutcome(result), result?.message ? "over" : "good");
-      return result;
-    } catch (error) {
-      // A sync that never reached the bank used to be indistinguishable from one that
-      // ran and found nothing: the button stopped spinning, "Synced <n> ago" kept the
-      // value it had, and the reason reached the console only. Reported here, beside
-      // the success it mirrors, so both Sync buttons -- the health strip and Settings
-      // -- get it from one place.
-      //
-      // The strip's own "Needs attention" covers the other half of this: a sync that
-      // failed inside the backend is recorded against the connection and shows up on
-      // the next refetch. Nothing records a sync that died in the browser, so this
-      // toast is the only report there is.
-      // A spent allowance is not a failure to report as one: the product worked, the
-      // bank's budget for unattended checks is used up, and the owner's move is to
-      // wait rather than to go and look. Reported in the backend's own words, above
-      // the generic path so the status code never reaches the screen for this case.
-      const allowanceSpent = bankRateLimitMessage(error);
-      if (allowanceSpent) {
-        showToast(allowanceSpent, "over");
-        return undefined;
-      }
-      showToast(`Sync failed — ${summarizeApiError(error)}`, "over");
-      // Deliberately not rethrown: both buttons await this only to stop their spinner,
-      // and the escaping rejection is what kept the reason off screen.
-      return undefined;
-    }
-  }
-
   const modal = connectOpen && data.apiBase ? <ConnectBankModal apiBase={data.apiBase} prefill={connectPrefill} onClose={closeConnect} /> : null;
   const toastNode = toast ? <Toast message={toast.message} tone={toast.tone} /> : null;
 
@@ -313,7 +265,9 @@ export default function App() {
             onLogout={() => void data.logout()}
           />
 
-          {primaryConnection ? <HealthStrip connection={primaryConnection} onSync={syncConnection} onReconnect={openReconnect} /> : null}
+          {primaryConnection ? (
+            <HealthStrip connection={primaryConnection} nextSyncAt={data.summary?.next_sync_at} onReconnect={openReconnect} />
+          ) : null}
 
           <div className="br-content" style={{ padding: "22px 30px 60px" }}>
             {section === "dashboard" ? (
@@ -404,7 +358,6 @@ export default function App() {
               <SettingsPage
                 connections={data.connections}
                 accounts={data.accounts}
-                onSyncConnection={syncConnection}
                 onConnect={openConnect}
                 onReconnect={openReconnect}
                 onUpdateAccount={updateAccount}

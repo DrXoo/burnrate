@@ -118,6 +118,10 @@ class SummaryResponse(BaseModel):
     # Absent when every day of the recent past was fetched, which is the normal case
     # and earns silence rather than a reassurance nobody asked for.
     sync_gap: SyncGapResponse | None = None
+    # When the next unattended sync is due, with the owner's offset, or null when no
+    # schedule is configured. An intention, not a promise: an interface shows it only
+    # beside a healthy connection, because a worker that is down cannot deny it.
+    next_sync_at: str | None = None
     baseline_status: BaselineStatus
     # How many Qualifying Months the means rest on, so the owner can see how much
     # to trust them. Uniform across categories, which is why it is not repeated on

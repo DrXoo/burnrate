@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from burnrate.db.base import Base
 from burnrate.db.models import Account, Budget, Category, Transaction
 from burnrate.services.summary_service import SummaryService
+from burnrate.sync_schedule import next_sync_at
 from conftest import AHEAD_OF_UTC, BEHIND_UTC
 
 
@@ -1544,3 +1545,78 @@ def test_summary_service_counts_only_settled_money_as_moved_in() -> None:
     summary = SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))
 
     assert summary["inbound_transfer_amount"] == "300.00"
+
+
+def test_the_summary_publishes_the_next_scheduled_sync_from_the_configured_cron() -> None:
+    """The owner is told when data refreshes, and the schedule is the only source.
+
+    Asserted against ``sync_schedule.next_sync_at`` rather than against a literal
+    time, because a literal would pass against a constant hardcoded anywhere -- which
+    is exactly the defect ticket 05 is guarding, now that there is no button and the
+    schedule is all the owner has.
+    """
+    db = make_session()
+    service = SummaryService(
+        db=db,
+        timezone_name="Europe/Madrid",
+        sync_cron="0 11,20 * * *",
+        clock=lambda: datetime(2026, 11, 3, 15, 40, tzinfo=timezone.utc),
+    )
+
+    summary = service.get_summary()
+
+    expected = next_sync_at(
+        sync_cron="0 11,20 * * *",
+        timezone_name="Europe/Madrid",
+        after=datetime(2026, 11, 3, 15, 40, tzinfo=timezone.utc),
+    )
+    assert expected is not None
+    assert summary["next_sync_at"] == expected.isoformat()
+
+
+def test_the_next_scheduled_sync_carries_the_owners_offset_not_utc() -> None:
+    """A bare UTC instant would be rendered in the browser's zone, not the owner's.
+
+    ``0 20 * * *`` is 20:00 in Madrid and 19:00Z; published without the offset, a
+    client in another zone -- or one formatting the raw instant -- would show an hour
+    the owner never configured. The offset is what makes the string readable without
+    the client knowing ``APP_TIMEZONE``.
+    """
+    db = make_session()
+    service = SummaryService(
+        db=db,
+        timezone_name="Europe/Madrid",
+        sync_cron="0 20 * * *",
+        clock=lambda: datetime(2026, 11, 3, 15, 40, tzinfo=timezone.utc),
+    )
+
+    assert service.get_summary()["next_sync_at"] == "2026-11-03T20:00:00+01:00"
+
+
+def test_without_a_configured_cron_there_is_no_next_sync_to_publish() -> None:
+    """Null rather than a guess, so no caller invents a schedule of its own."""
+    db = make_session()
+
+    assert SummaryService(db=db).get_summary(month="2026-06", today=date(2026, 6, 15))["next_sync_at"] is None
+
+
+def test_the_api_wiring_passes_the_configured_schedule_through() -> None:
+    """The service makes the field optional, so the wiring is where it can go missing.
+
+    Nothing else would notice: an unwired schedule publishes ``null``, the interface
+    suppresses the line exactly as it does for an unhealthy connection, and the owner
+    silently loses the only answer they have to "when does this refresh?" now that the
+    button is gone.
+    """
+    from burnrate.api.dependencies import get_summary_service
+    from burnrate.config import Settings
+
+    service = get_summary_service(
+        db=make_session(),
+        settings=Settings(
+            SYNC_CRON="0 11,20 * * *",
+            DATABASE_URL="sqlite+pysqlite:///:memory:",
+        ),
+    )
+
+    assert service.get_summary()["next_sync_at"] is not None

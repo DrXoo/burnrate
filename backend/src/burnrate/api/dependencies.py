@@ -173,4 +173,8 @@ def get_summary_service(
         db=db,
         timezone_name=settings.app_timezone,
         baseline_window_months=settings.baseline_window_months,
+        # The schedule is passed here and nowhere else in the API, because this is the
+        # only summary a screen reads. Without it the next-sync line is simply absent,
+        # which is why there is a test on this wiring rather than only on the service.
+        sync_cron=settings.sync_cron,
     )
