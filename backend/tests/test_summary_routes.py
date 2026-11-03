@@ -27,6 +27,7 @@ class FakeSummaryService:
             "monthly_spending_amount": "260.00",
             "pending_spend_amount": "25.00",
             "monthly_income_amount": "2000.00",
+            "inbound_transfer_amount": "0.00",
             "net_cash_flow_amount": "1740.00",
             "savings_rate_percent": 87.0,
             "savings_status": "on_track",
@@ -53,6 +54,39 @@ class FakeSummaryService:
                     "status": "over",
                 }
             ],
+            "baseline_status": "ok",
+            "baseline_months_count": 2,
+            "comparable_spend_amount": "120.00",
+            "uncomparable_spend_amount": "8403.83",
+            "comparable_spend_baseline": {
+                "baseline_amount": "80.00",
+                "deviation_percent": 50.0,
+                "comparison_status": "above",
+            },
+            "monthly_income_baseline": {
+                "baseline_amount": "2000.00",
+                "deviation_percent": 0.0,
+                "comparison_status": "in_line",
+            },
+            "net_cash_flow_baseline_amount": "1715.00",
+            "category_baselines": [
+                {
+                    "category_id": "cat-1",
+                    "category_name": "Utilities",
+                    "spend_amount": "120.00",
+                    "baseline_amount": "80.00",
+                    "deviation_percent": 50.0,
+                    "comparison_status": "above",
+                },
+                {
+                    "category_id": "cat-2",
+                    "category_name": "Divorce",
+                    "spend_amount": "8403.83",
+                    "baseline_amount": None,
+                    "deviation_percent": None,
+                    "comparison_status": "no_baseline",
+                },
+            ],
         }
 
 
@@ -69,6 +103,27 @@ def test_summary_route_uses_service_dependency() -> None:
     assert response.safe_to_spend_status == "watch"
     assert response.fixed_overrun_amount == "50.00"
     assert response.budget_usage[0].status == "over"
+    # The comparison fields travel on this response rather than on one of their own,
+    # which is what keeps the data-fetching hook unchanged: a second endpoint would
+    # add a second fetch and a second loading state.
+    assert response.baseline_status == "ok"
+    assert response.baseline_months_count == 2
+    assert response.category_baselines[0].baseline_amount == "80.00"
+    assert response.category_baselines[0].comparison_status == "above"
+    # A category below the presence floor serializes its absent baseline as null
+    # rather than as a zero, so no client reads "normally nothing" off it.
+    assert response.category_baselines[1].baseline_amount is None
+    assert response.category_baselines[1].deviation_percent is None
+    assert response.category_baselines[1].comparison_status == "no_baseline"
+    # The aggregate comparison excludes what has no baseline and discloses it beside,
+    # so the two halves reconcile against the month's spending rather than restating
+    # it: this fake month is 120.00 comparable and 8403.83 that cannot be compared.
+    assert response.comparable_spend_amount == "120.00"
+    assert response.uncomparable_spend_amount == "8403.83"
+    assert response.comparable_spend_baseline.comparison_status == "above"
+    assert response.monthly_income_baseline.baseline_amount == "2000.00"
+    # Net cash flow carries an amount and deliberately no verdict.
+    assert response.net_cash_flow_baseline_amount == "1715.00"
 
 
 def test_summary_route_serves_an_allowance_the_owner_does_not_have() -> None:

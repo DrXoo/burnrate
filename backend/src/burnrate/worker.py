@@ -16,6 +16,7 @@ from burnrate.services.sync_service import SyncRunResult, SyncService
 from burnrate.telegram.notifier import (
     send_expiry_alerts,
     send_reconnect_alerts,
+    send_sync_gap_alert,
     send_sync_notification,
 )
 
@@ -107,6 +108,29 @@ def _alert_expiring_connections(*, session: Session, settings: Settings) -> None
         logger.exception("Failed to send connection-expiry alert")
 
 
+def report_sync_gap_at_startup(settings: Settings) -> None:
+    """Say so, once, if days of bank data were never fetched while this was down.
+
+    Startup rather than per sync pass, because the failure this covers is the worker
+    not running and a process that is not running cannot report itself -- and because
+    starting up is what debounces it: a pass runs every half hour, and a permanent gap
+    reported per pass would be 48 messages a day for the ninety days of the lookback.
+
+    Guarded and best-effort like every other notifier call here. A worker must start
+    whether or not it can send a message.
+    """
+    if not settings.telegram_bot_token or not settings.telegram_notify_on_sync:
+        return
+    session = SessionLocal()
+    try:
+        client = TelegramClient(settings=settings)
+        send_sync_gap_alert(session=session, client=client, settings=settings)
+    except Exception:
+        logger.exception("Failed to report sync gap at startup")
+    finally:
+        session.close()
+
+
 def build_scheduler(settings: Settings) -> BlockingScheduler:
     """Build a scheduler that runs the sync pass on the configured cron.
 
@@ -135,6 +159,9 @@ def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     logger.info("Starting sync worker with schedule %s (%s)", settings.sync_cron, settings.app_timezone)
+    # Before the first cron tick, which is up to half an hour away: a worker that has
+    # just returned from an outage has something to say now, not later.
+    report_sync_gap_at_startup(settings)
     scheduler = build_scheduler(settings)
     try:
         scheduler.start()

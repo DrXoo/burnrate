@@ -169,4 +169,8 @@ def get_summary_service(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> SummaryService:
-    return SummaryService(db=db, timezone_name=settings.app_timezone)
+    return SummaryService(
+        db=db,
+        timezone_name=settings.app_timezone,
+        baseline_window_months=settings.baseline_window_months,
+    )

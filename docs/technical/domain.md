@@ -269,9 +269,62 @@ The current pace of spending, typically represented as daily average spending an
 
 ---
 
+### Sync Gap
+
+Days the bank was never asked about: no successful sync's trailing window reached them. The sweep that decides it is the same one a Qualifying Month's sync-coverage test uses, asked a day at a time instead of a month at a time, because this needs to know *which* days and for how much longer they can still be had.
+
+A missing day is not lost. The provider serves a trailing 30-day window, so a run today still reaches a day missed yesterday and the next pass fetches it; a day is lost exactly when it falls out of that window. So the reported state is a **deadline, not a fact**: `expiring` means a reconnection still works and names the date, and it is about today, so it shows whatever month is open. `lost` means days are gone and belong to **the month being viewed**, whose figures are understated, with no action offered because none recovers them; `lost_elsewhere` is the same loss seen from another month and is silent there. A loss also stops being an unprompted message once it has been one, or the worker would repeat it on every startup for the ninety days of the lookback. A gap the next successful run will close is not reported at all, which is the over-firing the alerting phase fails by.
+
+It is computed on **every summary request**, because the failure it exists for is the sync worker not running and a process that is not running cannot report itself. The worker also reports it at startup, which is the first moment a returning worker can speak. A timely warning *during* an outage needs something outside the process and is deliberately not built. See `docs/adr/0013-a-sync-gap-is-read-at-request-time.md`.
+
+---
+
+### Event Budget
+
+A Fixed Budget whose window covers exactly one month -- `active_from` on the 1st, `active_to` on that month's last day -- which is how the owner says that month's spend in its category was an event and not a habit. Its spend counts in the actuals and steps the pace as any Fixed Budget does, and it is **excluded from every baseline**, so a divorce or a boiler cannot become what a later month reports as normal.
+
+The bounded window is the whole declaration. An open `active_to` is the default and means the commitment continues; a window spanning two months is a commitment that ran and stopped, not an event. Because both edges of a window sit on month boundaries (ADR-0005), "exactly one month" is two equalities and no arithmetic over days.
+
+The exclusion reaches baseline *input* and nothing else: the month on screen counts every euro that left it, which is the same figure-specific inclusion rule ADR-0003 established for Pending Spend rather than a disposition like `Ignored`. A flag on the charge was designed first and declined; see `docs/adr/0011-a-one-month-fixed-budget-declares-an-event.md` for why the window replaced it, and what it cannot reach.
+
+---
+
+### Inbound Transfer
+
+Money that arrived in the month from an account BurnRate cannot see: the booked credit legs of transfer categories. It is neither income nor spend, so it reaches neither side of net cash flow -- it is **disclosed beside** that figure as the funding the deficit came from, and never added to it. The loss is counted once, in the net; this says which pocket paid.
+
+The category carrying such credits was once typed `income`, which made a month that drained the owner's savings report as very nearly break-even: October 2026 read a net of -354.88 where the real figure was -8,195.88, the difference being 7,841.00 moved in from savings. The product's rule was already right -- both income queries select on `Category.type == "income"` -- so the correction was a retype, not a code change.
+
+The sign is filtered in SQL rather than netted afterwards, because the same categories carry money going the other way and summing them whole reports an outgoing month as *negative* money arriving. Booked only, matching the income figure it is read against.
+
+It **assumes every transfer in came from outside**, which holds while one account is linked and stops at the second: a transfer between two linked accounts lands as a credit on one and a debit on the other, and the credit leg would be reported as money from outside when nothing entered the owner's world at all. The trigger for pairing the two legs is the second linked account. See `docs/adr/0010-a-savings-draw-is-a-transfer.md`.
+
+---
+
 ### Runway
 
 The estimated time remaining before designated savings are exhausted, based on the current monthly deficit.
+
+### Baseline
+
+What a figure normally is for the owner: its mean over the Qualifying Months a window reaches, recomputed from transactions on each request and never stored.
+
+A **Qualifying Month** is a closed month whose data can be trusted. Two independent tests decide it, because each is blind to the other:
+
+* **Classification coverage** — the share of the month's *outgoing money* that is still unclassified must be under a floor. Measured by amount and never by rows: a month can read almost fully classified by row count while most of its money sits in the few large rows the owner has not got to, and admitting such a month biases every baseline downwards with nothing to signal it.
+* **Sync coverage** — the month must be spanned by the trailing fetch windows of *successful* syncs. A run on day S asked the bank about `[S - fetch window, S]`, so a month is covered only when those windows union to span every one of its days: two runs 25 days apart cover a month between them although neither does alone, and a single run a day short of the month's end leaves its last day never asked about. A month with a hole looks perfectly classified, because every row it does have is filed, while transactions are missing outright — and the resulting baseline is understated, which is the direction that makes ordinary spend read as an anomaly. Only `success` counts: an expired consent writes a `skipped` session per attempt and fetches nothing, so counting session rows rather than successes would read the months the owner was disconnected as the best-covered ones there are.
+
+Two rules keep a mean from being computed where it would mislead. A **presence floor** denies a baseline to a category the owner spends in too rarely, which is what makes the divisor safe: for a category above the floor the mean divides by every Qualifying Month in the window, treating an absent month as a real zero, because for a recurring expense that absence is information. The floor also retires a category whose spend has stopped, without anyone declaring anything — it falls below the floor as the window moves past it.
+
+For the month in progress, both sides are summed only to the **same day of the month**, clamped to each past month's own length. A part-month measured against whole ones is favourable for most of the month, which is the defect Phase 8 fixed in the budget pacing; summing past months to the same cutoff makes no assumption about pacing, so a Fixed Budget charged as a step lands identically on both sides. A closed month is compared whole against whole, and a month that has not started is not compared at all.
+
+Comparing and firing are different acts. The deviation is reported in both directions, since a quiet month is information. An anomaly fires **only upward**, and **only on spend**: the product exists to stop the owner overspending, and income is not spend. A bonus month bands *above* and stops there, because "unusually high" is the wording both interfaces give an anomaly and there is nothing wrong with being paid more than usual. Every other band applies to income unchanged, so a month well below the usual income still reads *below*.
+
+The spend comparison is computed over **Comparable Spend** only — the categories that have a baseline — and the rest is disclosed beside it as **Uncomparable Spend**, which is the shape Unbudgeted Spend already has. This is load-bearing rather than tidy: a month dominated by a one-off in a category with no history would otherwise report catastrophic overspending while every ordinary category sat under its own usual figure. Uncomparable Spend is defined as the residual, monthly spending less the comparable half, so the two reconcile against the headline rather than against a third total; the three things that land in it are a category with no baseline, an Archived Category, and spend dated after today's cutoff.
+
+Because it is a residual, both halves have to count the same money, which means the baselines read spend on the **same basis the headline does**: a hold on a Fixed Budget's category counts towards nothing until it books, in every month, the ones behind the window included. The rule is month-by-month, since a budget's window is month-granular and a category the owner made fixed in September was not fixed in August. Counting such a hold on the comparison side alone made the residual *negative* — 0.00 spent, 500.00 comparable and minus 500.00 that cannot be compared — and measuring a baseline on a wider basis than the figure it is compared against is the same defect in the other direction.
+
+Income and net cash flow take no such split. It exists because per-category baselines feed the spend aggregate and a category without one would poison it; both of these are whole-month figures with no per-category decomposition in play, and "this month was much worse than usual" about money kept is simply true, one-off included. They also take **no presence floor**, unlike a category's: a month in which nothing came in is a fact about the owner's year, and skipping it would report a salary as normal to someone paid once in three months. Having no floor to protect them, they are **medians rather than means** -- a median of three rejects exactly one outlier, which is what a divorce month or a severance month is, and neither has a budget window to declare it by. An absent month is still ordered with the rest rather than skipped, so the older decision holds; what changes is that someone paid once in three months now has a typical month of nothing, where the mean reported a third of a payslip as monthly income. Net cash flow carries a baseline **amount and no verdict**, because a ratio on a figure that can cross zero means nothing and an owner whose usual month is a deficit would carry a negative baseline that the bands read as no baseline at all.
 
 ---
 

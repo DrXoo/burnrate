@@ -12,11 +12,18 @@ from sqlalchemy.pool import StaticPool
 
 from burnrate.config import Settings
 from burnrate.db.base import Base
-from burnrate.db.models import Account, Category, EnableBankingConnection, Transaction
+from burnrate.db.models import (
+    Account,
+    Category,
+    EnableBankingConnection,
+    SyncSession,
+    Transaction,
+)
 from burnrate.services.sync_service import ConnectionSyncResult, SyncRunResult
 from burnrate.telegram.notifier import (
     send_expiry_alerts,
     send_reconnect_alerts,
+    send_sync_gap_alert,
     send_sync_notification,
 )
 from conftest import AHEAD_OF_UTC, BEHIND_UTC
@@ -406,3 +413,93 @@ def test_sync_notification_counts_the_month_the_owner_is_in(
     if uncategorized_count:
         expected.append(f"{uncategorized_count} still need a category — send /unknown.")
     assert text.splitlines() == expected
+
+
+def _seed_syncs(session: Session, ranges: list[tuple[date, date]]) -> None:
+    """One successful run per day across each range, as the cron would produce."""
+    for first, last in ranges:
+        day = first
+        while day <= last:
+            session.add(
+                SyncSession(
+                    started_at=datetime(day.year, day.month, day.day, 9, 0, tzinfo=UTC),
+                    finished_at=datetime(day.year, day.month, day.day, 9, 5, tzinfo=UTC),
+                    status="success",
+                    imported_accounts_count=1,
+                    imported_transactions_count=0,
+                )
+            )
+            day += timedelta(days=1)
+    session.flush()
+
+
+def test_sync_gap_alert_reports_the_days_the_worker_was_down_for() -> None:
+    """The message nobody ever got, sent on the run that comes back.
+
+    The owner's worker stopped on 29 August 2026 and returned on 4 October, and five
+    days in between were never fetched. A process that is not running cannot report
+    itself, so this fires when it returns -- late, and still the only unprompted path
+    there is.
+    """
+    session = make_session()
+    _seed_syncs(session, [(date(2026, 8, 1), date(2026, 8, 29)), (date(2026, 10, 4), date(2026, 10, 4))])
+    client = FakeClient()
+
+    sent = send_sync_gap_alert(
+        session=session,
+        client=client,
+        settings=make_settings(),
+        today=date(2026, 10, 4),
+    )
+
+    assert sent == 2
+    assert "gone for good" in client.sent[0][1]
+    assert "2026-08-30" in client.sent[0][1]
+
+
+def test_sync_gap_alert_stays_quiet_about_a_gap_the_next_run_will_close() -> None:
+    """A restart is not news, and over-firing is how the alerting phase fails."""
+    session = make_session()
+    _seed_syncs(session, [(date(2026, 10, 1), date(2026, 11, 1)), (date(2026, 11, 3), date(2026, 11, 3))])
+    client = FakeClient()
+
+    sent = send_sync_gap_alert(
+        session=session,
+        client=client,
+        settings=make_settings(),
+        today=date(2026, 11, 3),
+    )
+
+    assert sent == 0
+    assert client.sent == []
+
+
+def test_sync_gap_alert_stays_quiet_when_every_day_was_fetched() -> None:
+    session = make_session()
+    _seed_syncs(session, [(date(2026, 10, 1), date(2026, 11, 3))])
+    client = FakeClient()
+
+    sent = send_sync_gap_alert(
+        session=session,
+        client=client,
+        settings=make_settings(),
+        today=date(2026, 11, 3),
+    )
+
+    assert sent == 0
+
+
+def test_sync_gap_alert_respects_the_notification_switch() -> None:
+    """Every other notifier in this module is gated the same way, so this one is too."""
+    session = make_session()
+    _seed_syncs(session, [(date(2026, 8, 1), date(2026, 8, 29)), (date(2026, 10, 4), date(2026, 10, 4))])
+    client = FakeClient()
+
+    sent = send_sync_gap_alert(
+        session=session,
+        client=client,
+        settings=make_settings(TELEGRAM_NOTIFY_ON_SYNC=False),
+        today=date(2026, 10, 4),
+    )
+
+    assert sent == 0

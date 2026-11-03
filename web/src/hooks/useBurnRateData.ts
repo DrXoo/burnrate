@@ -105,6 +105,7 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     categoryId: "",
     status: "",
     categorized: "",
+    budgeted: "",
   });
   // Bumped by every applyFilters, so asking for the same month again re-runs the loader.
   // Without it the one month that cannot be re-asked for is "" -- an opening summary that
@@ -318,6 +319,7 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     filters.accountId,
     filters.categoryId,
     filters.categorized,
+    filters.budgeted,
     filters.month,
     filters.status,
     reloadToken,
@@ -469,7 +471,7 @@ export function useBurnRateData({ onRefreshFailed }: BurnRateDataOptions = {}) {
     }
     const payload = await getTransactions(
       apiBase,
-      { month: filters.month, accountId: "", categoryId: "", status: "", categorized: "" },
+      { month: filters.month, accountId: "", categoryId: "", status: "", categorized: "", budgeted: "" },
       { limit: 200, offset: 0, total: 0 },
     );
     return payload.transactions;

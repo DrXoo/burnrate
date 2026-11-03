@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from burnrate.db.base import Base
-from burnrate.db.models import Account, Category, EnableBankingAccountMapping, EnableBankingConnection, Transaction
+from burnrate.db.models import (
+    Account,
+    Budget,
+    Category,
+    EnableBankingAccountMapping,
+    EnableBankingConnection,
+    Transaction,
+)
 from burnrate.services.ledger_service import LedgerService
 
 
@@ -318,3 +325,219 @@ def test_ledger_service_puts_an_undated_pending_charge_in_the_review_queue() -> 
         "Coffee shop",
     ]
     assert count == 2
+
+
+def add_category(db: Session, *, name: str, category_type: str) -> Category:
+    category = Category(name=name, type=category_type, active=True)
+    db.add(category)
+    db.flush()
+    return category
+
+
+def add_budget(
+    db: Session,
+    *,
+    category: Category,
+    active_from: date,
+    active_to: date | None = None,
+) -> None:
+    db.add(
+        Budget(
+            category_id=category.id,
+            amount=Decimal("300.00"),
+            currency="EUR",
+            period_type="monthly",
+            active_from=active_from,
+            active_to=active_to,
+            is_fixed=False,
+        )
+    )
+    db.flush()
+
+
+def add_june_charge(
+    db: Session,
+    *,
+    account: Account,
+    category: Category | None,
+    description: str,
+    amount: str = "-20.00",
+    excluded_at: datetime | None = None,
+) -> None:
+    db.add(
+        Transaction(
+            account_id=account.id,
+            enable_banking_transaction_id=f"tx-{description.lower().replace(' ', '-')}",
+            booking_date=date(2026, 6, 12),
+            value_date=date(2026, 6, 12),
+            amount=Decimal(amount),
+            currency="EUR",
+            description=description,
+            merchant_name=None,
+            counterparty_name=None,
+            direction="credit" if Decimal(amount) > 0 else "debit",
+            status="booked",
+            category_id=category.id if category else None,
+            matched_rule_id=None,
+            excluded_at=excluded_at,
+            raw_payload={"source": "test"},
+            imported_at=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        )
+    )
+    db.flush()
+
+
+def descriptions(response: dict) -> list[str]:
+    return [row["description"] for row in response["transactions"]]
+
+
+def category_named(db: Session, name: str) -> Category:
+    return db.execute(select(Category).where(Category.name == name)).scalar_one()
+
+
+def seed_budget_coverage_scene(db: Session) -> Account:
+    """June spend in two expense categories, one of which the month has a budget for.
+
+    Both halves are needed in every test below: the budgeted row is what a filter
+    that has stopped reading budgets at all would wrongly include, and the
+    unbudgeted one is what keeps a passing assertion from being the empty list.
+    """
+    primary_account, _ = seed_ledger_data(db)
+    add_budget(db, category=category_named(db, "Food"), active_from=date(2026, 1, 1))
+    gadgets = add_category(db, name="Gadgets", category_type="expense")
+    add_june_charge(db, account=primary_account, category=gadgets, description="Headphones")
+    db.commit()
+    return primary_account
+
+
+def test_ledger_service_lists_the_spend_the_month_holds_no_budget_for() -> None:
+    db = make_session()
+    seed_budget_coverage_scene(db)
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=False)
+
+    # Groceries sits in Food, which June holds a budget for, so the month's only gap
+    # in the budgets is the Gadgets charge.
+    assert descriptions(response) == ["Headphones"]
+    assert response["total_count"] == 1
+
+
+def test_ledger_service_treats_only_categorized_expense_spend_as_unbudgeted() -> None:
+    db = make_session()
+    primary_account = seed_budget_coverage_scene(db)
+    salary = add_category(db, name="Salary", category_type="income")
+    add_june_charge(
+        db,
+        account=primary_account,
+        category=salary,
+        description="Payday",
+        amount="1800.00",
+    )
+    db.commit()
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=False)
+
+    # No budget covers an income category and none ever will, and an uncategorized
+    # charge -- the seeded "Coffee shop" -- belongs to the review queue, which has a
+    # filter of its own. Either one here would bury the actual budget gaps.
+    assert descriptions(response) == ["Headphones"]
+
+
+def test_ledger_service_reads_a_budget_cancelled_mid_month_as_covering_that_month() -> None:
+    db = make_session()
+    seed_budget_coverage_scene(db)
+    budget = db.execute(
+        select(Budget).where(Budget.category_id == category_named(db, "Food").id)
+    ).scalar_one()
+    budget.active_to = date(2026, 6, 10)
+    db.commit()
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=False)
+
+    # Budget windows are month-granular (docs/adr/0005): a window the month touches at
+    # all counts for the whole month. June's Food spend is budgeted spend even though
+    # the budget stopped on the 10th, which is also how the summary counts it.
+    assert descriptions(response) == ["Headphones"]
+
+
+def test_ledger_service_reads_a_budget_that_starts_next_month_as_covering_neither() -> None:
+    db = make_session()
+    seed_budget_coverage_scene(db)
+    budget = db.execute(
+        select(Budget).where(Budget.category_id == category_named(db, "Food").id)
+    ).scalar_one()
+    budget.active_from = date(2026, 7, 1)
+    db.commit()
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=False)
+
+    # A budget scheduled for July leaves June's spend in that category unbudgeted,
+    # even though the category does hold a budget row.
+    assert descriptions(response) == ["Headphones", "Groceries"]
+
+
+def test_ledger_service_lists_the_spend_a_budget_does_cover() -> None:
+    db = make_session()
+    seed_budget_coverage_scene(db)
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=True)
+
+    assert descriptions(response) == ["Groceries"]
+
+
+def test_ledger_service_leaves_an_ignored_charge_out_of_unbudgeted_spend() -> None:
+    db = make_session()
+    primary_account = seed_budget_coverage_scene(db)
+    # Excluding a charge clears its category, so nothing in the product writes this
+    # row today -- a backfill or a stray write can, and Ignored means out of every
+    # figure. Stated here rather than inherited from the shape of the join, for the
+    # reason ``burnrate.db.dispositions`` gives.
+    add_june_charge(
+        db,
+        account=primary_account,
+        category=category_named(db, "Gadgets"),
+        description="Refunded gadget",
+        excluded_at=datetime(2026, 6, 13, 10, 0, tzinfo=timezone.utc),
+    )
+    db.commit()
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=False)
+
+    assert descriptions(response) == ["Headphones"]
+
+
+def test_ledger_service_refuses_a_budget_filter_without_a_month() -> None:
+    db = make_session()
+    seed_budget_coverage_scene(db)
+    service = LedgerService(db=db)
+
+    # A budget covers months, so "has no budget" is unanswerable over all of history:
+    # it would have to mean "no budget in any month", which is a different question
+    # from the one the month-scoped view asks.
+    with pytest.raises(ValueError, match="Month is required to filter by budget"):
+        service.list_transactions(budgeted=False)
+
+
+def test_ledger_service_reads_a_budget_created_mid_month_as_covering_that_month() -> None:
+    db = make_session()
+    seed_budget_coverage_scene(db)
+    budget = db.execute(
+        select(Budget).where(Budget.category_id == category_named(db, "Food").id)
+    ).scalar_one()
+    budget.active_from = date(2026, 6, 20)
+    db.commit()
+    service = LedgerService(db=db)
+
+    response = service.list_transactions(month="2026-06", budgeted=False)
+
+    # The budget starts on the 20th and the Groceries charge landed on the 10th. A
+    # window still counts for any month it touches, so an owner who budgets a
+    # category today sees this month stop reading as a gap, rather than having to
+    # wait for the next one.
+    assert descriptions(response) == ["Headphones"]

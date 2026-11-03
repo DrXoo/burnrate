@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     telegram_poll_timeout_seconds: int = Field(default=30, ge=0, alias="TELEGRAM_POLL_TIMEOUT_SECONDS")
     telegram_notify_on_sync: bool = Field(default=True, alias="TELEGRAM_NOTIFY_ON_SYNC")
     connection_expiry_warning_days: int = Field(default=7, ge=0, alias="CONNECTION_EXPIRY_WARNING_DAYS")
+    # How many months back a baseline may reach. A maximum rather than a
+    # requirement: how many of those months actually qualify is what the mean rests
+    # on, and that count is published so the owner can see how much to trust it.
+    # Widen it as history accumulates -- nothing is stored, so there is nothing to
+    # convert.
+    baseline_window_months: int = Field(default=3, ge=1, le=24, alias="BASELINE_WINDOW_MONTHS")
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from burnrate.db.base import Base
-from burnrate.db.models import Account, Budget, Category, Transaction
+from burnrate.db.models import Account, Budget, Category, SyncSession, Transaction
 from burnrate.telegram.formatters import UNKNOWN_COMMAND_TEXT
 from burnrate.telegram.router import TelegramCommandRouter
 from conftest import AHEAD_OF_UTC, BEHIND_UTC
@@ -202,3 +202,86 @@ def test_unknown_scopes_to_the_month_the_owner_is_in(
 
     assert ("Coffee Shop" in text) is lists_the_leftover
     assert ("No unknown transactions" in text) is not lists_the_leftover
+
+
+def seed_three_clean_months(session_factory: sessionmaker) -> None:
+    """July, August and September fully classified behind an October on screen.
+
+    Enough history for a comparison to be offered at all, and dated like the rest of
+    this feature's fixtures rather than against the wall clock.
+    """
+    session = session_factory()
+    account = Account(
+        display_name="Main",
+        currency="EUR",
+        included_in_calculations=True,
+        latest_balance_amount=Decimal("1000.00"),
+        latest_balance_currency="EUR",
+    )
+    session.add(account)
+    food = Category(name="Food", type="expense", active=True)
+    session.add(food)
+    session.flush()
+
+    for month, amount in ((7, "300.00"), (8, "300.00"), (9, "300.00"), (10, "200.00")):
+        session.add(
+            Transaction(
+                account_id=account.id,
+                booking_date=date(2026, month, 5),
+                amount=-Decimal(amount),
+                currency="EUR",
+                description="Groceries",
+                direction="debit",
+                status="booked",
+                category_id=food.id,
+                imported_at=datetime(2026, 10, 26, 9, 0, tzinfo=timezone.utc),
+            )
+        )
+
+    day = date(2026, 7, 1)
+    while day <= date(2026, 10, 26):
+        session.add(
+            SyncSession(
+                started_at=datetime(day.year, day.month, day.day, 9, 0, tzinfo=timezone.utc),
+                finished_at=datetime(day.year, day.month, day.day, 9, 5, tzinfo=timezone.utc),
+                status="success",
+                imported_accounts_count=1,
+                imported_transactions_count=0,
+            )
+        )
+        day += timedelta(days=1)
+
+    session.commit()
+    session.close()
+
+
+def test_the_bot_honours_the_configured_baseline_window() -> None:
+    """The window is configuration, and the bot is not allowed its own copy of it.
+
+    ``SummaryService`` defaults the window to 3; the API passes
+    ``settings.baseline_window_months``. A router that leaves the argument off is
+    pinned to the default, so an owner who widens or narrows the window gets one
+    answer on the dashboard and a different one in the chat -- different baselines
+    under the same wording.
+
+    Two months of reach is too little history to compare at all -- the minimum is
+    three -- and three is enough, so the comparison line's presence is what the
+    window is read off here.
+    """
+    factory = make_session_factory()
+    seed_three_clean_months(factory)
+    clock = lambda: datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
+
+    narrow = TelegramCommandRouter(
+        session_factory=factory,
+        clock=clock,
+        baseline_window_months=2,
+    ).handle("/summary")
+    wide = TelegramCommandRouter(
+        session_factory=factory,
+        clock=clock,
+        baseline_window_months=3,
+    ).handle("/summary")
+
+    assert "usual" not in narrow
+    assert "normally 300.00 EUR · 33% below usual (3-month avg)" in wide

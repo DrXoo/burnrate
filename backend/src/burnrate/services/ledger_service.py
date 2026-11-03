@@ -6,13 +6,15 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.orm import Session
 
-from burnrate.db.dispositions import awaiting_categorization
+from burnrate.db.budget_windows import budget_covers_month
+from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import effective_date, month_window, within_month
 from burnrate.db.models import (
     Account,
+    Budget,
     CategorizationRule,
     Category,
     EnableBankingAccountMapping,
@@ -31,6 +33,10 @@ class TransactionFilters:
     month: tuple[date, date] | None = None
     status: str | None = None
     categorized: bool | None = None
+    # Whether the month holds a budget for the row's category: the Budgeted /
+    # Unbudgeted Spend split of ``GLOSSARY.md``, as a row filter. It says nothing
+    # without a month, and ``_build_filters`` is what refuses that pair.
+    budgeted: bool | None = None
 
 
 class LedgerService:
@@ -101,6 +107,7 @@ class LedgerService:
         month: str | None = None,
         status: str | None = None,
         categorized: bool | None = None,
+        budgeted: bool | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
@@ -110,6 +117,7 @@ class LedgerService:
             month=month,
             status=status,
             categorized=categorized,
+            budgeted=budgeted,
         )
         limit = min(max(limit, 1), 200)
         offset = max(offset, 0)
@@ -166,6 +174,7 @@ class LedgerService:
             month=month,
             status=status,
             categorized=False,
+            budgeted=None,
         )
         count_query = select(func.count()).select_from(self._transactions_query(filters=filters).subquery())
         return self.db.scalar(count_query) or 0
@@ -178,7 +187,13 @@ class LedgerService:
         month: str | None,
         status: str | None,
         categorized: bool | None,
+        budgeted: bool | None,
     ) -> TransactionFilters:
+        if budgeted is not None and month is None:
+            # A budget covers months, so over all of history the filter has no answer
+            # to give: "no budget" would have to mean "in no month at all", which is a
+            # different question from the one a month-scoped view asks.
+            raise ValueError("Month is required to filter by budget")
         try:
             parsed_account_id = UUID(account_id) if account_id else None
         except ValueError as exc:
@@ -193,6 +208,7 @@ class LedgerService:
             month=month_window(month) if month else None,
             status=status.strip().lower() if status else None,
             categorized=categorized,
+            budgeted=budgeted,
         )
 
     def _transactions_query(self, *, filters: TransactionFilters) -> Select[Any]:
@@ -219,8 +235,53 @@ class LedgerService:
             # already resolved by exclusion. Excluded rows still show in the full
             # ledger (categorized is None) so they can be restored.
             query = query.where(awaiting_categorization())
+        if filters.budgeted is not None and filters.month is not None:
+            # The month is always set here -- ``_build_filters`` refuses the pair
+            # otherwise -- and reading it from the window is what keeps this branch
+            # free of a second month convention.
+            month_start, month_end = filters.month
+            covered = self._category_budgeted_in(month_start=month_start, month_end=month_end)
+            query = query.where(
+                # Budgeted and Unbudgeted Spend are both defined over spending that
+                # landed in an expense category, so the filter splits that set rather
+                # than every row: an income category is covered by no budget and never
+                # will be, and an uncategorized charge belongs to the review queue,
+                # which has a filter of its own. Ignored rows are stated rather than
+                # inherited from this join, for the reason ``db.dispositions`` gives.
+                #
+                # Account inclusion is deliberately *not* read, as no other filter on
+                # this page reads it: the list describes the ledger, while only the
+                # figures are account-scoped. So spend in an account left out of the
+                # calculations is listed here and is absent from the dashboard's
+                # unbudgeted total.
+                Category.type == "expense",
+                not_ignored(),
+                covered if filters.budgeted else ~covered,
+            )
 
         return query
+
+    def _category_budgeted_in(self, *, month_start: date, month_end: date) -> ColumnElement[bool]:
+        """Whether a month holds a budget for the category the row sits in.
+
+        Correlated on the row's own category rather than joined, so a category with
+        two budget rows covering one month -- which a database predating the overlap
+        guard can still hold -- yields one row here instead of duplicating the
+        transaction in the listing.
+
+        Which budgets a month holds is ``budget_covers_month``'s answer, not a second
+        reading of ``active_from``/``active_to`` spelled here: the owner would not
+        accept a row the dashboard counts as budgeted spend appearing in a list of
+        what has no budget.
+        """
+        return (
+            select(Budget.id)
+            .where(
+                Budget.category_id == Transaction.category_id,
+                budget_covers_month(month_start=month_start, month_end=month_end),
+            )
+            .exists()
+        )
 
     def _serialize_account(
         self,

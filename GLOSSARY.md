@@ -74,6 +74,19 @@ A budget for a scheduled lump commitment such as rent or utilities. It is
 charged as a step, so it is never paced day by day or rate-extrapolated.
 _Avoid_: Recurring budget, bill, committed budget
 
+**Event Budget**:
+A Fixed Budget whose window covers exactly one month, which is how the owner says
+that month's spend in its category was an event and not a habit -- a divorce, a
+boiler, a move. It counts in the actuals and steps the pace as any Fixed Budget
+does, and it is excluded from every baseline, so an event cannot become what a
+later month reports as normal. The bounded window is the whole declaration and
+there is nothing else to set: a budget's default is that it continues and an
+event's is that it does not, and because both edges of a window sit on month
+boundaries, "exactly one month" is an exact question. Not the `anomalous`
+comparison status, which is a verdict the product computes rather than something
+the owner said.
+_Avoid_: Exceptional charge, one-off, outlier, anomaly, extraordinary
+
 **Variable Budget**:
 A budget for spend that accrues day by day, and therefore the only slice a
 daily allowance can draw on. The variable total is the monthly budget minus the
@@ -133,6 +146,15 @@ Income minus spending for the month, transfers excluded on both sides. This is
 the same figure as money saved in the month; the product names it once.
 _Avoid_: Saved, savings, surplus, net income, net
 
+**Inbound Transfer**:
+Money that arrived this month from an account BurnRate cannot see, so it is
+neither income nor spend. Disclosed beside Net Cash Flow because it is what
+funded a deficit rather than part of it: the loss is counted once, in the net,
+and this says which pocket paid for it. Named for what the product can know --
+that the money came from outside its view -- and not for savings, which it has no
+way to designate.
+_Avoid_: Savings draw, deposit, top-up, incoming income, external income
+
 **Savings Rate**:
 Net cash flow as a share of the month's income, carrying the same on-track /
 watch / over verdict the budgets use. Decided in the backend, so any interface
@@ -149,3 +171,50 @@ _Avoid_: Runway, buffer, emergency fund, months of runway
 How long the owner could sustain a negative cash flow before designated savings
 run out. Only meaningful, and only shown, while cash flow is actually negative.
 _Avoid_: Runway, time left, survival time
+
+**Sync Gap**:
+Days the bank was never asked about, because no successful sync's trailing window
+reached them. Not a failure the owner caused and not one they can always fix: a
+missing day is fetchable for thirty days after it and lost once it falls out of
+that window, so a gap is reported as a deadline rather than a fact -- either days
+already gone, which makes those months' figures understated, or days still worth
+reconnecting for. A loss is reported **on the months that lost the days** and not on
+a later one, and it stops being an unprompted message once it has been one: it is a
+fact, not an ask, and a notice with nothing to do about it becomes furniture. A gap
+the next successful sync will close is not reported at all.
+_Avoid_: Sync failure, sync error, missing transactions, downtime
+
+### Baselines
+
+**Baseline**:
+What a figure normally is for the owner, over the Qualifying Months a
+window reaches: the mean for a category, which a presence floor protects, and the
+**median** for a whole-month figure, which has no floor to protect it and so needs a
+statistic that rejects an outlier instead. Recomputed from transactions on every
+request and never stored,
+so correcting the past corrects it. A figure is only ever compared against its
+own baseline, never against another owner's or an external norm.
+_Avoid_: Average, normal, trend, expected
+
+**Qualifying Month**:
+A closed month whose data can be trusted as baseline input. It must be
+classified -- measured as a share of the month's outgoing money, never of its
+rows -- and it must be spanned by successful syncs. The current month never
+qualifies, and how many months qualify is reported alongside every baseline.
+_Avoid_: Complete month, clean month, valid month
+
+**Comparable Spend**:
+The share of a month's spending that falls in categories with a baseline, and
+therefore the only spending a comparison speaks to. Judging the whole month
+instead would let one one-off in a category with no history report the owner as
+overspending in a month where everything they control came in cheap.
+_Avoid_: Baselined spend, tracked spend, known spend
+
+**Uncomparable Spend**:
+The rest of the month's spending: monthly spending less Comparable Spend. Always
+disclosed beside the comparison and never counted inside it, as Unbudgeted Spend
+is. Three things land here -- a category with no baseline, an Archived Category,
+and spend dated after today's cutoff -- and it is defined as the residual so the
+two halves reconcile against the month's spending rather than against a total of
+their own.
+_Avoid_: Unbaselined spend, other spend, excluded spend

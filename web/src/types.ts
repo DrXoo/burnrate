@@ -14,6 +14,56 @@ export type SafeToSpendStatus =
   | "month_not_started"
   | BudgetUsageStatus;
 
+/** Whether a comparison against what is normal is offered, and if not, why not.
+
+    A month that has not started has no outcome to compare however much history sits
+    behind it, so the reason is a value here rather than something this client works
+    out by cross-referencing `safe_to_spend_status`. */
+export type BaselineStatus = "ok" | "insufficient_history" | "month_not_started";
+
+/** Which side of normal a figure is, and whether it is worth raising.
+
+    Only `anomalous` is a warning. `below` is reported in full because a quiet month
+    is information, but it never raises anything: the product exists to stop the owner
+    overspending. The bands are the backend's; this client renders the words. */
+export type BaselineComparisonStatus =
+  | "no_baseline"
+  | "below"
+  | "in_line"
+  | "above"
+  | "anomalous";
+
+/** One whole-month figure against its own normal.
+
+    Net cash flow has no entry of this shape on purpose: a ratio on a figure that can
+    cross zero means nothing, so it carries an amount and no verdict.
+
+    `comparison_status` is the field that says whether there is a baseline at all.
+    The amount is not: it can read "0.00" where the band says `no_baseline`, because
+    a baseline of zero or less is one the backend refuses to divide by. Read it
+    through `baselineFigure`, never with a truthiness check on the amount. */
+export interface FigureBaseline {
+  baseline_amount: string | null;
+  deviation_percent: number | null;
+  comparison_status: BaselineComparisonStatus;
+}
+
+export interface CategoryBaseline {
+  category_id: string;
+  category_name: string;
+  // The figure the comparison is about. For the current month both sides are measured
+  // to the same day of the month, so this can differ from the category's spend in
+  // `budget_usage` when a standing order falls later in the month.
+  spend_amount: string;
+  // Null when the category is below the presence floor, or when there is too little
+  // history for any baseline. It can also be "0.00" -- two months whose movements
+  // cancel out will do it -- in which case `comparison_status` is `no_baseline` and
+  // this field must not be printed. See `baselineFigure`.
+  baseline_amount: string | null;
+  deviation_percent: number | null;
+  comparison_status: BaselineComparisonStatus;
+}
+
 export type ConnectionExpiryStatus = "unknown" | "active" | "expiring_soon" | "expired";
 
 export interface Connection {
@@ -162,6 +212,9 @@ export interface SummaryDashboard {
   current_balance_currency: string | null;
   monthly_spending_amount: string;
   monthly_income_amount: string;
+  // Neither income nor spend: money the owner moved in from an account BurnRate
+  // cannot see. Shown beside the net it funded, never folded into it.
+  inbound_transfer_amount: string;
   net_cash_flow_amount: string;
   savings_rate_percent: number;
   savings_status: BudgetUsageStatus;
@@ -177,6 +230,36 @@ export interface SummaryDashboard {
   projected_month_end_spend_amount: string;
   projected_overspend_amount: string;
   budget_usage: BudgetUsage[];
+  baseline_status: BaselineStatus;
+  // How many Qualifying Months the means rest on. Shown beside them, so the owner
+  // can see how much to trust a comparison resting on as few as two.
+  baseline_months_count: number;
+  category_baselines: CategoryBaseline[];
+  // The spend the comparison can speak to, and the rest. Uncomparable Spend is the
+  // residual -- monthly spending less the comparable half -- so the two reconcile
+  // against the headline above them. Every euro in it is one the comparison cannot
+  // speak to: a category with no baseline, an archived category, or spend dated after
+  // today's cutoff.
+  comparable_spend_amount: string;
+  uncomparable_spend_amount: string;
+  comparable_spend_baseline: FigureBaseline;
+  monthly_income_baseline: FigureBaseline;
+  net_cash_flow_baseline_amount: string | null;
+  // Null when every day of the recent past was fetched, which is the normal case and
+  // earns silence rather than a reassurance nobody asked for.
+  sync_gap: SyncGap | null;
+}
+
+/** Days the bank was never asked about, with whether they can still be had.
+    `status` is the backend's call, so the dashboard and the bot cannot word the
+    difference between money already lost and a hole worth acting on differently. */
+export interface SyncGap {
+  status: "lost" | "lost_elsewhere" | "expiring";
+  oldest_missing_day: string;
+  newest_missing_day: string;
+  missing_days: number;
+  unrecoverable_days: number;
+  recoverable_until: string | null;
 }
 
 export interface TransactionsResponse {
@@ -192,6 +275,10 @@ export interface FiltersState {
   categoryId: string;
   status: string;
   categorized: "" | "true" | "false";
+  /** Whether the month holds a budget for the transaction's category. "false" is the
+      Unbudgeted Spend of `GLOSSARY.md`: spend in an expense category this month has
+      no budget for. The backend decides it, and it needs `month` to mean anything. */
+  budgeted: "" | "true" | "false";
 }
 
 export interface PagingState {

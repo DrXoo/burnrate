@@ -211,6 +211,22 @@ Notes:
   expression index on the coalesce, or the stored `effective_date` column that
   Phase 8 deferred because it needs a backfill -- the latter restores plain
   indexing and is the better end state.
+* Baselines multiply that cost rather than adding to it: a comparison reads one
+  month window per month in its window, so the default of three turns one
+  sequential scan into several. They add **no table and no column** -- every
+  baseline is recomputed from these same rows per request, because in this product
+  the past changes (a budget cancelled from a past month, the pending sweep, an
+  Unknown Transaction finally classified) and a stored figure could not be verified
+  against it. The cost was measured rather than assumed, and the
+  answer is **no snapshot table**: 25 statements and some 37ms at the default
+  three-month window, over one owner's 623 transactions. The statement count is
+  bounded by the window rather than by how much history accrues behind it, so five
+  years of rows does not move it. What *would* move it is widening
+  `BASELINE_WINDOW_MONTHS`, which this design invites: twelve months comes to roughly
+  seventy statements per request. That is the trigger for revisiting this, and the
+  cheap mitigation then is the expression index or the stored `effective_date` column
+  named above rather than a snapshot table. Figures, method and the rejected options
+  in `docs/adr/0008-baselines-are-derived-every-request.md`.
 * The first version can stay coupled to Enable Banking transaction identifiers.
 
 ---
@@ -236,7 +252,13 @@ Suggested constraints:
 
 Notes:
 
-* `type` should support values such as `expense`, `income`, and `transfer`.
+* `type` should support values such as `expense`, `income`, and `transfer`. It is
+  what decides which side of every figure a category's money lands on, and it is
+  deliberately **not editable through the API**: correcting one rewrites what every
+  past month reported, so it is done by a migration rather than a control to click
+  past. `0009_from_savings_is_a_transfer` is the worked example, and
+  `docs/adr/0010-a-savings-draw-is-a-transfer.md` records why a credit from the
+  owner's own account is a `transfer` and not `income`.
 * `name` is editable after creation and is the only label any surface shows for a
   category, so nothing stores a copy of it. Uniqueness is enforced
   case-insensitively by the application, which is stricter than the exact database

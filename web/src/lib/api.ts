@@ -377,6 +377,7 @@ export async function getTransactions(
     category_id: filters.categoryId || undefined,
     status: filters.status || undefined,
     categorized: filters.categorized || undefined,
+    budgeted: filters.budgeted || undefined,
     limit: paging.limit,
     offset: paging.offset,
   })}`);

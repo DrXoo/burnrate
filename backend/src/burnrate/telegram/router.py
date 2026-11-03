@@ -35,10 +35,15 @@ class TelegramCommandRouter:
         session_factory: Callable[[], Session],
         timezone_name: str = "UTC",
         clock: Callable[[], datetime] | None = None,
+        baseline_window_months: int = 3,
     ) -> None:
         self._session_factory = session_factory
         self._timezone_name = timezone_name
         self._clock = clock or (lambda: datetime.now(UTC))
+        # Carried rather than left to the service's own default: the API passes
+        # ``settings.baseline_window_months``, and a bot pinned to the default
+        # publishes different baselines under the same wording as the dashboard.
+        self._baseline_window_months = baseline_window_months
 
     def handle(self, text: str) -> str:
         command, argument = self._parse(text)
@@ -93,6 +98,7 @@ class TelegramCommandRouter:
             db=session,
             timezone_name=self._timezone_name,
             clock=self._clock,
+            baseline_window_months=self._baseline_window_months,
         )
 
     def _unknown(self, session: Session, argument: str | None) -> str:

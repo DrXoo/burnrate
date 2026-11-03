@@ -4,6 +4,8 @@ import {
   TONE_COLOR,
   TONE_DIM,
   TONE_LABEL,
+  baselineFigure,
+  comparisonPhrase,
   eur,
   eurPlain,
   formatMonthLabel,
@@ -12,7 +14,7 @@ import {
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
 import type { HeroMode } from "../../lib/viewTypes";
-import type { SafeToSpendStatus, SummaryDashboard } from "../../types";
+import type { SafeToSpendStatus, SummaryDashboard, SyncGap } from "../../types";
 
 interface DashboardPageProps {
   summary: SummaryDashboard | null;
@@ -272,8 +274,15 @@ function useSavingsModel(summary: SummaryDashboard) {
     // its own, so the dashboard and the bot cannot disagree.
     const saved = num(summary.net_cash_flow_amount);
     const tone = usageTone(summary.savings_status);
+    // Money the owner moved in from an account BurnRate cannot see. It funded the
+    // net rather than forming part of it, so it reads as that figure's cause and is
+    // never added to it. The phrase is built here, once, because both hero modes
+    // render it -- formatting the net baseline at two call sites is exactly how it
+    // came to be signed in one mode and unsigned in the other.
+    const movedIn = num(summary.inbound_transfer_amount);
 
     return {
+      movedInNote: movedIn !== 0 ? ` · ${eurPlain(movedIn)} moved in from an unsynced account` : "",
       income: num(summary.monthly_income_amount),
       spending: num(summary.monthly_spending_amount),
       saved,
@@ -497,7 +506,20 @@ function MeterBar({ label, value, subtitle, fillPct, color, markers = [], footLe
   );
 }
 
-function MetricCard({ label, value, sub }: { label: string; value: string; sub: ReactNode }) {
+function MetricCard({
+  label,
+  value,
+  sub,
+  compare,
+}: {
+  label: string;
+  value: string;
+  sub: ReactNode;
+  // A second line beneath a figure the owner already reads, rather than a page of
+  // its own: the product competes with a fuel gauge, not with a BI tool. Absent
+  // whenever the backend offers no comparison.
+  compare?: ReactNode;
+}) {
   return (
     <div style={cardBase}>
       <div style={{ fontSize: 12, color: "var(--text-3)", fontWeight: 600, marginBottom: 7 }}>{label}</div>
@@ -505,6 +527,9 @@ function MetricCard({ label, value, sub }: { label: string; value: string; sub: 
         {value}
       </div>
       <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3 }}>{sub}</div>
+      {compare ? (
+        <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3 }}>{compare}</div>
+      ) : null}
     </div>
   );
 }
@@ -539,7 +564,44 @@ export function DashboardPage({ summary, loading, error, heroMode, includedAccou
           <FailureBanner>These figures may be out of date — {error}</FailureBanner>
         </div>
       ) : null}
+      <SyncGapBanner gap={summary.sync_gap} />
       <DashboardContent summary={summary} heroMode={heroMode} includedAccountCount={includedAccountCount} />
+    </div>
+  );
+}
+
+/** Days the bank was never asked about, above every figure they invalidate.
+ *
+ * Two sentences, picked by the backend's `status` rather than by counting here: when
+ * days are lost there is nothing to do and the point is that past months are
+ * understated, and when they can still be had the point is the date. The owner read
+ * two months of understated totals in 2026 with nothing anywhere saying so, which is
+ * why this sits above the figures rather than among them.
+ */
+function SyncGapBanner({ gap }: { gap: SyncGap | null }) {
+  // ``lost_elsewhere`` is a real loss belonging to another month, and the month it
+  // belongs to is where it is said. A permanent notice about August on top of
+  // November is how a warning becomes furniture.
+  if (!gap || gap.status === "lost_elsewhere") {
+    return null;
+  }
+  const days = `${gap.missing_days} ${gap.missing_days === 1 ? "day" : "days"}`;
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <FailureBanner>
+        {gap.status === "lost" ? (
+          <>
+            {days} of bank data were never fetched ({gap.oldest_missing_day} to{" "}
+            {gap.newest_missing_day}) and can no longer be recovered. Figures for those months
+            are understated.
+          </>
+        ) : (
+          <>
+            {days} of bank data are missing since {gap.oldest_missing_day}. Reconnect the bank
+            before {gap.recoverable_until} and they will be fetched.
+          </>
+        )}
+      </FailureBanner>
     </div>
   );
 }
@@ -574,6 +636,11 @@ function DashboardContent({
   const headline = useHeadline(summary);
   const disclosures = useDisclosures(summary);
   const savings = useSavingsModel(summary);
+  // Taken off the band rather than off the amount, once per card. See
+  // ``baselineFigure``: the amount can read "0.00" while the band says there is no
+  // baseline at all, and "0.00" is truthy.
+  const incomeBaseline = baselineFigure(summary.monthly_income_baseline);
+  const comparableBaseline = baselineFigure(summary.comparable_spend_baseline);
 
   return (
     <div>
@@ -682,7 +749,15 @@ function DashboardContent({
               color={savings.statusColor}
               label="Saved this month"
               centerText={eur(savings.saved)}
-              subtitle={`of ${eurPlain(savings.income)} income`}
+              subtitle={
+                // Both hero modes carry it: the owner picks the mode, not the data.
+                // Signed, because this is the one baseline that can be a deficit --
+                // the amount is published without a band for exactly that reason --
+                // and an unsigned formatter smuggled the minus in as "€-450.00".
+                summary.net_cash_flow_baseline_amount != null
+                  ? `of ${eurPlain(savings.income)} income · normally ${eur(summary.net_cash_flow_baseline_amount)} kept${savings.movedInNote}`
+                  : `of ${eurPlain(savings.income)} income${savings.movedInNote}`
+              }
               footLeft="saved"
               footRight={`${savings.ratePct} rate`}
             />
@@ -714,7 +789,17 @@ function DashboardContent({
             <MeterBar
               label="Saved this month"
               value={eur(savings.saved)}
-              subtitle={<>of {eurPlain(savings.income)} income this month</>}
+              subtitle={
+                <>
+                  of {eurPlain(savings.income)} income this month
+                  {/* An amount and no verdict: a ratio on a figure that can cross
+                      zero means nothing, and the two figures side by side say it. */}
+                  {summary.net_cash_flow_baseline_amount != null ? (
+                    <> · normally {eur(summary.net_cash_flow_baseline_amount)} kept</>
+                  ) : null}
+                  {savings.movedInNote}
+                </>
+              }
               fillPct={`${(savings.savedFrac * 100).toFixed(1)}%`}
               color={savings.statusColor}
               footLeft={
@@ -783,11 +868,42 @@ function DashboardContent({
           label="Monthly income"
           value={eur(summary.monthly_income_amount)}
           sub="booked income this month"
+          compare={
+            incomeBaseline != null ? (
+              <>
+                normally {eurPlain(incomeBaseline)} ·{" "}
+                {comparisonPhrase(summary.monthly_income_baseline)}
+              </>
+            ) : null
+          }
         />
         <MetricCard
           label="Monthly spending"
           value={eur(summary.monthly_spending_amount)}
           sub={`${eurPlain(summary.budgeted_spending_amount)} budgeted · ${eurPlain(summary.unbudgeted_spending_amount)} unbudgeted`}
+          compare={
+            // Said on the spending card alone rather than under all three figures:
+            // one statement of the reason, beside the figure the owner acts on.
+            // Silence would read as "nothing to say about your spending", which is a
+            // different and wrong claim -- and the owner's own fix is to classify
+            // the months the backlog disqualified.
+            summary.baseline_status === "insufficient_history" ? (
+              <>not enough history to compare yet</>
+            ) : comparableBaseline != null ? (
+              <>
+                {eurPlain(summary.comparable_spend_amount)} comparable · normally{" "}
+                {eurPlain(comparableBaseline)} ·{" "}
+                {comparisonPhrase(summary.comparable_spend_baseline)}
+                {/* Disclosed beside the comparison, never folded into it. A month
+                    dominated by a one-off in a category with no history would
+                    otherwise report catastrophic overspending while every ordinary
+                    category came in cheap. */}
+                {num(summary.uncomparable_spend_amount) > 0 ? (
+                  <> · {eurPlain(summary.uncomparable_spend_amount)} cannot be compared</>
+                ) : null}
+              </>
+            ) : null
+          }
         />
         <MetricCard
           label="Projected spend"

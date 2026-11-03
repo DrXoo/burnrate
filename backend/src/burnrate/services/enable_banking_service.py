@@ -40,7 +40,16 @@ _CONSENT_VALIDITY_MARGIN = timedelta(minutes=5)
 
 # How far back a sync re-asks the bank. One number, because the booked fetch, the
 # pending fetch and the sweep all read it: see ``_transaction_window``.
-_TRANSACTION_WINDOW = timedelta(days=30)
+TRANSACTION_WINDOW = timedelta(days=30)
+"""The one trailing window the booked fetch, the pending fetch and the sweep share.
+
+Public because baseline coverage is now a fourth reader: a month is only
+trustworthy as baseline input if successful syncs asked about every one of its
+days, and that question is this window's length. ``enable-banking.md`` requires
+all readers to derive from a single value rather than restating 30, which is how
+a hold that booked across a month boundary came to be deleted and never
+re-imported.
+"""
 
 
 @dataclass
@@ -722,7 +731,7 @@ class EnableBankingService:
         in ``docs/technical/bank-integrations/enable-banking.md``.
         """
         today = self._owner_today()
-        return today - _TRANSACTION_WINDOW, today
+        return today - TRANSACTION_WINDOW, today
 
     def _owner_today(self) -> date:
         return civil_date(timezone_name=self.settings.app_timezone, instant=self._clock())

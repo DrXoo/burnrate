@@ -383,7 +383,26 @@ rendering, which ticket 17 then took.
 
 ---
 
-## Phase 9: "Is this normal?"
+## Phase 9: "Is this normal?" — Split; 9a shipped, 9b not started
+
+**The phase was split before any code was written**, during
+`/grill-with-docs`. Its six scope bullets hold three independent machines, and two
+of them are each larger than Phase 8's original scope was — which Phase 8 then
+overran by sixteen tickets. The split falls on the natural seam:
+
+* **9a — baselines.** Trailing per-category averages, month-over-month comparison,
+  and anomaly flagging on category totals. All three hang off the same aggregation.
+  **Shipped**; its Definition of Done is checked below.
+* **9b — recurring charges.** Recurring-payment detection, the subscription
+  inventory and price-change detection. All three hang off matching by counterparty
+  and need no baseline at all. **Not started.** It also owes the last open Phase 8
+  gap, because carrying a decision across the pending-to-booked transition needs the
+  same identity matching.
+
+The Definition of Done below is the *whole* phase's and is not satisfied: its
+second clause is entirely 9b's. **Phase 9 is open.** The original clause was also
+**rewritten on 2026-11-02** after it failed its own check; both versions are below,
+and **Revised: what a baseline is for** is the argument that forced it.
 
 ### Objective
 
@@ -407,11 +426,533 @@ Prefer computing from source transactions. If query cost becomes a problem,
 introduce a monthly snapshot table — but measure first, and keep derived metrics
 derived, per the database rules in `AGENTS.md`.
 
-### Definition of Done
+### Definition of Done — superseded
 
-Every headline figure on the dashboard is shown against its own baseline, and the
-owner can see a list of their recurring commitments and total subscription cost
-without having gone looking for it manually.
+> Every headline figure on the dashboard is shown against its own baseline, and the
+> owner can see a list of their recurring commitments and total subscription cost
+> without having gone looking for it manually.
+
+Kept as written because what it got wrong is the lesson. Its first clause names no
+enumerable set, so it could only be evaluated by inventing a denominator at close —
+and when that was done it scored **3 of 8** and got the denominator wrong on the
+first attempt. The replacement is below; the reasoning that forced it is under
+**Revised: what a baseline is for**.
+
+### Definition of Done — revised
+
+Eight dashboard figures, named, each with its answer fixed in advance:
+
+| Figure | Baseline? | Why |
+|---|---|---|
+| Monthly income | **yes** | the one figure no budget states, so history is the only possible source of normal |
+| Monthly spending | **yes**, on the Comparable Spend basis | with its uncomparable residual disclosed beside it |
+| Net cash flow | **yes** | met 2026-11-02: `figure_baseline_amount` is a median, which is the protection it had none of. Published as an amount with no band, because a ratio on a figure that crosses zero means nothing |
+| Safe to Spend Today | no | comparing an allowance across months mixes a budget, a month length and a fixed overrun, all of which moved |
+| Budget left | no | a budget the owner changed; the budget *is* the statement of normal |
+| Projected spend | no | a plan, not an outcome |
+| Burn rate | no | already compared against the plan, which is the comparison that acts on it |
+| Current balance | no | a level with no month, so a monthly mean says nothing about it |
+
+Every "no" renders **one line saying which kind of blank it is**, so that "no history
+for this", "deliberately not compared" and "nobody asked" are not the same pixel.
+
+And three rules, each of which must be the sole cause of a failing test:
+
+* A month's spend declared an event by a **one-month Fixed Budget window** reaches no
+  baseline. The test fails with `BASELINE_PRESENCE_FLOOR` neutralised, or the rule has
+  no test — see the third failure mode in `AGENTS.md`.
+* **No baseline is offered at all** while the qualifying months behind it are events
+  rather than months. `BASELINE_MINIMUM_MONTHS` is what enforces this.
+* The recurring half stays 9b's and is enumerated the same way: **the recurring
+  commitments present in the live data at close, listed by name in the spec**, not
+  "their recurring commitments".
+
+### Definition of Done: checked (9a)
+
+Checked against the implementation rather than assumed, and against the live
+database rather than only the tests. Phase 8 learned that its own check was not
+enough — the check found five gaps and per-ticket review found five more — so this
+one reads the running product too.
+
+| Clause | Result | Evidence |
+|---|---|---|
+| Every headline figure on the dashboard is shown against its own baseline | **Not met as written: three of eight** | Monthly spending, Monthly income and Saved this month each carry a comparison, asserted in `web/tests/DashboardPage.test.tsx`. Safe to Spend Today, Current balance, Budget left, Projected spend and Burn rate do not. This check first recorded the denominator as **seven**, having missed Burn rate — which is evidence for the wording gap below rather than a separate slip. See the gaps. |
+| The owner can see their recurring commitments and total subscription cost | **Not met** | 9b, not started. Nothing in the codebase detects a Recurring Charge. |
+| Trailing per-category averages over a configurable window, default 3 months | Met | `BASELINE_WINDOW_MONTHS`, default 3, read through the dependency the route uses and asserted by behaviour rather than by attribute. |
+| Month-over-month comparison on spending, income and per-category totals | Met in substance, not on the stated surface | Spending, income and net cash flow are on the dashboard. The per-category comparison is on the **Categories** page, not the dashboard, and the dashboard's own per-category rows carry none. See the gaps. |
+| Anomaly flagging on category totals, relative to baseline | Met | One status over five bands in `burnrate.domain.baselines`, fired one-sided at 1.5× the baseline, as a worked-example table. |
+| Anomaly flagging **on transactions** | **Not met, deliberately** | Needs a per-transaction distribution. Two Qualifying Months with eleven rows in a category is not one. Recorded in the spec's Out of Scope rather than discovered later. |
+| Derived metrics stay derived; measure before any snapshot table | Met | No migration, no table, nothing stored. Measured before and after: 6 statements to 13-15 live, 25 at the ceiling; the decision is no snapshot table, with widening the window named as the trigger to revisit. |
+
+### Known gaps (9a)
+
+Recorded explicitly, because Phase 3 was closed over a known gap and it stayed
+closed for six phases.
+
+* **Five of the dashboard's eight figures have no baseline, and only one of those is
+  a decision.** Safe to Spend Today is excluded deliberately and has a test saying so
+  — comparing an allowance across months mixes a budget, a month length and a fixed
+  overrun, all of which moved. **Current balance, Budget left, Projected spend and
+  Burn rate were never examined at all.** Two of them plausibly deserve the
+  allowance's reasoning (Budget left is a budget the owner changed; Projected spend is
+  a plan, not an outcome) and Current balance plausibly deserves a baseline, but none
+  of that was decided — it was simply not asked, and the Definition of Done says
+  "every".
+
+  **Burn rate is the sharpest of the five**, and the one this check itself missed: it
+  is the only figure that already carries a comparison — `vs €20.00/day planned` —
+  against the *budget* rather than against the owner's *past*. That is precisely the
+  distinction Phase 9 exists to add, on the one figure where it was never considered.
+* **The same cause produces a sentence on one card and silence on two others.** With
+  `baseline_status == "insufficient_history"`, the spending card says "not enough
+  history to compare yet" while Monthly income and Saved this month render nothing —
+  because the spending card branches on `baseline_status` and the other two branch on
+  their own null `baseline_amount`. Identical cause, three different surfaces. The
+  product already decided that silence is a claim; that decision reached one card.
+* **A blank beside a figure now means three different things and looks the same.**
+  "No history for this" (income, saved), "deliberately not compared" (Safe to Spend
+  Today) and "nobody ever asked" (the other four). The owner cannot tell them apart,
+  which makes the cheap fix not four more baselines but **one line per figure saying
+  which of the three it is**.
+* **The clause could not be checked as written, and that is the reusable lesson.**
+  "Every headline figure" names no enumerable set, so the clause was neither true nor
+  false until someone invented the list at close — and the first attempt got the
+  denominator wrong. Phase 8's DoD had the same shape (*"**No** financial rule or
+  threshold remains in the Web UI"*) and resolved it by carving an exception into its
+  own evidence row; it got away with it because the exception was defensible.
+  **Phase 11's DoD has the same shape waiting** — *"no documented metric remains
+  unimplemented"* — and it is the clause Phase 3 failed silently for six phases. A
+  clause that can only be evaluated by inventing its denominator at close is an
+  opinion issued when it is most expensive to act on. Enumerate the set in the
+  clause.
+* **The dashboard's Budget pulse rows are silent while the Categories page's rows
+  are not.** Both render the same categories for the same month; one carries the
+  comparison and the other does not. Cheap to close: the per-category payload already
+  exists and joins by category id. Left open only because no ticket owned it.
+  `budget_usage` is the wrong carrier on its own, though — it holds only budgeted
+  categories, which is why the comparison travels in a list of its own.
+* **Nothing yet is proactive**, by design. 9a makes the comparison visible; Phase 10
+  is what makes the product speak first.
+* **`as_utc` is a clock concern living in a consent module.** Baseline sync coverage
+  imports it from `services/connection_expiry.py`, where its own docstring says it is
+  for a datetime read back naive from SQLite. It was imported rather than duplicated
+  or moved, because `AGENTS.md` forbids riding a refactor along on a feature; the
+  review stage was where it should have been picked up and was not. Two readers now,
+  so the next one is the trigger.
+
+### The gap that is not in the code (9a)
+
+**The live product shows no comparison at all today**, and the reason is the data
+rather than the implementation. Both the current and a closed month report
+`insufficient_history` with **zero** Qualifying Months, because the sync history has
+a **36-day hole from 2026-08-29 to 2026-10-04** — wider than the 30-day fetch window.
+The sync-coverage rule found it; nothing else in the system reports it.
+
+August and September therefore **can never qualify**: no entry point can request a
+window older than 30 days, so 30 August to 3 September will never be fetched. Their
+spending totals are understated by whatever fell in those days, and every figure
+BurnRate has ever reported for those two months is too.
+
+Two consequences worth carrying into Phase 10 and beyond:
+
+* **The feature becomes demonstrable in December 2026** without anyone touching it,
+  once October and November are both closed and inside the window. It can instead be
+  demonstrated today by classifying the June and July backlog — both months *are*
+  sync-covered — and setting `BASELINE_WINDOW_MONTHS=5`. That this is an environment
+  variable rather than a migration is the return on refusing a stored accumulator
+  during design.
+* ~~**Nothing alerts the owner to a sync gap.**~~ **Closed 2026-11-03.** The product
+  carried on reporting figures for months it never fully fetched — the one case where
+  it knew something the owner could not see.
+
+  > **Correction, 2026-11-03.** This section attributed the hole to a lapsed consent
+  > writing a `skipped` session per attempt. **That is false, and it mattered**,
+  > because it is the wrong thing to build against. There is exactly **one** `skipped`
+  > session in the whole database, dated 2026-07-09, and the active connection was
+  > authorized on 2026-07-16 and expires 2027-01-12. The consent alert *works*: it
+  > fired on 2026-07-16 for the previous connection, three days before it lapsed.
+  >
+  > **There are no `sync_sessions` rows at all between 2026-08-29 and 2026-10-04.**
+  > The 29th cut off at 33 runs of 48 and the 4th resumed at 27. The worker was not
+  > running for 36 days.
+  >
+  > Which is why the alert could not be only where it was first proposed: **a process
+  > that is not running cannot report itself.** The gap is therefore read at request
+  > time in `/summary`, which is the only path that catches a dead worker, and the
+  > worker reports it at **startup** — the first moment it can speak, and what
+  > debounces it without a stored `*_alerted_at`. A timely warning *during* an outage
+  > needs something outside the process entirely, and that is deployment, not a
+  > feature. See ADR-0013.
+
+### The leak with a deadline (9a)
+
+The sync hole above is why no comparison shows **today**. This is what happens when
+one does. Measured against the live database on 2026-10-26, not reasoned about:
+
+```
+month    sync covered   unclassified share of outgoing   qualifies
+2026-06       yes               66.6%  (4,661.72)           no
+2026-07       yes               62.9%  (4,952.77)           no
+2026-08       no                 0.0%                       no, permanently
+2026-09       no                 0.0%                       no, permanently
+2026-10        —                 2.2%    (212.99)           yes, once it closes
+```
+
+August and September are perfectly classified and permanently disqualified; June and
+July are fully fetched and disqualified only by the backlog. So a window of three
+from **December 2026** reaches September, October and November, September is gone,
+and what is left is **October and November — exactly the two-month minimum**.
+
+> **The first baseline this product ever shows its owner will be a two-month mean,
+> and one of the two months is October 2026.**
+
+October 2026 holds **€8,403.83** in a category named `Divorce` — five booked
+transfers, the largest €5,000.00, dated the 1st and the 9th — against a monthly spend
+of €9,251.08. It is 90.8% of the month and 97.2% of all unbudgeted spend. Three of the
+four aggregate baselines survive that; one does not.
+
+| Baseline | Survives October? | Why |
+|---|---|---|
+| Per-category | **yes** | `Divorce` has spend in one of the two months, and `BASELINE_PRESENCE_FLOOR` is 2, so it is denied a baseline |
+| Comparable spend | **yes** | built from the per-category baselines, so a category without one cannot enter it |
+| Monthly income | yes | the charge is spend |
+| **Net cash flow** | **no** | `figure_baseline_amount` is a plain mean with **no presence floor and no outlier handling** |
+
+The exemption is deliberate and documented — *"a month in which nothing came in is a
+fact about the owner's year, and skipping it would report a salary as normal to
+someone who was paid once in three months"* — and it is exactly what lets the charge
+through. October's net of **−€354.88** enters whole and carries **half** the weight of
+the owner's first-ever "normal".
+
+> **Correction, 2026-11-02.** That −€354.88 was itself wrong, and wrong by a factor of
+> twenty-three. `From Savings` was typed `income`, so five credits from the owner's own
+> savings totalling €7,841.00 counted as money earned; the figure was measuring how
+> much the *current account* drained. October's real net is **−€8,208.87**. Retyped by
+> `0009_from_savings_is_a_transfer`; see `docs/adr/0010-a-savings-draw-is-a-transfer.md`.
+> The leak this section describes is worse than it says, not better.
+
+The consequence is not a wrong pixel. From December 2026 the product begins telling
+the owner that a monthly deficit is normal for them, the divorce is laundered into
+their baseline, and **nothing anywhere says so**. Every remedy below has to land
+before then, and the per-category protection that does work is the reason this is one
+figure rather than all of them.
+
+Two things that do **not** fix it, recorded so they are not re-proposed:
+
+* **A Fixed Budget on the category.** It fixes the pace figures (see the proposal
+  below) and has no effect here. *Corrected 2026-11-02:* this said `_category_spend`
+  has "no budget awareness at all", which is wrong in letter — `_fixed_categories_by_month`
+  does read `Budget.is_fixed`, month by month. But it reads it only to decide whether
+  **pending** spend counts, and all seven divorce rows are booked, so they enter every
+  baseline in full. Right in substance, and the correction matters because a reader
+  checking the claim would have found the budget join and concluded the opposite.
+* **A median or a trimmed mean.** At the two Qualifying Months the minimum allows, a
+  median *is* the mean. Robust statistics need a distribution, and per-transaction
+  distributions are out of scope by decision, not by omission.
+
+The cheap mitigation that does work is already named above: classifying the June and
+July backlog (**€9,614.49** of unclassified outgoing money across the two) and
+widening `BASELINE_WINDOW_MONTHS` to 5. From October that window reaches May to
+September and **excludes the divorce entirely**, because October is the month on
+screen rather than a candidate. It buys a clean baseline now and dilutes October to a
+third of the weight later.
+
+> **Outcome, 2026-11-02.** July was classified: 62.9% of outgoing money unclassified
+> down to **0.0%**, so it qualifies. The mitigation did not work, and the reason is the
+> one thing nobody checked — **July is an outlier too.** It holds a €5,500.00
+> severance, €4,821.00 of it moved to savings the same week, giving a **+€2,909.73**
+> month. Diluting a divorce with a severance is not a baseline. The three answers it
+> produces are measured under **Revised: what a baseline is for**, and all three are
+> false. June is still 66.6% unclassified and a 5-month window from December does not
+> reach it anyway.
+
+---
+
+## Revised: what a baseline is for
+
+Written on 2026-11-02, after the owner's own objection: *an unforeseen expense wrecks
+the baseline, unforeseen expenses happen easily — a mortgage, a car, a car repair, a
+trip — and having to wait months for it to be clean again is bad design.* The
+objection is right about something specific and wrong about something specific, and
+the difference is what this section exists to fix.
+
+### Four examples, four different things
+
+**A mortgage is not an outlier.** It is a new recurring commitment, the owner enters
+it as a Fixed Budget, and the baseline should rise at once. A baseline that takes
+three months to notice a mortgage is wrong for being *slow*, not for being fragile.
+Nothing here needs changing for it.
+
+**A car or a trip is an event**, and the owner already declares it without being
+asked. On 2026-11-02 they bounded `Divorce` and `Relocation` to `2026-10-31`
+themselves, using a primitive they already understood, for an unrelated reason. That
+is the whole argument for reading the *window* rather than asking for a flag: the
+Exceptional Charge was declined twice because it asked for a new gesture, and a
+one-month Fixed Budget window asks for none.
+
+**A car repair is the case the objection was really about, and it was measured.** July
+2026 holds €565.40 of `Car Maintenance` over 6 rows, against €3,015.02 of spend.
+Removing it moves a three-month spend mean from €2,713.59 to €2,525.13 — **7.5%**,
+inside the 15% in-line band. It is absorbed and never reported. That generalises: a
+one-off small enough not to budget is small enough not to move a mean, and one large
+enough to move a mean is one the owner would have budgeted. The gap between the two is
+narrower than it looks from outside.
+
+### What actually breaks it is two numbers and a hole
+
+Not the idea. `BASELINE_WINDOW_MONTHS` is 3 and `BASELINE_MINIMUM_MONTHS` is 2, so **a
+single event is half of "normal"** — and two of the owner's five months are
+permanently dead from a 36-day sync hole. At a twelve-month window a divorce is one
+month of twelve and none of this conversation exists.
+
+So the fragility is a property of starting up, made acute by a data accident. It is
+still a real defect, because every product starts up.
+
+### The defect that is narrower and worse
+
+Per-category baselines **are** protected: `BASELINE_PRESENCE_FLOOR` denies a mean to a
+category with spend in fewer than two Qualifying Months, so an event in a new category
+never becomes a normal.
+
+The aggregates had **no protection at all**. `figure_baseline_amount` was a plain
+mean — no presence floor, no outlier handling — and the exemption was deliberate and
+documented. That exemption is the hole October walks through, and no budget and no
+window rule closes all of it, because an exceptional *income* has no budget to bound.
+The owner's July is the proof: a €5,500.00 severance, €4,821.00 of it moved straight
+to savings, giving a **+€2,909.73** month.
+
+> **Closed 2026-11-02, by a median.** 9a rejected a median and was right to on the
+> floor it had: *"at the two Qualifying Months the minimum allows, a median is the
+> mean."* A median of **three** is not the mean — it rejects exactly one outlier — so
+> raising `BASELINE_MINIMUM_MONTHS` to 3 is what made it available, and the two
+> changes only work together. The function had **no test of its own at all** until
+> then; it was exercised only through the service, which is how a plain mean survived
+> in the one figure that needed robustness most. Over {July, October, November} it now
+> reads **−€1,568.45** where the mean read −€2,289.20, and income reads **€1,055.20**
+> where the mean read €2,653.38. "Normally" now means typical rather than average,
+> which is the claim the product was making in words all along. ADR-0012 records it,
+> including why a category keeps its mean and the trap that **lowering the minimum
+> back to 2 silently turns this median back into a mean** with nothing to say so.
+
+**Half the system is protected and the half that is not is the half that is lying.**
+
+### Measured: every answer available on 2026-12-01 is false
+
+Corrected months, after `From Savings` was retyped and July classified:
+
+| Month | Net | What it is |
+|---|---|---|
+| 2026-07 | **+€2,909.73** | a severance |
+| 2026-08 | −€1,596.91 | ordinary — **permanently disqualified** |
+| 2026-09 | −€1,568.45 | ordinary — **permanently disqualified** |
+| 2026-10 | **−€8,208.87** | a divorce |
+| 2026-11 | in progress | — |
+
+With November landing near September, the three reachable answers are:
+
+| Scenario | Qualifying | Baseline |
+|---|---|---|
+| Window 3, as shipped | Oct, Nov | **−€4,888.66** |
+| Window 5, July classified | Jul, Oct, Nov | −€2,289.20 |
+| Window 5 + the event rule | Jul, Oct, Nov | **+€395.41** |
+
+The third is the worst: the rule removes the divorce and leaves the severance, so the
+product tells an unemployed owner burning €1,600 a month that they normally save €395.
+The second looks defensible and is an accident — a severance cancelling a divorce.
+
+**The owner's only two ordinary months are the two the bank was never asked about.**
+Everything that qualifies is an event. The baseline is not missing a rule; there is
+nothing normal to average.
+
+### The claim shrinks
+
+The original Definition of Done promised a baseline beside every figure and scored 3
+of 8. That was read as eight gaps to close. It is better read as the goal being wrong.
+
+The owner has already told the product what normal is: **it is the budget.** A
+baseline is a second, derived, fragile answer to a question already answered. Where it
+is not a second answer is narrow, and that narrow set is what the revised Definition
+of Done keeps:
+
+* **Income**, which nobody budgets, so history is the only source.
+* **Telling the owner their budget is unrealistic** — budget €450 of food against
+  €600 spent every month and the budget says "over" forever and teaches nothing, while
+  the baseline says "this month is like your months". There the baseline does not
+  compete with the budget; it corrects it.
+
+Outside those, *"is this normal?"* competes with *"am I on plan?"*, and the second is
+the hero metric — which uses no baseline at all.
+
+### The structural answer, named as such
+
+**Widen the window.** At twelve months with a median instead of a mean, outliers stop
+mattering and the robust statistics that are out of scope today become available,
+because a median needs a distribution and twelve months is one. It cannot be done now:
+there are five months of history, two of them dead.
+
+9a measured the cost of the window before deciding against a snapshot table — 6
+statements to 13-15 live, 25 at the ceiling — and named *widening the window* as the
+trigger to revisit that decision. **This is that trigger being claimed in advance.**
+Twelve months and a median is the target shape; every parameter change before then is
+a patch on N=2 and should be recorded as one.
+
+### What this costs, in order
+
+1. **`BASELINE_MINIMUM_MONTHS` to 3**, before 2026-12-01. One line. Not a delaying
+   tactic: any number the product could publish that day is false, and it already
+   knows how to say *"not enough history to compare yet"*. Saying it is the correct
+   output.
+2. **The event rule.** A predicate beside `budget_covers_month` — `is_fixed` and both
+   edges on the same month's boundaries, which ADR-0005 makes an exact comparison —
+   applied in `_month_spending` and `_category_spend` and nowhere else. It does not
+   rescue December, and it makes every month after it clean with no new gesture from
+   the owner. Owes an ADR at implementation.
+3. ~~**Protect the aggregates**~~, which is the defect this section exists to name.
+   **Done 2026-11-02**: a median, which needed the minimum of three above it and
+   nothing else. The guess that it "needs the window first" was wrong — the window
+   would have helped a median, but three months were already enough for one.
+4. **Then the window**, with the snapshot-table decision reopened against measurement
+   rather than against the estimate 9a made.
+
+---
+
+## Declined: the Exceptional Charge
+
+**Declined by the owner on 2026-11-02, twice over, and the reasoning is kept because
+what replaced it is weaker in one place and stronger in another.**
+
+The pace half was solved instead by a **Fixed Budget** on `Divorce`, bounded to
+`2026-10-01`-`2026-10-31`: `_project_fixed` steps it and `fixed_booked_spend` lifts it
+out of the variable slice, so October's burn rate reads €22.71/day against €20.00
+planned instead of €302.84. That is the figure set this proposal argued a Budget could
+not be trusted with, and over one month it can — the objection was never mechanical,
+it was that a Budget's default is to continue. Bounding the window is what answers it,
+and the owner bounded it unprompted.
+
+The baseline half is taken by the **event rule** above, which reads that same bounded
+window instead of asking for a declaration. The proposal's own argument is why: a
+category-level flag is a new gesture, and the window is one the owner already makes.
+
+What the Budget does **not** cover, and this proposal would have: a one-off inside an
+*ordinary* category — a boiler repair filed under `Home` — which no budget window can
+express without inventing a budget for it. That case is unreached in the live data and
+is the reason this section is kept rather than deleted.
+
+The original reasoning follows unchanged.
+
+### Why it was proposed
+
+One primitive, which closes a live Phase 8 defect and the Phase 9 leak above with the
+same rule, and which the owner's October is the worked example for.
+
+### The product models two kinds of spend and there are three
+
+1. **Budgeted recurring** — rent, food. Has a budget; paced, or stepped if fixed.
+2. **Unbudgeted ordinary** — the small unplanned stuff. *Must* pace, and must erode
+   the allowance.
+3. **Exceptional** — the divorce, a boiler, a car written off. Real money, but neither
+   a rate nor a budget overrun. An event.
+
+**2 and 3 are collapsed into "unbudgeted", and that collapse is the defect.** An
+exceptional charge has no budget, so it is not `is_fixed`, so it lands in the variable
+slice and is extrapolated as a daily rate.
+
+### What that does to the live dashboard
+
+October 2026, day 26 of 31, with the €8,403.83 charge in the variable slice:
+
+| Figure | Live value | What the charge does |
+|---|---|---|
+| Burn rate | €349.04/day vs €20.00 planned | **swallowed whole** — 17× the plan |
+| Projected spend | €10,730.94 | **extrapolated forward**, as though the divorce continued at €349/day |
+| Monthly spending | €9,251.08 | counted. Correct. |
+| Saved this month | −€354.88 | counted. Correct. |
+| Safe to Spend Today | **€32.13, `on_track`** | **invisible to it** |
+| Budget left | €313.83 | invisible to it |
+
+These are two opposite failures. The pace figures treat the charge as **recurring**;
+the budget figures **cannot see it**. Only the actuals are right.
+
+Removing the charge from the variable slice gives a burn rate of **€25.82/day**
+against €20.00 planned — 29% over, a number that can be read and acted on.
+
+The allowance's blindness is a **third, separate** matter and should not be folded in
+here. It draws on `variable_budgeted_spend`, so spend with no budget cannot reduce it;
+that is internally consistent. But the live consequence is that with **€164.51** in
+the account the product says spend €32.13 today and calls it on track, and five
+remaining days at that allowance is €160.65 — the balance, near enough. Nothing in
+that figure is computed from what is actually in the bank. **That belongs to
+Phase 11's cushion**, and it is listed here only because it is live.
+
+### Why a Budget is the wrong carrier
+
+A one-month Fixed Budget window looks like it should work, and mechanically it does:
+`_project_fixed` steps it rather than extrapolating, and `fixed_booked_spend` lifts it
+out of the variable slice. Two things make it the wrong answer.
+
+**A budget's default is that it continues.** A one-off's default must be that it does
+not. The create endpoint takes `active_from` and **not `active_to`** — a budget can be
+scheduled to *start* and can only be ended afterwards, from a later month, by
+`deactivate_budget`, which sets `active_to = month_start - 1 day`. So the owner cannot
+express "October only": cancelling **in** October ends the window before October
+begins, and only cancelling **in November** produces the intended window. A primitive
+whose null state is recurrence cannot represent an event; it can only be simulated by
+a human remembering, in one specific month, to correct it.
+
+**Forgetting does not merely clutter the page, it invents money.** Cancelled a month
+late, the window covers October and November, and in November the category has a
+€8,403.83 fixed budget with nothing booked against it. `_project_fixed` falls back to
+the budgeted estimate when nothing has booked, so November's Projected spend carries a
+phantom €8,403.83, Budget left reads ~€8,717 instead of €313.83, and Budget pulse
+renders a neutral `Divorce` row that reads as a fixed bill not yet paid.
+
+The right carrier is therefore **the charge, not a window of time**. A charge is
+singular by construction — it happened once, on one date. Nothing to cancel, nothing
+to roll forward, no November. The codebase has already made this exact choice once:
+`excluded_at` lives on the transaction rather than on a budget window.
+
+### The primitive
+
+A third disposition, in the gap between `excluded_at` (out of *everything*) and
+nothing — the figure-specific inclusion rule ADR-0003 already established for Pending
+Spend:
+
+> **Exceptional Charge** — counted in the actuals. A step in the pace and the
+> projection, never a rate. Excluded from every baseline.
+
+The term was fixed in `GLOSSARY.md` beside `Ignored` and has been **removed from it**,
+because a declined concept is not the product's language. `Event Budget` stands in its
+place, in the Budgets section rather than among the dispositions, which is the whole
+difference between the two: this was a disposition the owner set on a charge, that is a
+budget window they bound. Both are kept distinct from the `anomalous` comparison status
+on purpose: that is a verdict the product computes against a baseline.
+
+One concept, three rules. It fixes the burn rate and the projection for the month in
+progress, and it is the only thing above that also stops October 2026 from becoming
+the owner's normal in December.
+
+**Where the flag goes has two answers, and the live data picks the cheaper one.** The
+€8,403.83 is not one charge but **five** booked transfers dated the 1st and the 9th,
+so a purely per-transaction disposition means the owner marks five rows and keeps
+marking them as more arrive. Both exceptional clusters in the live data sit in
+categories of their own — `Divorce`, and arguably `Relocation` — which makes a
+**category-level flag the cheap 80%**: one mark, permanent, every charge in that
+category exceptional in every month. It also has none of the Budget's problem, because
+a category carries no time window at all, so there is nothing to cancel in November.
+
+The per-transaction disposition remains the general case and should follow rather than
+lead: it is the only one that reaches a one-off inside an *ordinary* category — a
+boiler repair filed under `Home` — which no category flag can express. Taken in that
+order, the first step is a boolean on `Category` and the second is a nullable column
+on `Transaction`, and neither invalidates the other. A categorization rule setting the
+flag is a third option worth weighing, since three of the five rows share a
+counterparty.
+
+### Known gap it exposes
+
+`POST /budgets` accepts no `active_to`. A commitment can be given a start date, even a
+future one, but can only be given an end retroactively from a later month. That
+asymmetry is independent of this proposal and worth closing on its own.
 
 ---
 
@@ -482,6 +1023,15 @@ starts to grate — it has no dependency on Phases 8 to 10.
 
 The dashboard states how many months the owner's explicitly-marked savings would
 cover, and no documented metric remains unimplemented.
+
+**Enumerate "documented metric" before starting.** This clause has the shape 9a's
+first clause failed on — a universal over a set named nowhere — and it is the clause
+Phase 3 failed silently for six phases. The set is small and knowable from
+`docs/product/metrics.md` and `docs/technical/domain.md`; listing it here turns the
+check into arithmetic instead of judgement. Phase 11 also inherits the live case
+recorded under the Exceptional Charge proposal: the allowance is computed from budgets
+and knows nothing about the balance, which on 2026-10-26 meant €32.13/day and
+`on_track` against €164.51 in the account.
 
 ---
 
@@ -572,7 +1122,9 @@ Act II, under way:
 
 * **Data Becomes a Decision** (Phase 8) — one number that changes what the owner
   does today. Shipped, with the gaps listed under that phase still open.
-* **Data Gets a Memory** (Phase 9) — every figure has a baseline.
+* **Data Gets a Memory** (Phase 9) — every figure has a baseline. 9a shipped: the
+  comparison exists and refuses to speak when it cannot speak honestly. 9b, the
+  recurring charges, is not started.
 * **Data Speaks First** (Phase 10) — BurnRate reaches out instead of waiting.
 * **Data Gets a Horizon** (Phase 11) — how long the cushion lasts.
 * **Data Gets Help** (Phase 12) — the model handles the tail the rules cannot.
@@ -599,24 +1151,142 @@ Still off the table, and now for firmer reasons:
 
 ---
 
+## Between Phase 8 and 9a: the category lifecycle
+
+Not a phase, and recorded here because it shipped between the two and the roadmap
+would otherwise read as though Phase 8 were the last thing that happened.
+
+Categories could only ever be created: their name was fixed and nothing could retire
+one, although `Category.active` existed and three guards already refused an inactive
+category. Renaming now lives on the category rather than on a per-surface label, so
+one rename reaches budget rows, rules, the dashboard and Telegram through joins that
+already existed. Retiring is two operations, because deleting and archiving are not
+the same act — delete only while nothing references it, archive otherwise, and both
+refuse rather than cascade, because a category's budget rows are what past months
+reported. ADR-0005 settled the month-granular budget window rules alongside it, and
+ADR-0006 and ADR-0007 record the two decisions a future reader will question.
+
+---
+
 ## Recommended Immediate Next Steps
 
-Phase 8 is closed. All eighteen of its tickets are done, and of the ten gaps its
-Definition of Done check and the per-ticket reviews found, nine are fixed and the
-tenth is deferred to Phase 9 with its obvious-but-wrong fix written down. What is
-next:
+Rewritten on 2026-11-02. The previous list put the Exceptional Charge third with a
+December deadline; it was declined, the pace half is solved by a bounded Fixed Budget,
+and the baseline half turned out not to be solvable in time by anything. Two items
+below are new and two are gone.
 
-1. Add trailing per-category baselines, as the foundation for Phase 9.
-2. Decide whether to promote Phase 12's categorization copilot, based on whether
-   the unknown queue is actually the daily friction. Phase 8 sharpened the argument:
-   the allowance only counts *categorized* pending spend in budgeted categories, so
-   the headline's accuracy is a function of rule coverage.
-3. Carry a decision across the pending-to-booked transition, which needs the two rows
-   recognised as one transaction. It belongs with Phase 9's recurring-payment
-   matching, and it is the last Phase 8 gap left open.
+Done since the last revision, recorded so the list reads honestly: **July is
+classified** (0.0% of outgoing unclassified, down from 62.9%), **`From Savings` is
+retyped** to `transfer` by `0009`, and **`0008` has finally been applied** — the live
+database sat on `0007` for an entire phase, so every mid-month `active_to` the old
+cancellation rule wrote was still being read as a budget the month held in full.
+
+In rough order of value:
+
+1. ~~**`BASELINE_MINIMUM_MONTHS` to 3, before 2026-12-01.**~~ **Shipped 2026-11-02.**
+   Not one line, as this list first called it: it is a domain constant in
+   `burnrate.domain.baselines`, and only `BASELINE_WINDOW_MONTHS` is configuration.
+   On 2026-12-01 the window would have reached two Qualifying Months — a divorce and
+   one ordinary month — and published **−€4,888.66** as the owner's normal. Every
+   other reachable answer that day was also false, including the event rule's. The
+   product now says *"not enough history to compare yet"*, which is the honest
+   output. See **Revised: what a baseline is for**.
+
+   It cost twenty-one fixtures across two files, because the floor of two was baked
+   into every one of them. And it exposed a test passing for the wrong reason:
+   `test_a_qualifying_months_own_hold_on_a_fixed_bill_is_excluded_too` claimed to
+   cover the presence floor at the service seam, but with two Qualifying Months the
+   window itself was below the minimum, so nothing earned a baseline and lowering
+   `BASELINE_PRESENCE_FLOOR` to 1 changed nothing. Two rules masking each other,
+   visible only to the mutation.
+
+   **One consequence to carry**: a 3-month window with a 3-month minimum means all
+   three months must be clean, so a single sync hole anywhere in the window silences
+   the comparison entirely. Widening the window is not the fix — window 5 reaches
+   July's severance. Item 2 is the fix.
+2. ~~**Close the sync gap, and alert on the next one.**~~ **Shipped 2026-11-03.** The
+   36-day hole killed **August and September** — the owner's only two ordinary months.
+   The old August days are unrecoverable and always were; what shipped is the alerting.
+
+   **The cause recorded under 9a was wrong**, and finding that out changed the design.
+   It was not a lapsed consent: there are no `sync_sessions` rows at all across the
+   hole, so the worker simply was not running, and a process that is not running
+   cannot report itself. So the gap is read at **request** time in `/summary` — the
+   only path that catches a dead worker — and the worker reports it at **startup**,
+   which is the first moment it can speak and what debounces it without a stored
+   `*_alerted_at` column.
+
+   The message is a deadline rather than a fact: a missing day is fetchable for
+   thirty days after it, so the backend decides between three states and a gap the
+   next run will close says nothing at all, which is the over-firing the roadmap warns
+   Phase 10 fails by.
+
+   **The first version of this had two states and was wrong**, which the owner caught
+   in a sentence: *"are we going to show this all the time, even in November?"* With
+   the 90-day lookback that banner would have sat above every month's figures until
+   2 December, a permanent notice about August with nothing to do about it. A loss is
+   a fact about the months that lost the days, so `lost_elsewhere` is silent and the
+   worker stops alerting once the loss has hardened past the grace period -- otherwise
+   every redeploy for three months re-sent the same August message.
+
+   ADR-0013 records it, including the one case left open: a **timely** warning during
+   an outage needs a dead-man's switch outside the process, which is deployment and
+   belongs with Phase 13.
+3. ~~**The event rule.**~~ **Shipped 2026-11-02**, with item 1. A one-month Fixed
+   Budget window — an **Event Budget** in `GLOSSARY.md` — declares that month's
+   spend in its category an event, excluded from every baseline and from nothing
+   else. `is_event_budget` lives beside `budget_covers_month`; the transaction filter
+   is private to `BaselineService`, because the rule is "excluded from every
+   baseline" and a shared predicate would sooner or later be added to a figure.
+   ADR-0011 records it, with the three neighbours that must answer the other way: an
+   open window, a two-month window, and the month on screen's own figures. Five
+   mutations confirmed, one per rule. It does **not** rescue December — that is
+   item 1, and the reason is July's severance, which is an exceptional *income* and
+   has no budget to bound. Which makes item 5 the one that is left.
+4. **Close 9a's cheap gaps**, now narrower than they were: the dashboard's Budget pulse
+   rows, and one line per figure saying which kind of blank it is. The fourth part of
+   this item — "a decision, either way, on Current balance, Budget left, Projected
+   spend and Burn rate" — **is decided**, in the revised Definition of Done: all four
+   carry no baseline, with the reason named per figure.
+5. ~~**Protect the aggregate baselines.**~~ **Shipped 2026-11-02.**
+   `figure_baseline_amount` is a **median**, which is the hole October walked through
+   closed, and the one no budget could close — an exceptional *income* has no window
+   to bound, and the owner's €5,500.00 severance in July was the worked example. It
+   needed the minimum of three and nothing more; the note that it "needs the window
+   first" was a wrong guess. It also gained the first tests it has ever had, including
+   one at the service seam, because every other fixture in that module seeds identical
+   months — where a median and a mean agree, which is how the mean survived.
+6. **Widen the window, and reopen the snapshot-table decision.** Twelve months with a
+   median is the target shape, and 9a named widening as the trigger to revisit the
+   no-snapshot-table decision. Blocked on history: five months exist and two are dead.
+   Everything above it is a patch on N=2 and should be recorded as one.
+7. **Then 9b**: recurring-charge detection, the subscription inventory and
+   price-change detection, which also owes the last open Phase 8 gap. Two notes from
+   the 2026-11-02 grilling, which was cancelled before reaching a spec but not before
+   reaching the data. **There is no counterparty**: `counterparty_name` is NULL in 610
+   of 623 rows, `merchant_name` is NULL in 305 and is the *owner's own name* in 261,
+   `bank_transaction_code` reads `"Banca online"` on all 623 and
+   `merchant_category_code` is always NULL — so the only signal in the entire payload
+   is a Spanish free-text `description`, and 9b's scope line "same counterparty,
+   stable cadence, similar amount" names a field that does not exist. And **exact
+   description matching splits three of the eight real subscriptions in half**: Claude,
+   Google One and ChatGPT each arrive under two strings, leaving each half below any
+   cadence threshold. Merchant normalization is not an improvement to 9b, it is 9b.
+   The round-up saver is now **259** near-identical rows across five months, every day
+   of the month, €0.01-€1.94.
+8. **Decide whether to promote Phase 12's categorization copilot.** Sharpened a third
+   time: classifying July took one afternoon and changed what three months report, and
+   the backlog is what disqualifies months from being baseline input.
 
 Phase 3's lesson was that a phase closed over a known gap stays closed for six
-phases. Phase 8's gap list having grown twice *after* its own Definition of Done
-check is that lesson arriving a second time — the check is what found the first five,
-and per-ticket `/code-review` is what found the rest, so neither alone would have
-been enough.
+phases. Phase 8's gap list growing twice *after* its own check was that lesson
+arriving again. 9a's version was narrower: **its check passed on the tests and failed
+on the data**, and only reading the running product showed the difference.
+
+The 2026-11-02 version is narrower still and is about the goal rather than the check.
+9a scored 3 of 8 against "every headline figure", and that was read as five gaps to
+close. It was the goal that was wrong: the owner had already stated what normal is —
+it is the budget — and a baseline beside every figure is a second, derived, fragile
+answer to a question already answered. **A Definition of Done can fail its own check
+by being met too little or by being worth meeting too little, and the second takes
+longer to notice.**

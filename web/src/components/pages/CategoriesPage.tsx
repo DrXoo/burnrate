@@ -6,8 +6,10 @@ import {
   TONE_COLOR,
   TONE_DIM,
   TONE_LABEL,
+  baselineFigure,
   capitalize,
   categoryColor,
+  comparisonPhrase,
   eur,
   eurPlain,
   shortAccount,
@@ -15,7 +17,14 @@ import {
   usageTone,
 } from "../../lib/format";
 import type { Tone } from "../../lib/format";
-import type { BudgetUsage, Category, CategoryType, SummaryDashboard, Transaction } from "../../types";
+import type {
+  BudgetUsage,
+  Category,
+  CategoryBaseline,
+  CategoryType,
+  SummaryDashboard,
+  Transaction,
+} from "../../types";
 
 interface CategoriesPageProps {
   categories: Category[];
@@ -43,6 +52,14 @@ interface CategoryStat {
       budget figure and the verdict are read off it, so this page and the dashboard
       cannot disagree about the same category. */
   usage: BudgetUsage | undefined;
+  /** The month's comparison against what this category normally costs, when the
+      backend offers one. Null whenever it does not: too little trustworthy history,
+      a month with no outcome yet, or a category the owner spends in too rarely to
+      have a normal monthly cost. */
+  comparison: CategoryBaseline | null;
+  /** What the category normally costs, when there is a figure to print. Read off
+      the comparison's band rather than its amount -- see ``baselineFigure``. */
+  baseline: string | null;
   budget: number | null;
   spent: number;
   tone: Tone;
@@ -193,6 +210,12 @@ export function CategoriesPage({
       ledgerTotal[transaction.category_id] = (ledgerTotal[transaction.category_id] ?? 0) + Math.abs(num(transaction.amount));
     }
 
+    // Keyed by category, like the budget rows, but a list of its own: the comparison
+    // covers every category with spend, including ones the owner never budgeted.
+    const comparisonById = new Map(
+      (summary?.category_baselines ?? []).map((row) => [row.category_id, row]),
+    );
+
     return categories.map((category) => {
       const usage = usageById.get(category.category_id);
       const ledgerSpent = ledgerTotal[category.category_id] ?? 0;
@@ -208,9 +231,20 @@ export function CategoriesPage({
       // than this page inventing a threshold of its own.
       const tone: Tone = category.type === "expense" && usage ? usageTone(usage.status) : "neutral";
 
+      // Withheld unless the backend says a comparison is on offer. A month with too
+      // little history, or one that has not started, has none -- and inferring that
+      // from a null amount here is the re-derivation ADR-0002's amendment exists to
+      // stop.
+      const comparison =
+        summary?.baseline_status === "ok"
+          ? comparisonById.get(category.category_id) ?? null
+          : null;
+
       return {
         category,
         usage,
+        comparison,
+        baseline: comparison ? baselineFigure(comparison) : null,
         budget,
         spent,
         tone,
@@ -250,6 +284,15 @@ export function CategoriesPage({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ fontSize: 15, fontWeight: 600 }}>Categories</div>
           <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+            {summary?.baseline_status === "ok" ? (
+              <>
+                {/* Said once rather than on every row, because the mean rests on the
+                    same Qualifying Months for every category. Shown at all because a
+                    comparison resting on two months deserves to say so. */}
+                <span className="num">{summary.baseline_months_count}-month average</span>
+                {" · "}
+              </>
+            ) : null}
             <span className="num">{categories.length}</span> total
           </span>
         </div>
@@ -334,6 +377,27 @@ export function CategoriesPage({
                               </span>
                               <span style={{ fontSize: 11, fontWeight: 600, color: stat.color }}>{pctStr}</span>
                             </div>
+                            {stat.comparison ? (
+                              <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 4 }}>
+                                {stat.baseline != null ? (
+                                  <>
+                                    <span className="num">
+                                      normally {eurPlain(stat.baseline)}
+                                    </span>
+                                    {" · "}
+                                  </>
+                                ) : null}
+                                <span
+                                  style={
+                                    stat.comparison.comparison_status === "anomalous"
+                                      ? { color: "var(--text)", fontWeight: 600 }
+                                      : undefined
+                                  }
+                                >
+                                  {comparisonPhrase(stat.comparison)}
+                                </span>
+                              </div>
+                            ) : null}
                           </>
                         ) : (
                           <div className="num" style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 6 }}>

@@ -1,3 +1,5 @@
+import type { BaselineComparisonStatus } from "../types";
+
 import type {
   BudgetUsageStatus,
   CategoryType,
@@ -309,3 +311,57 @@ export function formatMonthLabel(value: string): string {
   });
 }
 
+
+
+/** The figure to print beside a comparison, or null when there is none to print.
+ *
+ * Read off the band and never off the amount, which is the trap this exists to
+ * close: a baseline of zero or less is one the backend refuses to divide by, so it
+ * publishes `no_baseline` with "0.00" still sitting in the amount. "0.00" is a
+ * truthy string, so every card that guarded on the amount printed "normally €0.00 ·
+ * no baseline yet" -- a figure and a denial of it in one breath. A salary dated the
+ * 28th read on the 26th is all it takes, and a category can reach it too, with two
+ * months whose movements cancel out.
+ *
+ * Stated once because three cards ask it: monthly income, comparable spending, and
+ * each category row.
+ */
+export function baselineFigure(comparison: {
+  baseline_amount: string | null;
+  comparison_status: BaselineComparisonStatus;
+}): string | null {
+  if (comparison.comparison_status === "no_baseline") {
+    return null;
+  }
+  return comparison.baseline_amount;
+}
+
+/** The phrase the owner reads beside a figure compared against its own normal.
+ *
+ * The bands are the backend's; this picks words for them. The magnitude is rounded
+ * to a whole percent because the owner is deciding whether to care, not auditing.
+ *
+ * Only `anomalous` is worded as a warning. Being well under a baseline is reported
+ * in full and flagged as nothing: the product exists to stop the owner overspending,
+ * and in their own October every ordinary category sits below its baseline while one
+ * one-off swamps the month.
+ */
+export function comparisonPhrase(comparison: {
+  deviation_percent: number | null;
+  comparison_status: BaselineComparisonStatus;
+}): string {
+  const deviation = comparison.deviation_percent;
+  const magnitude = deviation == null ? "" : `${Math.abs(Math.round(deviation))}%`;
+  switch (comparison.comparison_status) {
+    case "no_baseline":
+      return "no baseline yet";
+    case "in_line":
+      return "in line with usual";
+    case "below":
+      return `${magnitude} below usual`;
+    case "above":
+      return `${magnitude} above usual`;
+    case "anomalous":
+      return `unusually high · ${magnitude} above usual`;
+  }
+}

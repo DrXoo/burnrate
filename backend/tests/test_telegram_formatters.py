@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import pytest
 
+from burnrate.domain.sync_coverage import SyncGap
 from burnrate.telegram.formatters import (
     HELP_TEXT,
     format_budgets,
     format_expiry_alert,
     format_reconnect_alert,
     format_summary,
+    format_sync_gap_alert,
     format_sync_notification,
     format_unknown,
 )
@@ -24,6 +27,8 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "current_balance_currency": "EUR",
         "monthly_spending_amount": "120.00",
         "monthly_income_amount": "0.00",
+        "inbound_transfer_amount": "0.00",
+        "sync_gap": None,
         "net_cash_flow_amount": "-120.00",
         "unbudgeted_spending_amount": "0.00",
         "monthly_budget_amount": "200.00",
@@ -33,6 +38,17 @@ def make_summary(**overrides: Any) -> dict[str, Any]:
         "days_elapsed": 30,
         "days_in_month": 30,
         "budget_usage": [],
+        # No comparison by default, so every test above keeps its meaning: each of
+        # them is about a figure rather than about what is normal for the owner.
+        "baseline_status": "insufficient_history",
+        "baseline_months_count": 0,
+        "comparable_spend_amount": "0.00",
+        "uncomparable_spend_amount": "0.00",
+        "comparable_spend_baseline": {
+            "baseline_amount": None,
+            "deviation_percent": None,
+            "comparison_status": "no_baseline",
+        },
     }
     payload.update(overrides)
     return payload
@@ -144,6 +160,93 @@ def test_format_summary_hides_income_line_without_income() -> None:
 
     assert "Income:" not in text
     assert "unbudgeted" not in text
+
+
+def test_format_summary_discloses_money_moved_in_beside_the_net() -> None:
+    text = format_summary(
+        make_summary(
+            monthly_income_amount="1055.20",
+            inbound_transfer_amount="7841.00",
+            net_cash_flow_amount="-8195.88",
+        )
+    )
+
+    assert "Net: -8195.88 EUR" in text
+    assert "7841.00 EUR moved in from an unsynced account" in text
+
+
+def test_format_summary_reports_the_net_of_a_month_funded_entirely_by_a_transfer() -> None:
+    """Income alone cannot gate the net, or the worst month goes silent.
+
+    The block was shown only when income was above zero. A month whose every inflow
+    was the owner moving their own money in has no income at all -- and that is
+    exactly the month whose deficit they need told, so gating on income hid it.
+    """
+    text = format_summary(
+        make_summary(
+            monthly_income_amount="0.00",
+            inbound_transfer_amount="2000.00",
+            net_cash_flow_amount="-120.00",
+        )
+    )
+
+    assert "Net: -120.00 EUR" in text
+    assert "2000.00 EUR moved in from an unsynced account" in text
+
+
+def test_format_summary_leads_with_bank_data_that_is_gone_for_good() -> None:
+    """It qualifies every figure below it, so it goes above them.
+
+    The owner read figures for August and September 2026 for two months without
+    knowing the bank had never been asked about five of their days. Saying it after
+    the allowance would be saying it after the thing it invalidates.
+    """
+    text = format_summary(
+        make_summary(
+            sync_gap={
+                "status": "lost",
+                "oldest_missing_day": "2026-08-30",
+                "newest_missing_day": "2026-09-03",
+                "missing_days": 5,
+                "unrecoverable_days": 5,
+                "recoverable_until": None,
+            }
+        )
+    )
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert "5 days of bank data missing since 2026-08-30" in text
+    assert "gone for good" in text
+    # Above the allowance, which is the first figure the summary otherwise leads with.
+    assert lines.index(next(l for l in lines if "bank data missing" in l)) < lines.index(
+        next(l for l in lines if "Safe to spend today" in l)
+    )
+
+
+def test_format_summary_gives_a_recoverable_hole_its_deadline_instead() -> None:
+    """Nothing lost yet, so the message is a date and an action, not an apology."""
+    text = format_summary(
+        make_summary(
+            sync_gap={
+                "status": "expiring",
+                "oldest_missing_day": "2026-10-11",
+                "newest_missing_day": "2026-11-04",
+                "missing_days": 25,
+                "unrecoverable_days": 0,
+                "recoverable_until": "2026-11-10",
+            }
+        )
+    )
+
+    assert "25 days of bank data missing since 2026-10-11" in text
+    assert "recoverable until 2026-11-10" in text
+    assert "gone for good" not in text
+
+
+def test_format_summary_says_nothing_about_sync_when_there_is_no_hole() -> None:
+    text = format_summary(make_summary())
+
+    assert "bank data missing" not in text
 
 
 def test_format_summary_hides_budget_lines_when_no_budget() -> None:
@@ -426,3 +529,216 @@ def test_format_summary_still_reports_progress_for_a_month_that_has_closed() -> 
     assert "% used" in text
     assert "⏱ Avg/day: 4.00 EUR (30/30 days)" in text
     assert "🔮 Projected: 120.00 EUR" in text
+
+
+def with_comparison(**overrides: Any) -> dict[str, Any]:
+    """A payload carrying the owner's live October, shaped for the bot.
+
+    295.00 spent where 580.00 is usual, with 8400.00 in a category that has no
+    history and so cannot be compared to anything.
+    """
+    payload = {
+        "monthly_spending_amount": "8695.00",
+        "baseline_status": "ok",
+        "baseline_months_count": 2,
+        "comparable_spend_amount": "295.00",
+        "uncomparable_spend_amount": "8400.00",
+        "comparable_spend_baseline": {
+            "baseline_amount": "580.00",
+            "deviation_percent": -49.1,
+            "comparison_status": "below",
+        },
+    }
+    payload.update(overrides)
+    return make_summary(**payload)
+
+
+def comparison_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if "usual" in line or "compared" in line]
+
+
+def test_format_summary_reports_spending_against_what_is_normal() -> None:
+    """With the months the mean rests on, because two is few enough to disclose.
+
+    The wording follows the dashboard's: an owner who reads both should not have to
+    reconcile two vocabularies for the same payload, which is the reason the tense
+    suffixes already match.
+    """
+    text = format_summary(with_comparison())
+
+    assert comparison_lines(text) == [
+        "   ↳ 295.00 EUR comparable · normally 580.00 EUR · 49% below usual (2-month avg)",
+        "   ↳ 8400.00 EUR cannot be compared",
+    ]
+
+
+def test_format_summary_omits_the_comparison_when_the_baseline_is_zero() -> None:
+    """A zero baseline is an absent one, and only the status says so.
+
+    The amount is what every reader reached for first, and it is the wrong field: a
+    baseline of zero or less is not divided by, so the band is already
+    ``no_baseline`` while the amount beside it reads "0.00". Keyed on the amount,
+    this line published "normally 0.00 EUR · no baseline yet" -- a figure and a
+    denial of it in one breath. The owner's own case is a salary dated the 28th read
+    on the 26th, where every Qualifying Month contributes nothing to the cutoff.
+    """
+    text = format_summary(
+        with_comparison(
+            comparable_spend_baseline={
+                "baseline_amount": "0.00",
+                "deviation_percent": None,
+                "comparison_status": "no_baseline",
+            },
+        )
+    )
+
+    assert comparison_lines(text) == []
+
+
+def test_format_summary_omits_the_comparison_with_too_little_history() -> None:
+    """Omitted rather than stated, which is the opposite of what the dashboard does.
+
+    The asymmetry is deliberate. The dashboard is a screen the owner is looking at,
+    where an absent line is ambiguous and reads as "nothing to say about your
+    spending". A chat reply is a list of facts, and a fact that is not known is
+    simply not among them.
+    """
+    text = format_summary(with_comparison(baseline_status="insufficient_history"))
+
+    assert comparison_lines(text) == []
+    # The figures themselves are untouched: what is missing is the commentary.
+    assert "💸 Spent: 8695.00 EUR" in text
+
+
+def test_format_summary_reads_the_verdict_off_the_status_not_off_the_figures() -> None:
+    """The payload here is deliberately inconsistent, to prove which source wins.
+
+    295.00 against 580.00 is half, which any band derived here would call well
+    below. The status says ``in_line``, and that is what must be printed: the bands
+    live in the domain and the bot renders words for them. Phase 8 was where this
+    was learned -- a client that re-derived a threshold flipped an on-plan month to
+    a warning around day 26, and ticket 17 is where this formatter stopped deriving
+    a month's tense of its own.
+    """
+    text = format_summary(
+        with_comparison(
+            comparable_spend_baseline={
+                "baseline_amount": "580.00",
+                "deviation_percent": -49.1,
+                "comparison_status": "in_line",
+            },
+        )
+    )
+
+    assert "in line with usual" in text
+    assert "below usual" not in text
+
+
+def test_format_summary_omits_the_uncomparable_line_when_there_is_none() -> None:
+    text = format_summary(with_comparison(uncomparable_spend_amount="0.00"))
+
+    assert comparison_lines(text) == [
+        "   ↳ 295.00 EUR comparable · normally 580.00 EUR · 49% below usual (2-month avg)",
+    ]
+
+
+def test_format_summary_gives_a_month_that_has_not_started_no_comparison() -> None:
+    """And keeps ticket 17's suppression of everything else that describes progress.
+
+    Such a month has no outcome to compare, however much history sits behind it. The
+    backend says so in the baseline status, so the bot does not work it out from the
+    tense -- but the two must agree, and this pins that they do.
+    """
+    text = format_summary(
+        with_comparison(
+            safe_to_spend_status="month_not_started",
+            baseline_status="month_not_started",
+        )
+    )
+
+    assert comparison_lines(text) == []
+    assert "Avg/day" not in text
+    assert "Projected" not in text
+    assert "not started yet" in text
+
+
+def test_format_summary_marks_an_unusually_high_month() -> None:
+    text = format_summary(
+        with_comparison(
+            comparable_spend_amount="1200.00",
+            uncomparable_spend_amount="0.00",
+            comparable_spend_baseline={
+                "baseline_amount": "580.00",
+                "deviation_percent": 106.9,
+                "comparison_status": "anomalous",
+            },
+        )
+    )
+
+    assert "unusually high · 107% above usual" in text
+
+
+def test_format_sync_gap_alert_names_what_is_gone_and_what_it_cost() -> None:
+    """The unprompted version of the dashboard's line, and it has to carry the cost.
+
+    This is the message nobody ever got: the worker was down from 29 August to 4
+    October 2026 and five days were never fetched, so every figure BurnRate reported
+    for those two months was understated and nothing said so.
+    """
+    text = format_sync_gap_alert(
+        gap=SyncGap(
+            oldest_missing_day=date(2026, 8, 30),
+            newest_missing_day=date(2026, 9, 3),
+            missing_days=5,
+            unrecoverable_days=5,
+            recoverable_days=0,
+            recoverable_until=None,
+        )
+    )
+
+    assert "2026-08-30" in text
+    assert "2026-09-03" in text
+    assert "5 days" in text
+    assert "gone for good" in text
+    # No action is offered, because none recovers them. Offering one would be a lie.
+    assert "reconnect" not in text.lower()
+
+
+def test_format_sync_gap_alert_asks_for_the_fix_while_there_is_still_time() -> None:
+    """Nothing lost yet, so this one is an ask with a deadline on it."""
+    text = format_sync_gap_alert(
+        gap=SyncGap(
+            oldest_missing_day=date(2026, 10, 11),
+            newest_missing_day=date(2026, 11, 4),
+            missing_days=25,
+            unrecoverable_days=0,
+            recoverable_days=25,
+            recoverable_until=date(2026, 11, 10),
+        )
+    )
+
+    assert "2026-11-10" in text
+    assert "gone for good" not in text
+    assert "reconnect" in text.lower()
+
+
+def test_format_summary_says_nothing_about_a_loss_that_belongs_to_another_month() -> None:
+    """The month that lost the days is where it is said, and nowhere else.
+
+    Otherwise the owner reads a permanent notice about August on top of November,
+    with nothing to do about it, every time they open the bot.
+    """
+    text = format_summary(
+        make_summary(
+            sync_gap={
+                "status": "lost_elsewhere",
+                "oldest_missing_day": "2026-08-30",
+                "newest_missing_day": "2026-09-03",
+                "missing_days": 5,
+                "unrecoverable_days": 5,
+                "recoverable_until": None,
+            }
+        )
+    )
+
+    assert "bank data missing" not in text

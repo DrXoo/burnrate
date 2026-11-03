@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 
 from burnrate.clock import civil_date
 from burnrate.db.budget_windows import budget_covers_month
+from burnrate.db.counted_spend import counted_spend
 from burnrate.db.dispositions import awaiting_categorization, not_ignored
 from burnrate.db.effective_date import month_window, within_month
 from burnrate.db.models import Account, Budget, Category, Transaction
+from burnrate.services.baseline_service import BaselineService, FigureBaseline
+from burnrate.services.sync_coverage_service import SyncCoverageService
 from burnrate.domain.metrics import (
     FixedCommitment,
     MetricStatus,
@@ -77,10 +80,21 @@ class SummaryService:
         db: Session,
         timezone_name: str = "UTC",
         clock: Callable[[], datetime] | None = None,
+        baseline_window_months: int = 3,
     ) -> None:
         self.db = db
         self._timezone_name = timezone_name
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._baseline_window_months = baseline_window_months
+        self._baselines = BaselineService(db=db, timezone_name=timezone_name)
+        # Read at request time on purpose: the failure this catches is the worker not
+        # running, and a process that is not running cannot report itself. The owner
+        # opening the app is the only path that reaches it.
+        self._sync_coverage = SyncCoverageService(
+            db=db,
+            timezone_name=timezone_name,
+            clock=self._clock,
+        )
 
     def get_summary(
         self,
@@ -105,6 +119,14 @@ class SummaryService:
         uncategorized_count = self._count_uncategorized_transactions(
             month_start=month_start,
             month_end=month_end,
+        )
+
+        month_tense = self._month_tense(month_start=month_start, reference_day=reference_day)
+        baselines = self._baselines.baselines_for(
+            month_value=month_value,
+            month_tense=month_tense,
+            reference_day=reference_day,
+            window_months=self._baseline_window_months,
         )
 
         active_budgets = self._get_active_budgets(month_start=month_start, month_end=month_end)
@@ -146,6 +168,13 @@ class SummaryService:
         # too: monthly spending less this is what the bank has actually settled.
         pending_spending = (monthly_spend.pending - fixed_pending_spend).quantize(Decimal("0.01"))
         monthly_income = self._get_monthly_income(month_start=month_start, month_end=month_end)
+        # Neither income nor spend, and disclosed because it is what funded whatever
+        # the month spent. Counting it as income is what let a month that drained the
+        # owner's savings report as very nearly break-even.
+        inbound_transfers = self._get_monthly_inbound_transfers(
+            month_start=month_start,
+            month_end=month_end,
+        )
         # Net cash flow this month: what landed in income categories minus what left
         # in expense categories. Transfers are excluded on both sides, and it feeds no
         # projection. Spending counts committed money, pending included, while income
@@ -213,10 +242,7 @@ class SummaryService:
             fixed_overrun=overrun,
             days_in_month=days_in_month,
             days_elapsed=days_elapsed,
-            month_tense=self._month_tense(
-                month_start=month_start,
-                reference_day=reference_day,
-            ),
+            month_tense=month_tense,
         )
 
         # Burn rate reflects the *variable* daily pace only -- fixed lumps are excluded
@@ -293,6 +319,7 @@ class SummaryService:
             "monthly_spending_amount": self._format_decimal(monthly_spending),
             "pending_spend_amount": self._format_decimal(pending_spending),
             "monthly_income_amount": self._format_decimal(monthly_income),
+            "inbound_transfer_amount": self._format_decimal(inbound_transfers),
             "net_cash_flow_amount": self._format_decimal(net_cash_flow),
             "savings_rate_percent": float(savings.rate_percent),
             "savings_status": savings.status,
@@ -308,6 +335,40 @@ class SummaryService:
             "projected_month_end_spend_amount": self._format_decimal(projected_month_end_spend),
             "projected_overspend_amount": self._format_decimal(projected_overspend),
             "budget_usage": budget_usage,
+            "sync_gap": self._serialize_sync_gap(
+                today=reference_day,
+                month_start=month_start,
+                month_end=month_end,
+            ),
+            "baseline_status": baselines.status,
+            "comparable_spend_amount": self._format_decimal(baselines.comparable_spend),
+            # Defined as the residual, so the two halves reconcile against the
+            # headline above them rather than against a third total of their own.
+            # Every euro in it is a euro the comparison cannot speak to, for one of
+            # three reasons: a category with no baseline, a category the owner
+            # archived, or spend dated after today's cutoff.
+            "uncomparable_spend_amount": self._format_decimal(
+                monthly_spending - baselines.comparable_spend
+            ),
+            "comparable_spend_baseline": self._serialize_figure_baseline(baselines.comparable),
+            "monthly_income_baseline": self._serialize_figure_baseline(baselines.income),
+            "net_cash_flow_baseline_amount": self._format_optional_decimal(
+                baselines.net_cash_flow_baseline
+            ),
+            "baseline_months_count": baselines.qualifying_months_count,
+            "category_baselines": [
+                {
+                    "category_id": str(row.category_id),
+                    "category_name": row.category_name,
+                    "spend_amount": self._format_decimal(row.spend_amount),
+                    "baseline_amount": self._format_optional_decimal(row.baseline_amount),
+                    "deviation_percent": (
+                        float(row.deviation_percent) if row.deviation_percent is not None else None
+                    ),
+                    "comparison_status": row.comparison_status,
+                }
+                for row in baselines.categories
+            ],
         }
 
     def _resolve_month(self, *, month: str | None, current_month: str) -> tuple[date, date, str]:
@@ -411,6 +472,90 @@ class SummaryService:
             )
         ) or Decimal("0.00")
         # Income transactions are credits (positive amounts), so no sign flip.
+        return Decimal(total_amount).quantize(Decimal("0.01"))
+
+    def _serialize_sync_gap(
+        self, *, today: date, month_start: date, month_end: date
+    ) -> dict[str, Any] | None:
+        """Days the bank was never asked about, or ``None`` when there are none.
+
+        ``status`` is decided here rather than left for each interface to derive from
+        the counts, which is the amendment ``ADR-0002`` records and for the same
+        reason: these are three different things to say to the owner, and two clients
+        deriving the distinction are two clients that can word it differently.
+
+        * ``expiring`` -- days can still be fetched. An **ask with a deadline**, and
+          about *today*, so it is reported whatever month is open.
+        * ``lost`` -- days are gone *and belong to the month being viewed*, whose
+          figures are therefore understated.
+        * ``lost_elsewhere`` -- days are gone and belong to some other month.
+
+        That last one exists because the first version of this had only two values and
+        put one banner above every month's figures for as long as the lookback
+        reached. On the owner's data that was a permanent notice about August sitting
+        on top of November, with nothing to do about it -- which is how a warning
+        becomes furniture. A loss is a fact about the months that lost the days, so it
+        is reported on them. The facts stay in the payload in every case, so an
+        interface that wants to surface it somewhere quieter need not re-derive it.
+
+        ``expiring`` wins over a loss in the same window, because it is the only one
+        of the two that can still be acted on.
+        """
+        gap = self._sync_coverage.current_gap(today=today)
+        if gap is None:
+            return None
+        if gap.unrecoverable_days == 0:
+            status = "expiring"
+        elif gap.oldest_missing_day < month_end and gap.newest_missing_day >= month_start:
+            status = "lost"
+        else:
+            status = "lost_elsewhere"
+        return {
+            "status": status,
+            "oldest_missing_day": gap.oldest_missing_day.isoformat(),
+            "newest_missing_day": gap.newest_missing_day.isoformat(),
+            "missing_days": gap.missing_days,
+            "unrecoverable_days": gap.unrecoverable_days,
+            "recoverable_until": (
+                gap.recoverable_until.isoformat() if gap.recoverable_until else None
+            ),
+        }
+
+    def _get_monthly_inbound_transfers(self, *, month_start: date, month_end: date) -> Decimal:
+        """What arrived this month from an account BurnRate cannot see.
+
+        Credit legs only, in transfer categories, which is why the sign is filtered
+        in SQL rather than netted afterwards: the same categories carry the money
+        going the other way, and summing them whole reports an outgoing month as
+        *negative* money arriving.
+
+        Booked only, matching the income figure this is read against. A credit the
+        bank has not settled is not money received, which is the asymmetry
+        ``docs/adr/0003-pending-spend-is-load-bearing.md`` records for income.
+
+        **It assumes every transfer in came from outside.** True while one account is
+        linked, which restricted production is: a transfer between two *linked*
+        accounts would land as a credit here and a debit there, and this figure would
+        report the credit leg as money from outside when nothing entered the owner's
+        world at all. Closing that needs the two legs recognised as one movement --
+        amount, date window and the opposite sign -- which is real work and has no
+        case to test against today. **The trigger is the second linked account**, and
+        nothing else; there is no partial version of this that helps.
+        """
+        total_amount = self.db.scalar(
+            select(func.coalesce(func.sum(Transaction.amount), Decimal("0.00")))
+            .select_from(Transaction)
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Category, Category.id == Transaction.category_id)
+            .where(
+                Account.included_in_calculations.is_(True),
+                within_month(month_start=month_start, month_end=month_end),
+                func.lower(Transaction.status) == "booked",
+                Category.type == "transfer",
+                Transaction.amount > 0,
+                not_ignored(),
+            )
+        ) or Decimal("0.00")
         return Decimal(total_amount).quantize(Decimal("0.01"))
 
     def _get_active_budgets(self, *, month_start: date, month_end: date) -> list[ActiveBudgetWindow]:
@@ -535,10 +680,16 @@ class SummaryService:
 
         A variable category counts pending spend; a fixed one does not, because a
         hold on a bill is not the bill being paid and its row has to keep reading as
-        not yet paid. Both the rows and the totals beside them read this, so the two
-        cannot drift apart.
+        not yet paid. The rule itself lives in ``burnrate.db.counted_spend``, with
+        the baselines reading the same one in its query form: they meet in
+        Uncomparable Spend, and two spellings of this is how that residual came to
+        be able to go negative.
         """
-        return spend.booked if is_fixed else spend.total
+        return counted_spend(
+            booked=spend.booked,
+            pending=spend.pending,
+            is_fixed=is_fixed,
+        )
 
     def _budget_usage_sort_key(self, row: dict[str, Any]) -> tuple[int, float, str]:
         priority: dict[MetricStatus, int] = {"over": 0, "watch": 1, "on_track": 2}
@@ -610,6 +761,15 @@ class SummaryService:
 
     def _format_decimal(self, value: Decimal) -> str:
         return format(value.quantize(Decimal("0.01")), ".2f")
+
+    def _serialize_figure_baseline(self, figure: FigureBaseline) -> dict[str, Any]:
+        return {
+            "baseline_amount": self._format_optional_decimal(figure.baseline_amount),
+            "deviation_percent": (
+                float(figure.deviation_percent) if figure.deviation_percent is not None else None
+            ),
+            "comparison_status": figure.comparison_status,
+        }
 
     def _format_optional_decimal(self, value: Decimal | None) -> str | None:
         """A figure the owner may not have, kept distinct from one that is zero."""

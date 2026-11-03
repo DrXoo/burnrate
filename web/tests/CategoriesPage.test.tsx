@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { summaryFor } from "./fakeApi";
 import { CategoriesPage } from "../src/components/pages/CategoriesPage";
-import type { Category } from "../src/types";
+import type { Category, SummaryDashboard } from "../src/types";
 
 const FOOD: Category = { category_id: "cat-food", name: "Food", type: "expense", active: true };
 const GYM_ARCHIVED: Category = { category_id: "cat-gym", name: "Gym", type: "expense", active: false };
@@ -18,13 +18,14 @@ interface PageProps {
   onDeleteCategory?: (categoryId: string) => Promise<void>;
   onArchiveCategory?: (categoryId: string) => Promise<void>;
   onUnarchiveCategory?: (categoryId: string) => Promise<void>;
+  summary?: SummaryDashboard;
 }
 
 function page(props: PageProps) {
   return (
     <CategoriesPage
       categories={props.categories ?? [FOOD]}
-      summary={props.withSummary === false ? null : summaryFor("2026-10")}
+      summary={props.withSummary === false ? null : props.summary ?? summaryFor("2026-10")}
       loading={props.loading ?? false}
       error={props.error ?? null}
       month="2026-10"
@@ -249,5 +250,118 @@ describe("CategoriesPage list", () => {
     // The list is what the owner scans. A row that reads like a live category invites
     // them to pick it and wonder why it offers no budget.
     expect(markup).toContain("archived");
+  });
+});
+
+
+describe("the comparison against what is normal", () => {
+  function withBaselines(
+    overrides: Partial<SummaryDashboard>,
+  ): SummaryDashboard {
+    return { ...summaryFor("2026-10"), ...overrides };
+  }
+
+  const foodBelow = {
+    category_id: "cat-food",
+    category_name: "Food",
+    spend_amount: "256.84",
+    baseline_amount: "414.74",
+    deviation_percent: -38.1,
+    comparison_status: "below" as const,
+  };
+
+  it("tells the owner what a category normally costs them and how this month compares", () => {
+    // The owner's own October Food figure against its August-September baseline.
+    const html = render({ summary: withBaselines({ category_baselines: [foodBelow] }) });
+
+    expect(html).toContain("normally €414.74");
+    expect(html).toContain("38% below usual");
+  });
+
+  it("marks an unusually high category rather than only reporting the number", () => {
+    const html = render({
+      summary: withBaselines({
+        category_baselines: [
+          { ...foodBelow, spend_amount: "900.00", deviation_percent: 117.0, comparison_status: "anomalous" },
+        ],
+      }),
+    });
+
+    expect(html).toContain("unusually high");
+    expect(html).toContain("117% above usual");
+  });
+
+  it("reads as a normal month when the figure is in line", () => {
+    const html = render({
+      summary: withBaselines({
+        category_baselines: [
+          { ...foodBelow, spend_amount: "420.00", deviation_percent: 1.3, comparison_status: "in_line" },
+        ],
+      }),
+    });
+
+    expect(html).toContain("in line with usual");
+    expect(html).not.toContain("above usual");
+    expect(html).not.toContain("below usual");
+  });
+
+  it("says a category has no baseline rather than printing a figure it does not have", () => {
+    // A one-off expense: below the presence floor, so there is nothing to compare.
+    const html = render({
+      summary: withBaselines({
+        category_baselines: [
+          {
+            category_id: "cat-food",
+            category_name: "Food",
+            spend_amount: "8403.83",
+            baseline_amount: null,
+            deviation_percent: null,
+            comparison_status: "no_baseline",
+          },
+        ],
+      }),
+    });
+
+    expect(html).toContain("no baseline yet");
+    expect(html).not.toContain("usual");
+  });
+
+  it("prints no figure for a baseline of zero", () => {
+    // Reachable with two months whose movements cancel out -- a refund will do it.
+    // The band is already `no_baseline`; the amount is not, and "0.00" is truthy, so
+    // a guard on the amount printed "normally €0.00 · no baseline yet".
+    const html = render({
+      summary: withBaselines({
+        category_baselines: [
+          { ...foodBelow, baseline_amount: "0.00", deviation_percent: null, comparison_status: "no_baseline" },
+        ],
+      }),
+    });
+
+    expect(html).toContain("no baseline yet");
+    expect(html).not.toContain("normally");
+  });
+
+  it("claims nothing at all when there is too little trustworthy history", () => {
+    // One qualifying month is not a baseline. The rows still show the owner's spend;
+    // what they do not get is a comparison, and the page must not invent one from a
+    // null amount either.
+    const html = render({
+      summary: withBaselines({
+        baseline_status: "insufficient_history",
+        baseline_months_count: 1,
+        category_baselines: [foodBelow],
+      }),
+    });
+
+    expect(html).not.toContain("usual");
+    expect(html).not.toContain("normally");
+    expect(html).not.toContain("no baseline yet");
+  });
+
+  it("shows how many months the comparison rests on", () => {
+    const html = render({ summary: withBaselines({ category_baselines: [foodBelow] }) });
+
+    expect(html).toContain("2-month average");
   });
 });

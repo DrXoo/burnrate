@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from burnrate.domain.sync_coverage import SyncGap
+
 HELP_TEXT = "\n".join(
     [
         "BurnRate bot — read-only spending visibility.",
@@ -65,6 +67,132 @@ reconcile two vocabularies for the same payload.
 """
 
 
+_COMPARISON_PHRASES = {
+    "no_baseline": "no baseline yet",
+    "in_line": "in line with usual",
+    "below": "{magnitude} below usual",
+    "above": "{magnitude} above usual",
+    "anomalous": "unusually high · {magnitude} above usual",
+}
+
+
+def _comparison_phrase(comparison: dict[str, Any]) -> str:
+    """Words for a band the backend already decided.
+
+    The bot renders; it does not band. A client that re-derives a threshold is how
+    an on-plan month came to flip to a warning around day 26, and ticket 17 is where
+    this formatter stopped working out a month's tense for itself. The wording
+    matches the dashboard's, so an owner who reads both does not have to reconcile
+    two vocabularies for one payload.
+
+    The magnitude is rounded to a whole percent: the owner is deciding whether to
+    care, not auditing.
+    """
+    deviation = comparison["deviation_percent"]
+    magnitude = "" if deviation is None else f"{abs(round(deviation)):.0f}%"
+    return _COMPARISON_PHRASES[comparison["comparison_status"]].format(magnitude=magnitude)
+
+
+def _comparison_lines(payload: dict[str, Any], currency: str | None) -> list[str]:
+    """What the month's spending looks like against what is normal, or nothing.
+
+    Omitted entirely when the backend offers no comparison, rather than stated as
+    the dashboard states it. The asymmetry is deliberate: a screen the owner is
+    looking at makes an absent line ambiguous, and it reads as "nothing to say about
+    your spending"; a chat reply is a list of facts, and a fact that is not known is
+    simply not among them.
+
+    Only the comparable half is judged, and the rest is disclosed beside it rather
+    than folded in -- the shape Unbudgeted Spend already has above. See
+    ``docs/product/metrics.md``.
+    """
+    if payload.get("baseline_status") != "ok":
+        return []
+    comparison = payload["comparable_spend_baseline"]
+    # Read off the band, never off the amount beside it. A baseline of zero or less
+    # is one the backend refuses to divide by, so the band already says
+    # ``no_baseline`` while the amount still reads "0.00" -- and keyed on the amount
+    # this line published "normally 0.00 EUR · no baseline yet".
+    if comparison["comparison_status"] == "no_baseline":
+        return []
+    baseline = comparison["baseline_amount"]
+    months = payload["baseline_months_count"]
+    lines = [
+        f"   ↳ {_money(payload['comparable_spend_amount'], currency)} comparable"
+        f" · normally {_money(baseline, currency)}"
+        f" · {_comparison_phrase(comparison)} ({months}-month avg)"
+    ]
+    uncomparable = payload["uncomparable_spend_amount"]
+    if Decimal(uncomparable) != 0:
+        lines.append(f"   ↳ {_money(uncomparable, currency)} cannot be compared")
+    return lines
+
+
+def format_sync_gap_alert(*, gap: SyncGap) -> str:
+    """The unprompted version of the summary's sync line, sent when the worker returns.
+
+    Two messages, and the difference is whether there is anything to do. When days
+    are already lost, **no action is offered**, because none recovers them -- offering
+    a reconnection would be a lie, and the owner's real cost is that they have been
+    reading understated figures for those months. When the days can still be had, this
+    is an ask with a date on it.
+
+    Takes the gap rather than a payload: this one has no request behind it, so there
+    is no payload to read it off.
+    """
+    days = gap.missing_days
+    plural = "day" if days == 1 else "days"
+    span = (
+        str(gap.oldest_missing_day)
+        if gap.oldest_missing_day == gap.newest_missing_day
+        else f"{gap.oldest_missing_day} to {gap.newest_missing_day}"
+    )
+    lines = [
+        "⚠️ Bank data missing",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        f"{days} {plural} were never fetched: {span}.",
+    ]
+    if gap.unrecoverable_days > 0:
+        lines += [
+            "",
+            "They are gone for good -- the provider only serves the last 30 days.",
+            "Every figure reported for those months is understated.",
+        ]
+    else:
+        lines += [
+            "",
+            f"Still recoverable until {gap.recoverable_until}.",
+            "Reconnect the bank before then and they will be fetched.",
+        ]
+    return "\n".join(lines)
+
+
+def _sync_gap_lines(payload: dict[str, Any]) -> list[str]:
+    """Days the bank was never asked about, worded off the backend's own status.
+
+    Two sentences, because they ask for different things. ``lost`` asks for nothing --
+    no action recovers those days -- but the owner has been reading figures for those
+    months that were understated, and that is worth knowing even though it is too
+    late. ``expiring`` asks for a reconnection, and the date is what makes it an ask
+    rather than a complaint.
+
+    The status is read, never derived: the dashboard says the same thing from the same
+    field, which is the amendment ``ADR-0002`` records.
+    """
+    gap = payload.get("sync_gap")
+    # ``lost_elsewhere`` is a real loss in some other month, and saying it here would
+    # be the furniture this scoping exists to remove. The month it belongs to says it.
+    if not gap or gap["status"] == "lost_elsewhere":
+        return []
+    days = gap["missing_days"]
+    plural = "day" if days == 1 else "days"
+    head = f"⚠️ {days} {plural} of bank data missing since {gap['oldest_missing_day']}"
+    if gap["status"] == "lost":
+        return [head, "   ↳ gone for good -- those months are understated", ""]
+    return [head, f"   ↳ recoverable until {gap['recoverable_until']} -- reconnect the bank", ""]
+
+
 def format_summary(payload: dict[str, Any]) -> str:
     currency = payload["current_balance_currency"]
     tense = _TENSE_SUFFIXES.get(payload["safe_to_spend_status"], "")
@@ -72,6 +200,10 @@ def format_summary(payload: dict[str, Any]) -> str:
         f"📊 Summary for {payload['month']}{tense}",
         "━━━━━━━━━━━━━━━━━━",
         "",
+        # Above every figure, because it qualifies all of them: the owner read two
+        # months of understated totals without anything saying the bank had never
+        # been asked about five of their days.
+        *_sync_gap_lines(payload),
         _allowance_line(payload, currency),
         "",
         f"💰 Balance: {_money(payload['current_balance_amount'], currency)}",
@@ -82,10 +214,24 @@ def format_summary(payload: dict[str, Any]) -> str:
     if Decimal(payload.get("unbudgeted_spending_amount", "0.00")) != 0:
         lines.append(f"   ↳ incl. {_money(payload['unbudgeted_spending_amount'], currency)} unbudgeted")
 
-    if Decimal(payload.get("monthly_income_amount", "0.00")) > 0:
+    lines.extend(_comparison_lines(payload, currency))
+
+    # Income alone used to gate this block, which went silent on exactly the month it
+    # matters most: one whose every inflow was the owner moving their own money in has
+    # no income at all, and a deficit with nothing beside it is the thing to report.
+    inbound = Decimal(payload.get("inbound_transfer_amount", "0.00"))
+    if Decimal(payload.get("monthly_income_amount", "0.00")) > 0 or inbound != 0:
         net_icon = "📈" if Decimal(payload["net_cash_flow_amount"]) >= 0 else "📉"
         lines.append(f"💵 Income: {_money(payload['monthly_income_amount'], currency)}")
         lines.append(f"{net_icon} Net: {_money(payload['net_cash_flow_amount'], currency)}")
+        if inbound != 0:
+            # Neither income nor spend: it funded the net above rather than forming
+            # part of it, so it reads as the net's cause and never as a figure of
+            # its own.
+            lines.append(
+                f"   ↳ {_money(payload['inbound_transfer_amount'], currency)}"
+                " moved in from an unsynced account"
+            )
 
     # A month that has not started has no elapsed day, so every figure that describes
     # progress has nothing to describe: the usage bar reads 20% used of a month nobody

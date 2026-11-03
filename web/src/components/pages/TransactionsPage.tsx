@@ -264,7 +264,19 @@ export function TransactionsPage({
   const [ruleForm, setRuleForm] = useState<RuleFormState | null>(null);
 
   const rulesById = useMemo(() => new Map(rules.map((rule) => [rule.rule_id, rule])), [rules]);
-  const categoryValue = filters.categoryId ? filters.categoryId : filters.categorized === "false" ? "uncat" : "all";
+  /** Which of the picker's options the filters in force amount to.
+   *
+   *  The options are mutually exclusive by construction, because every branch of
+   *  `handleCategory` clears the filters the other branches set -- so the order here
+   *  only decides what a hand-built combination would read as, never anything the
+   *  owner can reach. */
+  const categoryValue = filters.categoryId
+    ? filters.categoryId
+    : filters.categorized === "false"
+      ? "uncat"
+      : filters.budgeted === "false"
+        ? "unbudgeted"
+        : "all";
 
   function handleAccount(value: string) {
     applyFilters({ ...filters, accountId: value === "all" ? "" : value });
@@ -272,11 +284,13 @@ export function TransactionsPage({
 
   function handleCategory(value: string) {
     if (value === "all") {
-      applyFilters({ ...filters, categoryId: "", categorized: "" });
+      applyFilters({ ...filters, categoryId: "", categorized: "", budgeted: "" });
     } else if (value === "uncat") {
-      applyFilters({ ...filters, categoryId: "", categorized: "false" });
+      applyFilters({ ...filters, categoryId: "", categorized: "false", budgeted: "" });
+    } else if (value === "unbudgeted") {
+      applyFilters({ ...filters, categoryId: "", categorized: "", budgeted: "false" });
     } else {
-      applyFilters({ ...filters, categoryId: value, categorized: "" });
+      applyFilters({ ...filters, categoryId: value, categorized: "", budgeted: "" });
     }
   }
 
@@ -525,6 +539,9 @@ export function TransactionsPage({
         <select className="br-sel" value={categoryValue} onChange={(event) => handleCategory(event.target.value)}>
           <option value="all">All categories</option>
           <option value="uncat">Uncategorized</option>
+          {/* Spend filed under an expense category this month holds no budget for --
+              the money the dashboard discloses as unbudgeted, listed row by row. */}
+          <option value="unbudgeted">No budget</option>
           {categories.map((category) => (
             <option key={category.category_id} value={category.category_id}>
               {category.name}
