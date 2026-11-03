@@ -122,6 +122,89 @@ The database holds your full financial history, so it is treated as sensitive:
 Avoid `$` in `POSTGRES_PASSWORD` (docker compose interpolates it) and in the
 password inside `DATABASE_URL` (URL-reserved characters need escaping).
 
+## Backup and Restore
+
+Your history is not replaceable. The bank only serves a **30-day** fetch window, so
+anything older than that cannot be re-imported — a 36-day worker outage in 2026 lost
+30 August to 3 September for good.
+
+### What a backup set is
+
+`scripts/backup.sh` writes a timestamped directory to `~/burnrate-backups`
+(override with `BURNRATE_BACKUP_DIR`) holding **three artefacts and a manifest**,
+because the database alone does not restore a working product:
+
+| File | Why it is in the set |
+|---|---|
+| `burnrate.dump` | the data, in `pg_dump` custom format |
+| `env` | a copy of `.env`. Holds `BANK_TOKEN_ENCRYPTION_KEY`, without which every restored bank token is unreadable ciphertext, and `AUTH_SECRET_KEY` / `AUTH_PASSWORD_HASH`, without which nobody can log in |
+| `enable-banking.pem` | signs every request to the bank. Without it the product cannot call Enable Banking at all, so it cannot even re-authorize |
+| `manifest.txt` | the Alembic revision and an exact row count per table, which is what a restore is checked against |
+
+Every dump is verified readable the moment it is written and the set is deleted if
+it is not, because a dump nobody has read is a belief rather than a backup. Retention
+keeps the most recent 14 sets (`BURNRATE_BACKUP_RETENTION`).
+
+It runs nightly from a host `cron` entry at 03:30, not from inside the stack — a
+backup that lives in the stack cannot run when the stack is what is broken:
+
+```
+MAILTO=""
+30 3 * * * mkdir -p $HOME/burnrate-backups && cd /home/bots/burnrate && ./scripts/backup.sh >> $HOME/burnrate-backups/backup.log 2>&1
+```
+
+The `mkdir` is not redundant: the log redirect is evaluated before the script runs,
+so on a host where the directory does not exist yet cron would fail on the redirect
+and never reach the backup.
+
+To check a set that has been on disk for months, without restoring it:
+
+```bash
+./scripts/verify-dump.sh ~/burnrate-backups/<set>/burnrate.dump
+```
+
+### Restoring
+
+```bash
+./scripts/restore.sh ~/burnrate-backups/<set> --database burnrate_check
+```
+
+It prints the row counts it restored, so compare them with the set's
+`manifest.txt`. The live database is **refused** unless you pass `--allow-live`;
+restoring is destructive and overwrites everything the stack is using.
+
+A full recovery onto a clean host is three steps, and the first two are manual
+because they are secrets:
+
+1. Copy the set's `env` back to `.env` and its `enable-banking.pem` back to
+   `secrets/enable-banking.pem`.
+2. Bring up Postgres (`docker compose up -d postgres`).
+3. `./scripts/restore.sh <set> --database <the POSTGRES_DB from that env> --allow-live`,
+   then start the rest of the stack.
+
+Skip step 1 and you get a database that holds your history and nothing that can
+read it: the login fails on a different `AUTH_SECRET_KEY`, and the bank tokens raise
+*"Could not decrypt a stored bank token"* and have to be reconnected from scratch.
+
+### Exercised on 2026-11-03
+
+Not a procedure nobody has run. A set was taken, restored into a scratch database,
+and all ten tables matched the manifest row for row (624 transactions, 4,169 sync
+sessions). All three stored bank sessions — including the active one, which expires
+2027-01-12 — decrypted using the key from the set's own `env` copy, which is the part
+of a recovery that is easiest to assume and worst to get wrong.
+
+`backend/tests/test_backup_restore.py` keeps it honest: it runs the real scripts
+against a scratch database on every test run, and skips when the stack is down.
+
+### What this does not protect against
+
+Backups are on **this host**. That covers a bad migration, a wrong `DELETE`, a
+dropped table and Postgres corruption. It does **not** cover losing the host. The
+upgrade is a destination off it, and the only thing that changes is
+`BURNRATE_BACKUP_DIR` — plus encrypting the secret copies, which is unnecessary here
+only because `.env` already sits in the clear beside them.
+
 ## Telegram Bot
 
 BurnRate ships a read-only Telegram bot as a secondary interface. It runs as its

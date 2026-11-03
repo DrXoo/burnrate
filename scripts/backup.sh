@@ -13,7 +13,11 @@
 # DELETE, a dropped table and Postgres corruption. It does not protect against
 # losing the host; a destination off it is the upgrade, and the only line that
 # changes is BURNRATE_BACKUP_DIR.
-set -euo pipefail
+# -E matters here and is not decoration: without errtrace the ERR trap below is not
+# reached when the failure happens inside a function, and every command that can fail
+# in this script runs through one. A backup that failed then left its partial set on
+# disk looking like a backup.
+set -Eeuo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
@@ -33,17 +37,15 @@ chmod 700 "${BACKUP_DIR}"
 mkdir -m 700 "${set_dir}"
 
 # A partial set is worse than none: it looks like a backup and is not one.
-trap 'rm -rf "${set_dir}"' ERR
+trap 'rm -rf "${set_dir}"' ERR INT TERM
 
 dump="${set_dir}/burnrate.dump"
 compose exec -T postgres pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Fc >"${dump}"
 
 # Verified at write time. Keeping a dump nobody has read turns a known gap into a
-# false belief, which is the whole failure mode of this phase.
-if ! compose exec -T postgres pg_restore --list <"${dump}" >/dev/null 2>&1; then
-  echo "the dump just written is not readable by pg_restore; refusing to keep it" >&2
-  exit 1
-fi
+# false belief, which is the whole failure mode of this phase. The trap below is what
+# removes the set, so a dump that fails here is never left behind.
+"${REPO_ROOT}/scripts/verify-dump.sh" "${dump}" >/dev/null
 
 cp "${REPO_ROOT}/.env" "${set_dir}/env"
 cp "${REPO_ROOT}/secrets/enable-banking.pem" "${set_dir}/enable-banking.pem"

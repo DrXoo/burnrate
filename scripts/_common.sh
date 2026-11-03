@@ -7,9 +7,15 @@
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# An exported variable wins over .env, so a drill can point the scripts at something
+# other than the live stack without editing the file the live stack reads.
 env_value() {
   local key="$1"
   local line
+  if [[ -n "${!key:-}" ]]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
   line="$(grep -m1 "^${key}=" "${REPO_ROOT}/.env" || true)"
   if [[ -z "${line}" ]]; then
     echo "${key} is not set in ${REPO_ROOT}/.env" >&2

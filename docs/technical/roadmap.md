@@ -28,7 +28,7 @@ database**.
 
 | # | Phase | Why here | Size |
 |---|---|---|---|
-| 1 | **13 — Keep the data** | the only item whose cost of delay is permanent, and the data has already been lost once | half a day |
+| ~~1~~ | ~~**13 — Keep the data**~~ | **the backup half shipped 2026-11-03.** The dead-man's switch is parked | done |
 | 2 | **11 — "How much do I actually have?"** | the product cannot see the balance that matters; this is now the hero, not a reassurance metric | medium |
 | 3 | **14 — "When can I buy it?"** | the first forward-looking thing in the product, and the first consumer the net-cash-flow baseline has ever had | medium |
 | 4 | **10 — "Tell me, don't make me look"** | retention, and after 11 and 14 it finally has something to say | medium |
@@ -279,6 +279,32 @@ The restore is the deliverable, not the dump. An untested backup is a belief.
 A restore has been performed onto a clean stack and reproduces the owner's
 transactions, categories, budgets and a **working bank connection**. A 36-day worker
 outage would now be noticed within a day by something that is not the worker.
+
+### Definition of Done: checked (the backup half, 2026-11-03)
+
+Checked by running it, not by reading it.
+
+| Clause | Result | Evidence |
+|---|---|---|
+| A restore has been performed | **Met** | A set was taken and restored into a scratch database. All ten tables matched the manifest row for row -- 624 transactions, 4,169 sync sessions -- and the Alembic revision came back as `0009_from_savings_is_a_transfer` |
+| ...onto a clean stack | **Met in substance, not literally** | The target was a freshly created database in the running container, not a second host. What a separate host would additionally prove is Docker and Compose coming up from nothing, which is not what is at risk here |
+| ...and reproduces a working bank connection | **Met** | All three stored bank sessions decrypted using `BANK_TOKEN_ENCRYPTION_KEY` taken from the backup set's own `env` copy, including the active one expiring 2027-01-12. This is the clause most easily assumed and worst to get wrong, so it was executed rather than reasoned about |
+| A worker outage is noticed within a day | **Not met** | The dead-man's switch is parked by the owner. It is a separate concern from copying data and remains the open case from ADR-0013 |
+
+**Phase 13 is therefore half closed, deliberately and with the remainder named** --
+which is the shape Phase 3 got wrong by closing over a gap nobody wrote down.
+
+One defect was found by a test rather than by review, and it is the kind this phase
+is about: the backup script's cleanup trap did not fire, because an ERR trap is not
+inherited into shell functions without `set -E` and every command that can fail runs
+through one. A failed backup left its partial set on disk **looking like a backup**.
+The test that caught it was written before the script.
+
+### What is left
+
+* The **dead-man's switch** for the sync worker, parked.
+* A destination **off this host**, with the secret copies encrypted once they travel.
+  The only line that changes is `BURNRATE_BACKUP_DIR`.
 
 ---
 
@@ -617,7 +643,8 @@ re-proposed.
 * **Data Gets a Memory** (9a) — the comparison exists and refuses to speak when it
   cannot speak honestly. Shipped, with the claim shrunk to income and unrealistic
   budgets.
-* **Data Survives** (13) — backup and restore, proven. **Next.**
+* **Data Survives** (13) — backup and restore, proven by running it. Shipped, minus
+  the dead-man's switch.
 * **Data Is Complete** (11) — every balance the owner has, and how long it lasts.
 * **Data Gets a Future** (14) — what they want to buy, and what it costs them.
 * **Data Speaks First** (10) — BurnRate reaches out instead of waiting.
@@ -628,8 +655,11 @@ re-proposed.
 
 ## Immediate next steps
 
-1. **Back up the database, and exercise a restore.** Half a day. Phase 13's first two
-   bullets. Everything else on this page is worth less than this.
+1. ~~**Back up the database, and exercise a restore.**~~ **Shipped 2026-11-03.**
+   Nightly sets on this host, each verified readable as it is written, and a restore
+   actually performed -- including decrypting the live bank session from the key in
+   the backup set, which is the half of a recovery that is easiest to assume. The
+   dead-man's switch is parked; a destination off this host is the upgrade.
 2. **Re-run the Enable Banking consent to see whether ING will send the savings
    account.** Ten minutes, and it changes Phase 11's scope.
 3. **Classify June's 29 rows.** Twenty minutes. It fixes June's own figures, which

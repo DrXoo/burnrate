@@ -22,6 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKUP_SCRIPT = REPO_ROOT / "scripts" / "backup.sh"
 RESTORE_SCRIPT = REPO_ROOT / "scripts" / "restore.sh"
+VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-dump.sh"
 SCRATCH_DATABASE = "burnrate_restore_check"
 
 pytestmark = pytest.mark.integration
@@ -206,3 +207,61 @@ def test_retention_prunes_the_oldest_sets_and_keeps_the_newest(tmp_path: Path) -
 
     sets = sorted(p.name for p in tmp_path.iterdir() if p.is_dir())
     assert len(sets) == 2, "retention of 2 keeps two sets"
+
+
+def test_an_unreadable_dump_is_refused_by_verification(tmp_path: Path) -> None:
+    """Keeping a dump nobody has read turns a known gap into a false belief."""
+    truncated = tmp_path / "burnrate.dump"
+    truncated.write_bytes(b"PGDMP" + b"\x00" * 64)
+
+    refused = subprocess.run(
+        [str(VERIFY_SCRIPT), str(truncated)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert refused.returncode != 0
+
+
+def test_verification_accepts_a_dump_that_pg_restore_can_read(tmp_path: Path) -> None:
+    """The other half of the pair: a rule that only ever says no is not a check."""
+    subprocess.run(
+        [str(BACKUP_SCRIPT)],
+        cwd=REPO_ROOT,
+        env={**os.environ, "BURNRATE_BACKUP_DIR": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    backup_set = next(p for p in tmp_path.iterdir() if p.is_dir())
+
+    accepted = subprocess.run(
+        [str(VERIFY_SCRIPT), str(backup_set / "burnrate.dump")],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert accepted.returncode == 0, accepted.stderr
+
+
+def test_a_failed_run_leaves_no_partial_backup_set_behind(tmp_path: Path) -> None:
+    """A partial set is worse than none: it looks like a backup and is not one."""
+    failed = subprocess.run(
+        [str(BACKUP_SCRIPT)],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "BURNRATE_BACKUP_DIR": str(tmp_path),
+            "POSTGRES_USER": "no-such-role",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert failed.returncode != 0
+    assert [p for p in tmp_path.iterdir() if p.is_dir()] == []
