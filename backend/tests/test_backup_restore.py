@@ -158,6 +158,13 @@ def test_a_restore_reproduces_every_row_the_manifest_counted(
     restored_revision = _psql(SCRATCH_DATABASE, "select version_num from alembic_version")
     assert restored_revision == header["alembic_revision"]
 
+    # Asserted before the loop, because a loop over nothing is not a comparison. An
+    # empty [rows] section -- a manifest written against a database with no tables, or
+    # by a backup.sh that stopped emitting counts -- would otherwise take this test
+    # straight to green having checked no data at all.
+    assert expected_rows, "the manifest counted no tables, so the loop below proves nothing"
+    assert expected_rows["transactions"] > 0, "the live database has transactions to lose"
+
     for table, count in expected_rows.items():
         restored = int(_psql(SCRATCH_DATABASE, f'select count(*) from "{table}"'))
         assert restored == count, f"{table} lost rows in the round trip"
@@ -265,3 +272,140 @@ def test_a_failed_run_leaves_no_partial_backup_set_behind(tmp_path: Path) -> Non
 
     assert failed.returncode != 0
     assert [p for p in tmp_path.iterdir() if p.is_dir()] == []
+
+
+def test_the_live_database_guard_reads_the_env_file_not_the_environment(
+    tmp_path: Path,
+) -> None:
+    """A guard an exported variable can answer is a guard an exported variable disarms.
+
+    The drill in README.md exports POSTGRES_DB. Were the guard to read the environment,
+    that export would make the comparison miss and `--database <live>` would overwrite
+    production without anybody passing --allow-live.
+    """
+    fake_set = tmp_path / "set"
+    fake_set.mkdir()
+    (fake_set / "burnrate.dump").write_bytes(b"PGDMP")
+
+    refused = subprocess.run(
+        [str(RESTORE_SCRIPT), str(fake_set), "--database", _live_database()],
+        cwd=REPO_ROOT,
+        env={**os.environ, "POSTGRES_DB": "burnrate_something_else"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert refused.returncode != 0
+    assert "--allow-live" in (refused.stderr + refused.stdout)
+
+
+def test_a_database_flag_with_no_value_prints_usage(tmp_path: Path) -> None:
+    """`shift 2` on a one-element list fails, and under `set -e` that is a silent death."""
+    result = subprocess.run(
+        [str(RESTORE_SCRIPT), str(tmp_path), "--database"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "usage:" in result.stderr
+
+
+def test_retention_leaves_alone_what_is_not_a_backup_set(tmp_path: Path) -> None:
+    """The backup directory is the owner's, and retention runs `rm -rf` inside it."""
+    bystander = tmp_path / "pulled-off-the-nas"
+    bystander.mkdir()
+    (bystander / "keepme").write_text("not a backup set")
+
+    for _ in range(2):
+        subprocess.run(
+            [str(BACKUP_SCRIPT)],
+            cwd=REPO_ROOT,
+            env={
+                **os.environ,
+                "BURNRATE_BACKUP_DIR": str(tmp_path),
+                "BURNRATE_BACKUP_RETENTION": "1",
+            },
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    assert (bystander / "keepme").exists(), "retention deleted a directory it did not write"
+    sets = [p for p in tmp_path.iterdir() if p.is_dir() and p != bystander]
+    assert len(sets) == 1, "retention of 1 keeps one set, and counts only sets"
+
+
+def test_a_retention_of_zero_is_refused_rather_than_obeyed(tmp_path: Path) -> None:
+    """Obeyed literally it prunes the set the same run just wrote, leaving none."""
+    result = subprocess.run(
+        [str(BACKUP_SCRIPT)],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "BURNRATE_BACKUP_DIR": str(tmp_path),
+            "BURNRATE_BACKUP_RETENTION": "0",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert [p for p in tmp_path.iterdir() if p.is_dir()] == []
+
+
+def test_verification_separates_an_unreachable_database_from_a_bad_dump(
+    tmp_path: Path,
+) -> None:
+    """Told apart, because every way of failing to reach pg_restore also exits non-zero.
+
+    Reported as one, the script would tell the owner an intact dump was corrupt in
+    precisely the situation -- a host where the stack is not up -- that it exists for.
+    """
+    intact = tmp_path / "burnrate.dump"
+    subprocess.run(
+        [str(BACKUP_SCRIPT)],
+        cwd=REPO_ROOT,
+        env={**os.environ, "BURNRATE_BACKUP_DIR": str(tmp_path / "sets")},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    written = next(p for p in (tmp_path / "sets").iterdir() if p.is_dir())
+    intact.write_bytes((written / "burnrate.dump").read_bytes())
+
+    unreachable = subprocess.run(
+        [str(VERIFY_SCRIPT), str(intact)],
+        cwd=REPO_ROOT,
+        env={**os.environ, "COMPOSE_PROJECT_NAME": "burnrate-no-such-project"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert unreachable.returncode == 3, "a dump that was not checked is not a dump that failed"
+    assert "NOT checked" in unreachable.stderr
+    assert "cannot read" not in unreachable.stderr
+
+
+def test_env_file_value_strips_quotes_and_carriage_returns(tmp_path: Path) -> None:
+    """The guard compares strings, so a quoted or CRLF .env would make it fail open."""
+    (tmp_path / ".env").write_text('POSTGRES_USER=u\r\nPOSTGRES_DB="burnrate"\r\n')
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'source "{REPO_ROOT}/scripts/_common.sh"; REPO_ROOT="{tmp_path}"; '
+            "env_file_value POSTGRES_DB",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout == "burnrate"

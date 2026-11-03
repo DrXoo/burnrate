@@ -27,7 +27,9 @@ allow_live="no"
 
 while (( $# )); do
   case "$1" in
-    --database) target="${2:-}"; shift 2 ;;
+    # Checked rather than defaulted: a bare trailing --database would make `shift 2`
+    # fail, and under `set -e` the script would die with status 1 and no usage line.
+    --database) [[ $# -ge 2 && -n "$2" ]] || usage; target="$2"; shift 2 ;;
     --allow-live) allow_live="yes"; shift ;;
     -h|--help) usage ;;
     *) [[ -z "${set_dir}" ]] || usage; set_dir="$1"; shift ;;
@@ -40,9 +42,13 @@ dump="${set_dir}/burnrate.dump"
 [[ -f "${dump}" ]] || { echo "no dump at ${dump}" >&2; exit 1; }
 
 POSTGRES_USER="$(env_value POSTGRES_USER)"
-POSTGRES_DB="$(env_value POSTGRES_DB)"
 
-if [[ "${target}" == "${POSTGRES_DB}" && "${allow_live}" != "yes" ]]; then
+# env_file_value, not env_value: the guard has to ask what the *stack* runs on, which
+# is .env. Read through env_value, an exported POSTGRES_DB -- which is exactly what a
+# drill sets -- would make the comparison miss and the restore overwrite production.
+live_database="$(env_file_value POSTGRES_DB)"
+
+if [[ "${target}" == "${live_database}" && "${allow_live}" != "yes" ]]; then
   cat >&2 <<MSG
 refusing to restore over the live database "${target}".
 Pass --allow-live if that is genuinely what you want; restoring is destructive and

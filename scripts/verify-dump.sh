@@ -25,8 +25,20 @@ if [[ ! -f "${dump}" ]]; then
   exit 1
 fi
 
-if ! compose exec -T postgres pg_restore --list <"${dump}" >/dev/null 2>&1; then
-  echo "pg_restore cannot read ${dump}" >&2
+# Asked separately, and first, because every way of reaching pg_restore -- Docker not
+# running, the stack down, the container renamed -- exits non-zero just like a corrupt
+# archive does. Reported as one, this script would tell the owner that an intact dump
+# was unreadable, in exactly the situation it advertises itself for. "Not checked" and
+# "unreadable" are different answers and get different exit codes.
+if ! reach="$(compose exec -T postgres pg_restore --version 2>&1 >/dev/null)"; then
+  echo "cannot reach pg_restore in the postgres container, so ${dump} was NOT checked:" >&2
+  printf '%s\n' "${reach}" >&2
+  exit 3
+fi
+
+if ! complaint="$(compose exec -T postgres pg_restore --list <"${dump}" 2>&1 >/dev/null)"; then
+  echo "pg_restore cannot read ${dump}:" >&2
+  printf '%s\n' "${complaint}" >&2
   exit 1
 fi
 

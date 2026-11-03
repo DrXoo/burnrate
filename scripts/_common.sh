@@ -7,21 +7,39 @@
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# An exported variable wins over .env, so a drill can point the scripts at something
-# other than the live stack without editing the file the live stack reads.
-env_value() {
+# What .env says, and only what .env says. This is the authority on what the live
+# stack is, so the live-database guard in restore.sh must ask this and never
+# env_value: a guard that an exported variable can answer is a guard an exported
+# variable can disarm.
+#
+# Quotes and a trailing CR are stripped, because the guard compares strings and
+# POSTGRES_DB="burnrate" or a CRLF line would make it compare unequal and fail open.
+env_file_value() {
   local key="$1"
-  local line
-  if [[ -n "${!key:-}" ]]; then
-    printf '%s' "${!key}"
-    return 0
-  fi
+  local line value
   line="$(grep -m1 "^${key}=" "${REPO_ROOT}/.env" || true)"
   if [[ -z "${line}" ]]; then
     echo "${key} is not set in ${REPO_ROOT}/.env" >&2
     return 1
   fi
-  printf '%s' "${line#*=}"
+  value="${line#*=}"
+  value="${value%$'\r'}"
+  if [[ "${value}" == \"*\" || "${value}" == \'*\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "${value}"
+}
+
+# As above, but an exported variable wins, so a test can point a run at a role or a
+# value the live stack does not use. Only ever used for things that pick *how* to
+# connect, never for deciding what the live database is.
+env_value() {
+  local key="$1"
+  if [[ -n "${!key:-}" ]]; then
+    printf '%s' "${!key}"
+    return 0
+  fi
+  env_file_value "${key}"
 }
 
 # Exact counts, not pg_stat estimates: this is checked against a restore.
