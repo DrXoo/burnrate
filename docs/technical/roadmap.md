@@ -29,8 +29,8 @@ database**.
 | # | Phase | Why here | Size |
 |---|---|---|---|
 | ~~1~~ | ~~**13 — Keep the data**~~ | **the backup half shipped 2026-11-03.** The dead-man's switch is parked | done |
-| 2 | **11 — "How much do I actually have?"** | the product cannot see the balance that matters; this is now the hero, not a reassurance metric | medium |
-| 3 | **14 — "When can I buy it?"** | the first forward-looking thing in the product, and the first consumer the net-cash-flow baseline has ever had | medium |
+| 2 | **11 — "How much do I actually have?"** | the owner says **most of their money sits in accounts it cannot see**, so every balance-derived figure is confidently wrong, not merely incomplete | medium |
+| 3 | **14 — "When can I buy it?"** | the first forward-looking thing in the product, and with a salary back its ETA half is a real question again rather than `never` | medium |
 | 4 | **10 — "Tell me, don't make me look"** | retention, and after 11 and 14 it finally has something to say | medium |
 | 5 | **9b — Commitments** | inverted from detection to confirmation; the detection it was scoped as cannot be built on this data | small |
 | 6 | **12 — AI assistance** | narrowed to the categorization copilot and to wording. No dependencies; promote freely | medium |
@@ -135,21 +135,34 @@ baseline sync coverage. Two readers now, so the next one is the trigger to move 
 Measured on **2026-11-03** against the running database, not reasoned about. These
 are the facts that kill plans, and every one of them has killed one.
 
+> **Revised at 17:25 the same day**, when a second bank was connected and two of the
+> facts below stopped being true. The tables are the new readings. That the document
+> needed rewriting six hours after it was written is not an embarrassment, it is the
+> method working: it is ordered by measurements, so a new measurement reorders it.
+
 ### Money the product cannot see
 
 | | |
 |---|---|
-| Accounts in the system | **1** (`included_in_calculations`), balance **€51.54**, synced today |
-| Enable Banking mappings | 1 |
-| Savings accounts | **none** — the ING savings account is not synced and does not exist as a row |
-| Drawn from savings in 5 months | **€13,041.00** over 8 transfers, typed `transfer` by ADR-0010 |
-| Last income of any kind | **2026-10-09**, €980.20, `Abono prestación INEM` |
-| Income categories | `El Paro` €3,365.35 over 4, `Severance Pay` €5,500.00 over 1 |
+| Accounts in the system | **3**, across **two banks**, total visible **€1,753.08** |
+| ING current | €51.54, 624 transactions from 2026-06-01 |
+| Openbank current | **€1,701.54**, 25 transactions from 2026-10-19 |
+| Openbank second account | €0.00, no transactions, purpose unknown |
+| Savings accounts | **still none.** The ING savings account is not synced and does not exist as a row |
+| Money held outside what the product can see | **most of it** — the owner, asked directly on 2026-11-03 |
+| Last income | **2026-10-29, €1,823.50**, a payroll from a new employer, into Openbank |
+| The income before it | 2026-10-09, €980.20 `Abono prestación INEM` — the last unemployment payment |
+| Drawn from savings in 5 months | €13,041.00 over 8 transfers, typed `transfer` by ADR-0010 |
 
-**The product is blind to the only number that currently matters.** It reports a
-€51.54 balance as the owner's position while an unknown savings balance funds their
-life at roughly €2,600 a month. This is Phase 11, and it is why Phase 11 moved from
-sixth to second.
+**The product is still blind to the number that matters, and connecting a second bank
+did not fix it — it moved it.** It now sees €1,753.08 and the owner says the majority
+of their money is somewhere it cannot reach. So "Current balance", the cushion, and
+every *"can I afford this"* answer are computed on a minority of the money, and are
+wrong by an amount the product cannot bound.
+
+This is why Phase 11 stays second, and why its manual-account half stopped being the
+optional one. A cushion computed today would not be an incomplete number, it would be
+a **confidently wrong** one.
 
 ### History
 
@@ -180,13 +193,20 @@ is Phase 13, and it is why Phase 13 moved from last to first.
 
 ### Signals a feature was scoped against and does not have
 
-| Field | Reality |
-|---|---|
-| `counterparty_name` | NULL in 610 of 623 rows |
-| `merchant_name` | NULL in 305, the **owner's own name** in 261 |
-| `bank_transaction_code` | `"Banca online"` on all 623 |
-| `merchant_category_code` | always NULL |
-| Usable signal | a Spanish free-text `description`, nothing else |
+| Field | ING — 624 rows | Openbank — 25 rows |
+|---|---|---|
+| `counterparty_name` | present in **13** | present in **2** |
+| `merchant_name` | present in 319, frequently the **owner's own name** | present in **2** |
+| `bank_transaction_code` | one value, `"Banca online"`, on every row | absent |
+| `merchant_category_code` | never | never |
+| Usable signal | a Spanish free-text `description`, nothing else | the same |
+
+**This was measured on one bank in the morning and confirmed against a second the
+same evening.** That matters more than the numbers: the obvious objection to 9b's
+finding was that it described ING rather than the data, and a different bank with a
+different card and a different country of spend is poorer still — 8% of rows carry a
+merchant name against ING's 51%. The poverty is a property of what Enable Banking
+returns, not of one ASPSP, and connecting a third bank will not rescue 9b.
 
 9b's scope line — *"same counterparty, stable cadence, similar amount"* — names a
 field that does not exist. Exact description matching finds 19 strings recurring in
@@ -198,35 +218,46 @@ contributes **260 near-identical rows** of €0.01-€1.94 on every day of the m
 
 ## Who this is for
 
-> **Corrected on 2026-11-03**, against the data above. The previous version of this
-> section said *"a salaried person who does not want to overspend"* and called itself
-> *"the single most important input to the ordering below"*. The owner's live data
-> shows **no salary since the severance in July, unemployment benefit as the only
-> income, and life funded by savings drawdown**. The ordering input was stale, and
-> everything below it was ordered for a user the owner currently is not. ADR-0012
-> already half-noticed this — it rejected a mean because it would tell *"someone out
-> of work that their income had collapsed"* — and this section was not updated with
-> it.
+> **Corrected twice on 2026-11-03**, six hours apart. The morning version replaced
+> *"a salaried person"* with a drawdown profile, because the live data showed no
+> salary since July's severance. At 17:25 a second bank was connected and a
+> **€1,823.50 payroll from a new employer, dated 29 October, monthly** appeared with
+> it. The morning correction was right about the data it had and wrong about the
+> owner by ten days.
+>
+> This section's own closing instruction — *"If the owner returns to a salary,
+> re-read this section before re-ordering"* — fired within six hours of being
+> written. **Keep it.** It has now earned its place twice, and it is the only line
+> here that survives being wrong.
 
-BurnRate targets **its owner, who is currently drawing down savings between
-salaries, and who does not want to overspend.** That implies, in order:
+BurnRate targets **its owner, newly back on a salary, whose savings sit mostly in
+accounts the product cannot see, and who does not want to overspend.** That implies,
+in order:
 
-* **The cushion is the hero metric while the drawdown lasts.** *"My savings cover N
-  months of my life"* is the number that changes decisions when there is no monthly
-  income to pace against. It does not exist yet.
-* **Safe to Spend Today stays the daily driver**, because a daily allowance changes a
-  decision in the moment. But it is computed from budgets and **knows nothing about
-  the balance** — on 2026-10-26 it read €32.13/day and `on_track` against €164.51 in
-  the account. With the cushion beside it, that stops being misleading.
-* **A baseline is worth little here**, which ADR-0014 settles on other grounds too.
-  There is no stable normal to compare against while every month is an event.
-* **A purchase goal is the only forward-looking thing on the roadmap**, and in a
-  drawdown its useful output is not *"when can I afford it"* but *"what does this
-  cost me in cushion"*. That is Phase 14.
+* **Safe to Spend Today is the daily driver again, and now it can be right.** A
+  monthly income to pace against is the thing it was built for. But it is computed
+  from budgets and **knows nothing about the balance**, and the balance it would read
+  is a minority of the money. The fix is Phase 11, not a change to Phase 8.
+* **The cushion demotes to reassurance, exactly as this section predicted** — and its
+  input is missing, which is now the bigger problem. *"My savings cover N months"* is
+  no longer the number that changes a decision day to day, but it is still the number
+  the owner cannot see at all, and the only one Phase 3 ever promised.
+* **The baseline becomes reachable, and is still not reachable yet.** One payslip is
+  not a normal, Openbank holds fifteen days, and Qualifying Months is still **0**.
+  ADR-0014 stands on its own grounds regardless: a baseline is a second answer where
+  the budget already answers.
+* **Phase 14 inverts back to ETAs**, as written. With a surplus, *"when can I buy
+  it"* is a real question again, and *"what does this cost me in cushion"* becomes
+  the secondary framing rather than the only honest one.
 
-If the owner returns to a salary, re-read this section before re-ordering: the
-cushion demotes itself, the baseline becomes reachable, and Phase 14 inverts back to
-ETAs.
+One live caution the new bank introduces: **the product cannot tell "this account did
+not exist before 19 October" from "we only fetched from 19 October."** Here it is the
+former, confirmed by the account's first transaction being the owner seeding it with
+€200. A month-level figure spanning both banks before that date is ING-only and does
+not say so.
+
+If the owner's income changes again, re-read this section before re-ordering. It is
+the single most important input below, and it has been stale twice.
 
 ---
 
@@ -346,10 +377,11 @@ send, and state how long they would last.
 ### The defect this feature introduces if built naively
 
 `SummaryService` sums `Account.latest_balance_amount` across every account with
-`included_in_calculations = true` — see `summary_service.py:405-409`. **Adding a
-savings account with a balance silently inflates "Current balance"**, the one figure
-the owner reads as *what is in my account right now*. A €20,000 savings balance would
-publish a €20,051.54 balance beside a €32/day allowance.
+`included_in_calculations = true` — see `summary_service.py:405-409`. Across the
+three spending accounts live today that sum is correct. **Adding a savings account
+with a balance silently inflates "Current balance"**, the one figure the owner reads
+as *what is in my account right now*. A €20,000 savings balance would publish
+€21,753.08 beside a €32/day allowance.
 
 So every balance read must state the purpose it wants. Enumerate them before
 starting; there are few.
@@ -373,11 +405,21 @@ Two things that are **not** affected, verified rather than assumed, so that nobo
 
 ### Before writing any code
 
-**Re-run the Enable Banking consent and account selection to find out whether ING
-exposes the savings account at all.** Restricted production returning an empty
-account list is a valid product state, and the savings account may simply be outside
-the authorized scope rather than unsupported. Ten minutes, and it can delete half
-this phase.
+This was *"re-run the consent and find out whether ING exposes the savings account;
+ten minutes, and it can delete half this phase."* **Half of it ran on 2026-11-03** —
+against Openbank, not ING — and the result was two accounts, one of them empty, and
+no savings account. It did not delete half the phase.
+
+What remains of that check is the ING half, and it is **no longer a gate**. The owner
+has since stated that most of their money is in accounts the product cannot see, so
+manual accounts are required whatever ING answers; the ING answer only decides
+whether one specific balance stops needing to be typed by hand. It will be run in
+person when the owner is next at the host's location, which is also when the ING
+consent is renewed before it lapses on **2027-01-12**.
+
+The thing actually worth doing before writing code is smaller and is not a bank
+question: **find out what the second Openbank account is.** It carries €0.00 and no
+transactions, and `purpose` is the column this phase is about to add.
 
 ### Definition of Done
 
@@ -416,11 +458,14 @@ answer about each: when, and what it costs them.
   the product measures reality against it. The baseline is the **reality check**, not
   the input — *"you planned €400 a month and your typical month puts aside €90"*.
 * **Primary output depends on which way the money is flowing**, and both must exist:
-  * While there is a surplus: **an ETA per goal**, and *"what can I afford"* — the
-    largest single purchase that does not push goal #1 past its deadline.
-  * While there is a drawdown, **which is the live case**: the cost of a purchase in
-    **cushion**. *"This monitor costs you 3.1 weeks."* An ETA is `never` and saying
-    so is the honest output.
+  * While there is a surplus, **which is the live case again since 2026-10-29**: an
+    **ETA per goal**, and *"what can I afford"* — the largest single purchase that
+    does not push goal #1 past its deadline.
+  * While there is a drawdown: the cost of a purchase in **cushion**. *"This monitor
+    costs you 3.1 weeks."* An ETA is `never` and saying so is the honest output.
+  * Both exist and the product picks by measuring, not by configuration. The owner's
+    direction of cash flow has reversed twice in five months, and a roadmap section
+    had to be rewritten both times; the feature should not need rewriting at all.
 * **The affordability verdict is deterministic.** A goal is out of reach when its ETA
   exceeds its deadline, or when funding it drops the cushion below a floor. No model
   is required to say that a €35,000 car is fourteen years away at €200 a month.
@@ -660,15 +705,36 @@ re-proposed.
    actually performed -- including decrypting the live bank session from the key in
    the backup set, which is the half of a recovery that is easiest to assume. The
    dead-man's switch is parked; a destination off this host is the upgrade.
-2. **Re-run the Enable Banking consent to see whether ING will send the savings
-   account.** Ten minutes, and it changes Phase 11's scope.
+2. ~~**Re-run the Enable Banking consent to see whether ING will send the savings
+   account.**~~ **Partly done 2026-11-03**: Openbank is connected (two accounts,
+   €1,701.54, consent to 2027-05-02). The ING half waits for the owner to be at the
+   host's location, where the router is theirs — which is the same trip that renews
+   the ING consent before **2027-01-12**. It is no longer a gate on Phase 11.
 3. **Classify June's 29 rows.** Twenty minutes. It fixes June's own figures, which
    have always been wrong; it does not unblock December.
 4. **Close 9a's two cheap gaps**: one line per figure naming which kind of blank it
    is, and the dashboard's silent Budget pulse rows. Both are in the revised
    Definition of Done.
-5. **Then Phase 11**, which is the hero metric for the owner's current situation and
-   the oldest unkept promise in the product.
+5. **Then Phase 11.** No longer the hero metric — a salary returned on 2026-10-29
+   and Safe to Spend Today took that back — but it is the oldest unkept promise in
+   the product, and the owner has confirmed that most of their money is in accounts
+   it cannot see. Every balance-derived figure is wrong until it ships.
+
+### Deferred by decision, not by oversight
+
+**An HTTPS door on the host for the bank callback.** Enable Banking only accepts an
+HTTPS redirect, the whitelisted URL points at a hostname the owner no longer serves,
+and on 2026-11-03 the Openbank callback had to be completed by **retyping the URL
+against the LAN address by hand** — one attempt was already lost to a stray double
+slash returning 404, and an authorization code is single-use and expires in minutes.
+
+The fix is small and known: `listen 443 ssl` on the nginx that already proxies
+`/enable_banking_items/`, a certificate by **DNS-01** (which needs no inbound
+connectivity, so it works against a DuckDNS record pointing at a private address),
+and `443:443` published. The owner has deferred it on the grounds that the next
+renewal will be done in person with control of the router. Recorded here so that the
+decision is visible when the ING consent approaches **2027-01-12**, and so the
+scramble is a choice rather than a surprise.
 
 ### The lesson each of these is paying for
 
