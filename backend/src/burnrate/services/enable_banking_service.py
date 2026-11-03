@@ -38,17 +38,20 @@ logger = logging.getLogger(__name__)
 # time Enable Banking evaluates it (they reject anything over the cap).
 _CONSENT_VALIDITY_MARGIN = timedelta(minutes=5)
 
-# How far back a sync re-asks the bank. One number, because the booked fetch, the
-# pending fetch and the sweep all read it: see ``_transaction_window``.
+# How far back a sync re-asks the bank. One number, because the fetch, the sweep and
+# baseline coverage all read it: see ``_transaction_window``.
 TRANSACTION_WINDOW = timedelta(days=30)
-"""The one trailing window the booked fetch, the pending fetch and the sweep share.
+"""The one trailing window the transaction fetch and the sweep share.
 
-Public because baseline coverage is now a fourth reader: a month is only
-trustworthy as baseline input if successful syncs asked about every one of its
-days, and that question is this window's length. ``enable-banking.md`` requires
-all readers to derive from a single value rather than restating 30, which is how
-a hold that booked across a month boundary came to be deleted and never
-re-imported.
+It used to be shared by *two* fetches, booked and pending, and that sharing was the
+point: the booked call could not be the narrower of the two, or a hold that booked
+across a month boundary was swept and never re-imported. The pending fetch is gone
+(ADR-0015), and that particular hazard with it.
+
+One value still matters, because baseline coverage is the other reader: a month is
+only trustworthy as baseline input if successful syncs asked about every one of its
+days, and that question is this window's length. ``enable-banking.md`` requires all
+readers to derive from a single value rather than restating 30.
 """
 
 
