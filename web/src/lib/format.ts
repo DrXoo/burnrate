@@ -223,6 +223,26 @@ export function summarizeApiError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The owner-facing message for a bank whose daily allowance is used up, or null when
+    this is some other failure.
+
+    The wording comes from the backend and is not written here. A client that composed
+    it would be deciding what the state means and, worse, guessing when syncing
+    resumes -- which the backend deliberately does not promise, because banks differ on
+    whether the window rolls or resets at midnight.
+
+    Matched on `detail.code` rather than on the status: 503 is also what the backend
+    answers when no password is configured, and 429 is its own click limiter on the
+    very same endpoint. Duck-typed rather than `instanceof ApiError` so the error can
+    cross a module mock. */
+export function bankRateLimitMessage(error: unknown): string | null {
+  const detail = (error as { detail?: { code?: unknown; message?: unknown } } | null | undefined)?.detail;
+  if (!detail || detail.code !== "bank_rate_limit") {
+    return null;
+  }
+  return typeof detail.message === "string" ? detail.message : null;
+}
+
 export function transactionTitle(transaction: Transaction): string {
   return transaction.description || transaction.merchant_name || transaction.counterparty_name || "No description";
 }

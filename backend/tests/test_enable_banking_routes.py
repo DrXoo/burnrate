@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
+
+from burnrate.integrations.enable_banking.client import EnableBankingAPIError
 from burnrate.api.routes.enable_banking import (
     enable_banking_callback,
     list_connections,
@@ -158,3 +162,53 @@ def test_app_exposes_both_enable_banking_callback_paths() -> None:
     assert "/api/v1/integrations/enable-banking/callback" in paths
     assert "/api/v1/integrations/enable-banking/connections/{connection_id}/sync" in paths
     assert "/enable_banking_items/callback" in paths
+
+
+class RefusingBankService(FakeRouteService):
+    """A bank that refuses the sync with a status of the test's choosing."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+    def sync_connection(self, *, connection_id):
+        raise EnableBankingAPIError(
+            status_code=self.status_code,
+            detail={"error": "ASPSP_RATE_LIMIT_EXCEEDED", "psu_reference": "do-not-echo"},
+        )
+
+
+def test_a_spent_access_budget_is_not_reported_as_a_broken_bank() -> None:
+    """A 429 and a 503 called for opposite reactions and read identically.
+
+    Every bank failure became "The bank service returned an error (upstream status
+    429)" with a 502, so "the bank is down, go and look" and "today's allowance is
+    spent, wait" differed by one number in a message the owner had to interpret. They
+    spent an evening on the wrong one.
+
+    The discriminator is in the body rather than the status, and deliberately: this
+    endpoint already answers **429** from BurnRate's own `enable_banking_sync` limiter,
+    and **503** for a backend with no password configured. Either status reused here
+    would be ambiguous with something that has a different remedy, so the status is
+    chosen for honest semantics and the `code` is what a client keys on.
+    """
+    with pytest.raises(HTTPException) as exc_info:
+        sync_connection(connection_id="conn-1", service=RefusingBankService(429))
+
+    detail = exc_info.value.detail
+    assert detail["code"] == "bank_rate_limit"
+    # No upstream status reused as BurnRate's own, for the reason _bank_error records:
+    # a bank 401 passed through would read as the owner's session expiring.
+    assert exc_info.value.status_code != 429
+    # Nothing is lost, and saying so is what makes this calm rather than alarming --
+    # a later sync still reaches back across the fetch window.
+    assert "lost" in detail["message"].lower()
+    assert "do-not-echo" not in str(detail)
+
+
+def test_every_other_bank_failure_still_reports_as_a_bad_gateway() -> None:
+    """The rate limit is carved out of `_bank_error`, not substituted for it."""
+    with pytest.raises(HTTPException) as exc_info:
+        sync_connection(connection_id="conn-1", service=RefusingBankService(503))
+
+    assert exc_info.value.status_code == 502
+    assert "do-not-echo" not in str(exc_info.value.detail)

@@ -15,11 +15,25 @@ from burnrate.api.schemas.enable_banking import (
     StartAuthorizationResponse,
 )
 from burnrate.config import Settings, get_settings
-from burnrate.integrations.enable_banking.client import EnableBankingAPIError
+from burnrate.integrations.enable_banking.client import (
+    RATE_LIMIT_STATUS_CODE,
+    EnableBankingAPIError,
+)
 from burnrate.services.enable_banking_service import EnableBankingService
 
 
 logger = logging.getLogger("burnrate.api")
+
+
+BANK_RATE_LIMIT_CODE = "bank_rate_limit"
+"""What a client keys on to recognise a spent access budget.
+
+The **status** cannot carry this. A `429` is what BurnRate's own
+`enable_banking_sync` limiter already answers when the owner clicks too fast, and a
+`503` is what the backend answers when no password is configured -- so either one
+reused here would be ambiguous with something that has a different remedy. The status
+is chosen for honest semantics and this code is the discriminator.
+"""
 
 
 def _bank_error(exc: EnableBankingAPIError) -> HTTPException:
@@ -29,8 +43,34 @@ def _bank_error(exc: EnableBankingAPIError) -> HTTPException:
     can carry provider detail we should not echo back, and reusing the upstream
     status would let a bank 401 (lapsed consent) masquerade as "your session
     expired" and log the user out of BurnRate. The detail is logged instead.
+
+    A spent access budget is carved out of that, because it is the one case where the
+    generic message is actively misleading. "The bank service returned an error" and
+    "today's allowance is spent" call for opposite reactions -- go and look, versus
+    wait -- and they used to differ by one number in a message the owner had to
+    interpret.
     """
     logger.warning("Enable Banking API error (%s): %s", exc.status_code, exc.detail)
+    if exc.status_code == RATE_LIMIT_STATUS_CODE:
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": BANK_RATE_LIMIT_CODE,
+                # Written here rather than in the client, because the client must not
+                # derive what a state means -- ADR-0002's rule. The "nothing is lost"
+                # clause is what makes this calm rather than alarming, and it is true:
+                # a later successful sync still reaches back across the fetch window,
+                # which is the same self-healing property the sync-gap alert is built
+                # on. No refill time is promised, because banks differ on whether the
+                # window is rolling or resets at midnight and guessing would be a
+                # fabricated promise.
+                "message": (
+                    "This bank's daily allowance for automatic checks is used up. "
+                    "Syncing resumes on its own, and nothing is lost -- the next "
+                    "successful sync still fetches everything since."
+                ),
+            },
+        )
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail=f"The bank service returned an error (upstream status {exc.status_code}).",

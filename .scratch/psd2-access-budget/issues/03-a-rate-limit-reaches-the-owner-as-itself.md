@@ -1,6 +1,6 @@
 # 03 — A rate limit reaches the owner as itself, not as a 502
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 ## Why
@@ -45,3 +45,45 @@ Decide the status code deliberately and write the reason down. A 429 passed thro
 is honest about the cause but invites a client to retry, which ticket 01 establishes
 is the wrong thing to do. The presentation layer must not derive "when it resumes"
 on its own — per AGENTS.md the client reads it from a backend field.
+
+## Comments
+
+**2026-11-03 — done.** `503` with `detail = {"code": "bank_rate_limit", "message": ...}`.
+Every other bank failure keeps the `502`.
+
+### The status could not be the discriminator
+
+Both candidates were already taken on this very endpoint, which is what decided the
+design rather than a preference:
+
+* **429** is BurnRate's own `enable_banking_sync` limiter, i.e. "you clicked too fast"
+* **503** is the backend with no password configured (`test_auth.py` asserts it)
+
+So a client matching on status would conflate three states with three different
+remedies. It matches on `code`; the status is picked for honest semantics only.
+
+### Mutations, both directions, on both sides
+
+| Mutation | Killed by |
+|---|---|
+| backend: `if exc.status_code == RATE_LIMIT…` → `if False` | the new route test |
+| backend: → `if True` (every failure a rate limit) | `test_every_other_bank_failure_still_reports_as_a_bad_gateway` |
+| web: the `allowanceSpent` branch deleted | the new App test |
+| web: `detail.code` check removed | the pre-existing "names the reason" test |
+
+The second and fourth matter most: they are the ones that prove the carve-out is a
+carve-out and did not swallow the generic path. `test_every_other_bank_failure…`
+passed on arrival and was mutation-checked for exactly that reason.
+
+### The double again
+
+`fakeApi.failSync` could only throw a bare message, so a test could not express a
+structured failure and the discrimination was unobservable — the same defect as ticket
+02's fixtures, in the web suite. It now carries `detail` the way `ApiError` does.
+
+`bankRateLimitMessage` is duck-typed rather than `instanceof ApiError` so the error
+survives crossing the `vi.mock` boundary. The message is read from the backend and
+never composed in the client, per ADR-0002, and deliberately promises no refill time:
+banks differ on whether the window rolls or resets at midnight.
+
+Backend 551 passed; web 77 passed, `tsc --noEmit` clean.

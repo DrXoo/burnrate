@@ -106,6 +106,13 @@ what makes two runs a day fit with room rather than exactly. The pending *rules*
 untouched; see the 2026-11-03 amendment to ADR-0003 for the measurement, for why the
 machinery stays, and for the one behaviour it did cost.
 
+**A spent allowance is reported as itself.** It used to reach the owner as a `502`
+saying "The bank service returned an error (upstream status 429)" — so "the bank is
+broken, go and look" and "today's allowance is spent, wait" differed by one number in
+a message that had to be interpreted, and the owner spent an evening on the wrong one.
+It is now a `503` carrying `code: "bank_rate_limit"` and a message from the backend.
+The integration doc holds the shape and why the status cannot be the discriminator.
+
 **The schedule is expressed in UTC and drifts an hour across DST.** `APP_TIMEZONE` is
 unset and therefore UTC, so `0 11,20` lands at 12:00 and 21:00 Europe/Madrid in winter
 and an hour later under CEST. At this cadence that is immaterial. Setting

@@ -34,7 +34,7 @@ const heldMonths = new Set<string>();
 const resumers = new Map<string, (() => void)[]>();
 const failures = new Map<string, string>();
 const connectionStore = new Map<string, Connection>();
-const syncFailures = new Map<string, string>();
+const syncFailures = new Map<string, { message: string; detail?: unknown }>();
 const syncRequests: string[] = [];
 let syncImports = 2;
 let currentMonth = "2026-10";
@@ -105,8 +105,8 @@ export const fakeApi = {
   },
   /** Make the bank refuse the next sync of this connection. The stored row is left
       exactly as it was, which is what a failed sync does. */
-  failSync(connectionId: string, message: string): void {
-    syncFailures.set(connectionId, message);
+  failSync(connectionId: string, message: string, detail?: unknown): void {
+    syncFailures.set(connectionId, { message, detail });
   },
   /** The connection ids sync was asked for, in order. A UI that syncs something other
       than the row whose button was pressed is otherwise unobservable. */
@@ -366,7 +366,10 @@ export async function syncEnableBankingConnection(
   }
   const failure = syncFailures.get(connectionId);
   if (failure) {
-    throw new Error(failure);
+    // Carries `detail` the way ApiError does, because the backend sends a structured
+    // body for states a client must recognise rather than string-match. A double that
+    // could only throw a bare message could not tell the two paths apart.
+    throw Object.assign(new Error(failure.message), { detail: failure.detail });
   }
   connectionStore.set(connectionId, {
     ...stored,

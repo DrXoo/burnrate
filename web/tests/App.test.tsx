@@ -47,6 +47,36 @@ describe("App — manual sync", () => {
     expect(screen.queryByText(/Synced —/)).toBeNull();
   });
 
+  it("does not call a spent bank allowance a broken bank", async () => {
+    fakeApi.setConnection(connection());
+    // What the backend sends for ASPSP_RATE_LIMIT_EXCEEDED: a structured detail, because
+    // the status cannot carry it -- 429 is BurnRate's own click limiter and 503 is a
+    // backend with no password set.
+    fakeApi.failSync("conn-1", "Request failed (503): rate limited", {
+      code: "bank_rate_limit",
+      message:
+        "This bank's daily allowance for automatic checks is used up. Syncing resumes " +
+        "on its own, and nothing is lost -- the next successful sync still fetches " +
+        "everything since.",
+    });
+
+    const button = await openApp();
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    // The backend's own words reach the owner. "Sync failed -- Request failed (503)"
+    // said the bank was broken when the truth was "wait", and those call for opposite
+    // reactions.
+    const toast = await screen.findByText(/daily allowance/);
+    expect(toast.textContent).toContain("nothing is lost");
+    expect(screen.queryByText(/Sync failed/)).toBeNull();
+    expect(screen.queryByText(/503/)).toBeNull();
+    // Still nothing may imply it worked: the strip keeps the timestamp it had.
+    expect(screen.getByText("Synced 1 d ago")).toBeTruthy();
+    expect(screen.queryByText(/Synced —/)).toBeNull();
+  });
+
   it("says what a sync that landed brought in, and shows the new timestamp", async () => {
     fakeApi.setConnection(connection());
 

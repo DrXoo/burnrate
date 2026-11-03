@@ -14,7 +14,7 @@ import { RulesBudgetsPage } from "./components/pages/RulesBudgetsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { TransactionsPage } from "./components/pages/TransactionsPage";
 import { useBurnRateData } from "./hooks/useBurnRateData";
-import { formatMonthLabel, summarizeApiError } from "./lib/format";
+import { bankRateLimitMessage, formatMonthLabel, summarizeApiError } from "./lib/format";
 import type { HeroMode, Section, Theme } from "./lib/viewTypes";
 import type { Connection, ManualSyncResult } from "./types";
 
@@ -233,6 +233,15 @@ export default function App() {
       // failed inside the backend is recorded against the connection and shows up on
       // the next refetch. Nothing records a sync that died in the browser, so this
       // toast is the only report there is.
+      // A spent allowance is not a failure to report as one: the product worked, the
+      // bank's budget for unattended checks is used up, and the owner's move is to
+      // wait rather than to go and look. Reported in the backend's own words, above
+      // the generic path so the status code never reaches the screen for this case.
+      const allowanceSpent = bankRateLimitMessage(error);
+      if (allowanceSpent) {
+        showToast(allowanceSpent, "over");
+        return undefined;
+      }
       showToast(`Sync failed — ${summarizeApiError(error)}`, "over");
       // Deliberately not rethrown: both buttons await this only to stop their spinner,
       // and the escaping rejection is what kept the reason off screen.

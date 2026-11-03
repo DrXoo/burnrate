@@ -19,10 +19,26 @@ import type {
 
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /** The backend's parsed `detail`, for the states it sends structured rather than as
+      prose -- see `bankRateLimitMessage`. Undefined for the ordinary case, where the
+      body is a plain string or not JSON at all. */
+  readonly detail: unknown;
+  constructor(status: number, message: string, detail?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail;
+  }
+}
+
+/** The backend sends a structured `detail` for a state a client has to recognise
+    rather than string-match. Most error bodies are not that, so a parse failure here
+    is the normal case and not worth reporting. */
+function parseDetail(body: string): unknown {
+  try {
+    return (JSON.parse(body) as { detail?: unknown }).detail;
+  } catch {
+    return undefined;
   }
 }
 
@@ -50,7 +66,7 @@ async function request(url: string, options: RequestInit = {}): Promise<Response
       onUnauthorized?.();
     }
     const body = await response.text();
-    throw new ApiError(response.status, `Request failed (${response.status}): ${body}`);
+    throw new ApiError(response.status, `Request failed (${response.status}): ${body}`, parseDetail(body));
   }
 
   return response;

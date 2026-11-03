@@ -305,6 +305,32 @@ four accesses on its own retries.
 That holds whichever way the four are counted, which is why it was fixed ahead of the
 cadence question being settled.
 
+### What A Spent Allowance Looks Like To A Client
+
+A sync refused for rate limiting answers **503** with a structured body:
+
+```json
+{"detail": {"code": "bank_rate_limit", "message": "This bank's daily allowance ..."}}
+```
+
+Every other bank failure keeps the generic `502` and its prose detail, for the two
+reasons `_bank_error` records: the body can carry provider detail that must not be
+echoed, and a bank `401` reused as BurnRate's own would read as the owner's session
+expiring and log them out.
+
+**The discriminator is `code`, not the status, and that is forced rather than
+preferred.** This endpoint already answers `429` from BurnRate's own
+`enable_banking_sync` limiter when the owner clicks too fast, and the backend answers
+`503` when no password is configured. Either status reused here would be ambiguous
+with something that has a different remedy, so clients match on `code`.
+
+The `message` is written by the backend and not composed by the client, per ADR-0002:
+a state each client describes is a state each client can describe differently. It
+promises no refill time, because banks differ on whether the window rolls or resets at
+midnight, and a guessed time would be a fabricated promise. What it does say is that
+nothing is lost — true, and the same self-healing property the sync-gap alert rests on,
+since a later successful sync still reaches back across the fetch window.
+
 A rate limit is logged by name rather than left as a bare traceback, because a `429`
 and a `503` otherwise differ by one number while calling for opposite reactions — a
 `503` means something is wrong, a `429` means wait. The bank's response body is not
