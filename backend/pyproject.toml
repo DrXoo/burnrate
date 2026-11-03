@@ -40,3 +40,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "integration: needs the Docker stack running; skips itself when it is not up",
+]
