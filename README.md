@@ -142,8 +142,13 @@ because the database alone does not restore a working product:
 | `manifest.txt` | the Alembic revision and an exact row count per table, which is what a restore is checked against |
 
 Every dump is verified readable the moment it is written and the set is deleted if
-it is not, because a dump nobody has read is a belief rather than a backup. Retention
-keeps the most recent 14 sets (`BURNRATE_BACKUP_RETENTION`).
+it is not, because a dump nobody has read is a belief rather than a backup. The row
+counts are taken on both sides of the dump and have to agree, so the manifest never
+describes a database the dump does not contain.
+
+Retention keeps the most recent 14 sets (`BURNRATE_BACKUP_RETENTION`, at least 1).
+It matches timestamped set names only, so anything else you keep in that directory
+is neither counted nor deleted.
 
 It runs nightly from a host `cron` entry at 03:30, not from inside the stack — a
 backup that lives in the stack cannot run when the stack is what is broken:
@@ -163,6 +168,11 @@ To check a set that has been on disk for months, without restoring it:
 ./scripts/verify-dump.sh ~/burnrate-backups/<set>/burnrate.dump
 ```
 
+It never connects to a database and never writes, so it is safe on any set at any
+time. Exit **1** means the dump is unreadable; exit **3** means it could not be
+checked at all, usually because the stack is not up — which is exactly the situation
+where a tool that conflated the two would tell you an intact backup was corrupt.
+
 ### Restoring
 
 ```bash
@@ -171,7 +181,9 @@ To check a set that has been on disk for months, without restoring it:
 
 It prints the row counts it restored, so compare them with the set's
 `manifest.txt`. The live database is **refused** unless you pass `--allow-live`;
-restoring is destructive and overwrites everything the stack is using.
+restoring is destructive and overwrites everything the stack is using. "Live" means
+whatever `POSTGRES_DB` is in `.env`, read from the file and never from the
+environment — a guard an exported variable can answer is one a drill can disarm.
 
 A full recovery onto a clean host is three steps, and the first two are manual
 because they are secrets:
@@ -196,6 +208,10 @@ of a recovery that is easiest to assume and worst to get wrong.
 
 `backend/tests/test_backup_restore.py` keeps it honest: it runs the real scripts
 against a scratch database on every test run, and skips when the stack is down.
+Two rules in these scripts have no automated test and are checked by hand, because
+the only way to make either one the sole cause of a failing test is to let that test
+restore over the live database or race it: the `--snapshot`-free agreement of the row
+counts across the dump, and the cleanup trap's exit status on a signal.
 
 ### What this does not protect against
 
