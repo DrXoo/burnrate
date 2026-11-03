@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from burnrate import worker
@@ -74,3 +77,31 @@ def test_report_sync_gap_at_startup_is_silent_without_telegram_configured() -> N
     notification it was never meant to send.
     """
     worker.report_sync_gap_at_startup(make_settings("*/30 * * * *"))
+
+
+def test_the_default_cadence_stays_inside_the_regulated_access_budget() -> None:
+    """A deployment with no ``SYNC_CRON`` must not start outside PSD2.
+
+    The default was ``*/30 * * * *`` -- 48 passes a day -- against a budget of four
+    unattended accesses per 24 hours, which a sync spends one of per call per account.
+    That is the defect ADR-0015 records, and the default is the one place it can ship
+    to someone who never reads a doc.
+
+    Counted by walking the trigger rather than by comparing the cron string, so the
+    assertion is about how often the worker *fires* and not about the spelling it was
+    configured with.
+    """
+    settings = Settings(DATABASE_URL="sqlite+pysqlite:///:memory:")
+    trigger = worker.build_scheduler(settings).get_jobs()[0].trigger
+
+    start = datetime(2026, 11, 3, tzinfo=ZoneInfo(settings.app_timezone))
+    fires = []
+    previous = None
+    while True:
+        nxt = trigger.get_next_fire_time(previous, start if previous is None else previous)
+        if nxt is None or nxt >= start + timedelta(days=1):
+            break
+        fires.append(nxt)
+        previous = nxt
+
+    assert len(fires) <= 2, f"the default cadence fires {len(fires)} times a day: {fires}"

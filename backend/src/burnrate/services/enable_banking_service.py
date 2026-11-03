@@ -551,14 +551,22 @@ class EnableBankingService:
         return account
 
     def _import_account_transactions(self, *, local_account: Account, account_uid: str) -> int:
-        """Import booked and pending transactions for one external account.
+        """Import one external account's transactions with a single call.
 
-        Two calls over one window: Enable Banking returns a single status per call,
-        and a held transaction may have originated in the previous month. The window
-        is shared rather than tuned per call -- see ``_transaction_window`` for why
-        the booked call cannot be the narrower of the two. Banks that do not expose
-        pending transactions over open banking simply return nothing for the pending
-        call.
+        **One call, not two, and the second one is not coming back without evidence.**
+        There used to be a dedicated ``transaction_status="PDNG"`` fetch beside this
+        one. It cost a third of the per-account access budget PSD2 grants for
+        unattended access -- four per 24 hours, against three spent per sync -- and it
+        has never returned a row from either of this owner's banks: all 649 stored
+        transactions carry ``status: BOOK`` as set by the bank. ADR-0015 holds the
+        budget and ADR-0003's amendment holds the measurement.
+
+        Pending transactions are still handled everywhere else, and that is deliberate
+        rather than leftover. ``_extract_transactions`` merges a response's ``pending``
+        array whichever call produced it, and ``SCHD`` normalizes to pending, so a bank
+        that volunteers a held or scheduled row on this call still reaches
+        ``counted_spend`` and the sweep below with ADR-0003's rules intact. What was
+        removed is one HTTP request that never contributed anything, not the concept.
         """
         window_from, window_to = self._transaction_window()
         booked = self._fetch_and_upsert_transactions(
@@ -568,20 +576,13 @@ class EnableBankingService:
             date_to=window_to,
             transaction_status=None,
         )
-        pending = self._fetch_and_upsert_transactions(
-            local_account=local_account,
-            account_uid=account_uid,
-            date_from=window_from,
-            date_to=window_to,
-            transaction_status="PDNG",
-        )
-        if booked.readable and pending.readable:
+        if booked.readable:
             self._sweep_stale_pending_transactions(
                 local_account=local_account,
                 date_from=window_from,
-                reported_external_ids=booked.external_ids | pending.external_ids,
+                reported_external_ids=booked.external_ids,
             )
-        return booked.imported_count + pending.imported_count
+        return booked.imported_count
 
     def _sweep_stale_pending_transactions(
         self,

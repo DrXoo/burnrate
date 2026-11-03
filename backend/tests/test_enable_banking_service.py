@@ -375,17 +375,16 @@ def test_enable_banking_service_handles_callback_and_imports_initial_data() -> N
     assert callback["accounts_imported"] == 1
     assert callback["transactions_imported"] == 1
     today = datetime.now(timezone.utc).date()
-    booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
-    pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
-    # Pending transactions are fetched separately over a trailing 30-day window,
-    # which is also the window the sweep judges.
-    assert pending_requests[0]["date_from"] == today - timedelta(days=30)
-    assert pending_requests[0]["date_to"] == today
-    # The booked call covers at least that window. A constraint, not two numbers kept
-    # in step by hand: the sweep deletes a hold the pending response omits, and only
-    # the booked call can bring the settled copy of it back.
-    assert booked_requests[0]["date_from"] <= pending_requests[0]["date_from"]
-    assert booked_requests[0]["date_to"] >= pending_requests[0]["date_to"]
+    # One call over a trailing 30-day window, which is also the window the sweep judges.
+    # The two used to be asserted against each other, because the booked call had to
+    # cover at least what the pending call did -- the sweep deletes a hold the response
+    # omits, and only the booked rows could bring the settled copy back. With one call
+    # the constraint is no longer a relation between two numbers but a single window,
+    # so it is stated directly.
+    assert len(client.transaction_requests) == 1
+    assert client.transaction_requests[0]["transaction_status"] is None
+    assert client.transaction_requests[0]["date_from"] == today - timedelta(days=30)
+    assert client.transaction_requests[0]["date_to"] == today
 
 
 def test_reconnect_supersedes_previous_connection_for_same_bank() -> None:
@@ -600,14 +599,12 @@ def test_enable_banking_service_manual_sync_reuses_existing_connection() -> None
     assert len(sync_sessions) == 2
     assert sync_sessions[-1].imported_transactions_count == 1
     today = datetime.now(timezone.utc).date()
-    booked_requests = [r for r in client.transaction_requests if r["transaction_status"] is None]
-    pending_requests = [r for r in client.transaction_requests if r["transaction_status"] == "PDNG"]
-    # The most recent resync fetched both statuses over the trailing window, with the
-    # booked call still covering everything the sweep is allowed to delete.
-    assert pending_requests[-1]["date_from"] == today - timedelta(days=30)
-    assert pending_requests[-1]["date_to"] == today
-    assert booked_requests[-1]["date_from"] <= pending_requests[-1]["date_from"]
-    assert booked_requests[-1]["date_to"] >= pending_requests[-1]["date_to"]
+    # The resync spent one access per sync, not two: the initial import and this
+    # resync together, over the trailing window the sweep is scoped to.
+    assert len(client.transaction_requests) == 2
+    assert [r["transaction_status"] for r in client.transaction_requests] == [None, None]
+    assert client.transaction_requests[-1]["date_from"] == today - timedelta(days=30)
+    assert client.transaction_requests[-1]["date_to"] == today
 
 
 def test_resync_of_unchanged_month_counts_zero_new_transactions() -> None:
@@ -890,9 +887,17 @@ class PendingTransactionsClient(FakeEnableBankingClient):
                 "continuation_key": continuation_key,
             }
         )
-        if transaction_status == "PDNG":
-            return {"transactions": {"booked": [], "pending": list(self.pending_payloads)}}
-        return {"transactions": {"booked": list(self.booked_payloads), "pending": []}}
+        # One response carries both arrays, because the dedicated PDNG fetch is gone
+        # (ADR-0015). A bank that exposes holds volunteers them in the `pending` array
+        # of the ordinary response, which is where `_extract_transactions` has always
+        # read them from. Splitting them by `transaction_status` here would make this
+        # double agree with an implementation that no longer exists.
+        return {
+            "transactions": {
+                "booked": list(self.booked_payloads),
+                "pending": list(self.pending_payloads),
+            }
+        }
 
 
 def link_bank(*, service: EnableBankingService, db: Session) -> str:
@@ -981,8 +986,14 @@ def test_a_pending_hold_that_books_under_a_new_identifier_leaves_no_twin() -> No
     assert transactions[0].amount == Decimal("-40.00")
 
 
-class FailingSecondPendingPageClient(PendingTransactionsClient):
-    """The pending fetch returns one page and then fails, so the response is truncated."""
+class FailingSecondPageClient(PendingTransactionsClient):
+    """The fetch returns one page and then fails, so the response is truncated.
+
+    It used to be the *pending* fetch that died here. With one call (ADR-0015) the
+    truncation lands on the only fetch there is, which if anything sharpens the case:
+    the single response is now the sweep's only evidence, so a page that never arrives
+    takes every row on it out of `reported_external_ids`.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -997,23 +1008,24 @@ class FailingSecondPendingPageClient(PendingTransactionsClient):
         transaction_status: str | None = None,
         continuation_key: str | None = None,
     ):
-        if transaction_status != "PDNG":
-            return super().get_account_transactions(
-                account_id=account_id,
-                date_from=date_from,
-                date_to=date_to,
-                transaction_status=transaction_status,
-                continuation_key=continuation_key,
-            )
+        self.transaction_requests.append(
+            {
+                "account_id": account_id,
+                "date_from": date_from,
+                "date_to": date_to,
+                "transaction_status": transaction_status,
+                "continuation_key": continuation_key,
+            }
+        )
         if continuation_key is None:
             return {
                 "transactions": {"booked": [], "pending": list(self.first_page_payloads)},
-                "continuation_key": "pending-page-2",
+                "continuation_key": "page-2",
             }
-        raise EnableBankingAPIError(status_code=502, detail="pending page unavailable")
+        raise EnableBankingAPIError(status_code=502, detail="page unavailable")
 
 
-def test_a_pending_fetch_that_fails_mid_pagination_sweeps_nothing() -> None:
+def test_a_fetch_that_fails_mid_pagination_sweeps_nothing() -> None:
     db = make_session()
     client = PendingTransactionsClient()
     hold_one = make_pending_payload(transaction_id="hold-1")
@@ -1025,7 +1037,7 @@ def test_a_pending_fetch_that_fails_mid_pagination_sweeps_nothing() -> None:
 
     # Only hold-1 arrives before the fetch dies; hold-2 was on the page that never came,
     # so a sweep reading the truncated response would delete a hold that is still live.
-    failing_client = FailingSecondPendingPageClient()
+    failing_client = FailingSecondPageClient()
     failing_client.first_page_payloads = [hold_one]
     failing_service = EnableBankingService(db=db, settings=make_settings(), client=failing_client)
     with pytest.raises(EnableBankingAPIError):
@@ -1128,8 +1140,9 @@ class StandingOrderClient(FakeEnableBankingClient):
         continuation_key: str | None = None,
     ):
         assert account_id == "account-uid-1"
-        if transaction_status == "PDNG":
-            return {"transactions": {"booked": [], "pending": []}}
+        # Reported in the `pending` array of the ordinary response, which is how a
+        # standing order actually arrives: `SCHD` normalizes to pending, and there is
+        # no separate pending call to put it in.
         return {"transactions": {"booked": [], "pending": list(self.scheduled_payloads)}}
 
 
@@ -1207,9 +1220,8 @@ class TopLevelArraysClient(PendingTransactionsClient):
     """
 
     def get_account_transactions(self, **kwargs):
-        if kwargs.get("transaction_status") == "PDNG":
-            return {"booked": [], "pending": list(self.pending_payloads)}
-        return {"booked": list(self.booked_payloads), "pending": []}
+        self.transaction_requests.append(kwargs)
+        return {"booked": list(self.booked_payloads), "pending": list(self.pending_payloads)}
 
 
 def test_a_sync_whose_arrays_arrive_at_the_top_level_still_sweeps() -> None:
@@ -1280,13 +1292,15 @@ class FlatTransactionsListClient(PendingTransactionsClient):
     """
 
     def get_account_transactions(self, **kwargs):
-        rows = (
-            list(self.pending_payloads)
-            if kwargs.get("transaction_status") == "PDNG"
-            else list(self.booked_payloads)
-        )
+        # One flat list carrying both, because one call now fetches everything. Which
+        # rows are holds is readable only from each row's own status in this shape --
+        # that is the whole point of it, and the reason the status fall-back below
+        # matters.
         self.transaction_requests.append(kwargs)
-        return {"transactions": rows, "continuation_key": None}
+        return {
+            "transactions": list(self.booked_payloads) + list(self.pending_payloads),
+            "continuation_key": None,
+        }
 
 
 def test_a_sync_whose_transactions_arrive_as_one_flat_list_still_sweeps() -> None:
@@ -1442,22 +1456,37 @@ def test_the_array_a_row_arrives_in_decides_its_status_when_the_row_does_not() -
     assert charge.status == "booked"
 
 
-def test_a_flat_response_to_the_pending_call_stores_its_rows_as_pending() -> None:
+def test_a_flat_unmarked_row_now_reads_as_settled_and_that_is_a_real_loss() -> None:
+    """What removing the ``PDNG`` call cost, asserted rather than left implicit.
+
+    This used to store the row as **pending**, and the reasoning was sound: in the flat
+    shape there is no array to imply a status, so the fall-back was what the call itself
+    had asked for, and a ``PDNG`` request is the bank's own context for its answer.
+
+    There is no such request any more (ADR-0015), so ``requested_status`` is always
+    ``None`` and the fall-back is "settled". For a bank that uses the flat shape *and*
+    marks status by response rather than per row, every hold now reads as money already
+    spent: it under-reports pending spend, feeds the fixed-step projection a partial
+    authorization, and stays invisible to the sweep for ever.
+
+    Priced and accepted, not overlooked. Such a bank is hypothetical here — neither of
+    the owner's two has ever reported a pending row at all, in 649 transactions — while
+    the access budget the ``PDNG`` call spent was being hit twice a day for real. The
+    inference mechanism is kept intact behind ``requested_status`` so that restoring the
+    call restores the behaviour; see the amendment to ADR-0003.
+
+    A row that carries its own status is unaffected, which is the ordinary case and is
+    covered by ``test_a_provider_status_in_lower_case_is_still_recognised``.
+    """
     db = make_session()
     client = FlatTransactionsListClient()
-    # A bank that uses the flat shape *and* marks status by response rather than per
-    # row: there is no array to imply a status, but the call itself asked for PDNG.
     client.pending_payloads = [unmarked(make_pending_payload(transaction_id="hold-flat"))]
     service = EnableBankingService(db=db, settings=make_settings(), client=client)
     link_bank(service=service, db=db)
 
-    # The request is the bank's own context for the answer, and it is strictly better
-    # evidence than "assume settled": storing this as booked under-reports pending
-    # spend, feeds the fixed step projection a partial authorization, and leaves the
-    # row invisible to the sweep for ever.
     hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-flat"))
     assert hold is not None
-    assert hold.status == "pending"
+    assert hold.status == "booked"
 
 
 def test_a_provider_status_in_lower_case_is_still_recognised() -> None:
@@ -1505,3 +1534,39 @@ def test_a_charge_the_bank_dated_not_at_all_is_filed_on_the_day_the_sync_ran() -
     hold = db.scalar(select(Transaction).where(Transaction.enable_banking_transaction_id == "hold-undated"))
     assert hold is not None
     assert hold.imported_at.date() == date(2026, 1, 31)
+
+
+def test_a_sync_makes_one_transactions_call_per_account() -> None:
+    """The dedicated ``PDNG`` fetch is gone, because it cost a third of a regulated budget.
+
+    PSD2 grants four account-information accesses per 24 hours with the account holder
+    absent, and a sync spent three per account: balances, booked, pending. The pending
+    one has never returned a row from either of this owner's banks -- all 649 stored
+    transactions carry ``status: BOOK`` as set by the bank. See ADR-0015 and the
+    amendment to ADR-0003.
+
+    Asserted on the requests rather than on the rows imported, because the imported
+    rows are identical either way: a test that counted transactions would pass before
+    and after this change and prove nothing.
+    """
+    db = make_session()
+    client = FakeEnableBankingClient()
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    start = service.start_authorization(
+        StartAuthorizationRequest(
+            aspsp_name="Nordea",
+            aspsp_country="FI",
+            psu_type="personal",
+            access_valid_for_days=10,
+        )
+    )
+    db.commit()
+    service.handle_callback(code="auth-code", state=start["state"], error=None, error_description=None)
+    db.commit()
+
+    assert len(client.transaction_requests) == 1
+    assert client.transaction_requests[0]["transaction_status"] is None
+
+    today = datetime.now(timezone.utc).date()
+    assert client.transaction_requests[0]["date_from"] == today - timedelta(days=30)
+    assert client.transaction_requests[0]["date_to"] == today

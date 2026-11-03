@@ -13,7 +13,19 @@ from burnrate.integrations.enable_banking.jwt_signer import EnableBankingJWTSign
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+RATE_LIMIT_STATUS_CODE = 429
+
+RETRYABLE_STATUS_CODES = frozenset({500, 502, 503, 504})
+"""Upstream failures a later attempt could plausibly survive.
+
+**429 is deliberately absent, and reads as an obvious member of this set.** Enable
+Banking answers an over-budget access with ``ASPSP_RATE_LIMIT_EXCEEDED``, and the
+budget PSD2 grants is four accesses per account per day without the PSU present. A
+quantity measured in days cannot change across a backoff measured in seconds, so a
+retry is certain to fail -- and it is charged as another access, which deepens the
+overdraft that caused the error and pushes recovery further into tomorrow. On
+2026-11-03 one rate-limited balances call cost four accesses out of four.
+"""
 
 
 class EnableBankingAPIError(Exception):
@@ -108,6 +120,7 @@ class EnableBankingClient:
                 return self._perform_request(method, path, params=params, json=json)
             except (httpx.TransportError, EnableBankingAPIError) as exc:
                 if attempt >= self.settings.enable_banking_max_retries or not self._is_retryable(exc):
+                    self._log_rate_limit(method, path, exc)
                     raise
                 delay = self.settings.enable_banking_retry_backoff_seconds * (2**attempt)
                 logger.warning(
@@ -121,6 +134,31 @@ class EnableBankingClient:
                 )
                 self.sleep(delay)
                 attempt += 1
+
+    @staticmethod
+    def _log_rate_limit(method: str, path: str, exc: Exception) -> None:
+        """Name a spent access budget, because a 429 and a 503 otherwise look alike.
+
+        Without this the only trace either case leaves is the caller's traceback,
+        which differs by one number and reads as a crash both times -- yet a 503 means
+        go and look and a 429 means wait. Says which, and what happens next, so the
+        log answers the question rather than raising it.
+
+        The bank's body is not logged. ``_bank_error`` already refuses to echo
+        provider detail to a client, and a log file is no safer a place for it.
+        """
+        if not isinstance(exc, EnableBankingAPIError):
+            return
+        if exc.status_code != RATE_LIMIT_STATUS_CODE:
+            return
+        logger.warning(
+            "Enable Banking refused %s %s: rate limit reached for this consent. The "
+            "unattended access budget is spent and refills on the bank's own schedule, "
+            "so this is not retried. No history is lost while a later successful sync "
+            "still reaches back across the fetch window.",
+            method,
+            path,
+        )
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:

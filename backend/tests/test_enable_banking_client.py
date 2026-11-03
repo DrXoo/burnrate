@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import json
+import logging
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -199,3 +200,92 @@ def test_enable_banking_client_gives_up_after_max_retries() -> None:
     # Initial attempt + 2 retries = 3 calls.
     assert attempts["count"] == 3
     assert len(sleeps) == 2
+
+
+def test_enable_banking_client_does_not_retry_a_rate_limit() -> None:
+    """A 429 is the daily access budget for a consent, not a transient fault.
+
+    Enable Banking answers an over-budget access with ``ASPSP_RATE_LIMIT_EXCEEDED``,
+    and PSD2 measures that budget in days. Retrying it cannot succeed, and each retry
+    is charged as another access -- so the retries deepen the overdraft that caused
+    the error and push recovery further into tomorrow. Observed on 2026-11-03: one
+    rate-limited balances call cost four accesses of a budget of four.
+    """
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(429, json={"error": "ASPSP_RATE_LIMIT_EXCEEDED"})
+
+    sleeps: list[float] = []
+    client = EnableBankingClient(
+        settings=make_settings(max_retries=3, retry_backoff_seconds=0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=sleeps.append,
+    )
+
+    with pytest.raises(EnableBankingAPIError) as exc_info:
+        client.list_aspsps(country="fi")
+
+    assert exc_info.value.status_code == 429
+    assert attempts["count"] == 1
+    assert sleeps == []
+
+
+def test_enable_banking_client_logs_a_rate_limit_as_a_rate_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A spent budget and a broken bank must not read the same in the logs.
+
+    Both used to surface only as a caller's traceback saying "Enable Banking API
+    error (<status>)", so the two cases differed by one number and otherwise looked
+    identical -- and they call for opposite reactions: a 503 means go and look, a 429
+    means wait. The owner spent an evening on the wrong one.
+
+    The bank's body is deliberately not logged. ``_bank_error`` already refuses to
+    echo provider detail to a client, and a log file is no safer a place for it.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": "ASPSP_RATE_LIMIT_EXCEEDED", "psu": "secret"})
+
+    client = EnableBankingClient(
+        settings=make_settings(max_retries=3, retry_backoff_seconds=0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="burnrate.integrations.enable_banking.client"):
+        with pytest.raises(EnableBankingAPIError):
+            client.list_aspsps(country="fi")
+
+    logged = caplog.text
+    assert "rate limit" in logged.lower()
+    assert "/aspsps" in logged
+    assert "retrying" not in logged.lower()
+    assert "secret" not in logged
+
+
+def test_enable_banking_client_does_not_call_an_outage_a_rate_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The calming message must not be told about a bank that is actually down.
+
+    This exists because deleting the status check in ``_log_rate_limit`` left every
+    test green: the rate-limit message would have been attached to a 503 and to a
+    400, telling the owner to wait while the bank was broken. The guard had no test,
+    so it was a rule in name only.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "unavailable"})
+
+    client = EnableBankingClient(
+        settings=make_settings(max_retries=1, retry_backoff_seconds=0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="burnrate.integrations.enable_banking.client"):
+        with pytest.raises(EnableBankingAPIError):
+            client.list_aspsps(country="fi")
+
+    assert "rate limit" not in caplog.text.lower()

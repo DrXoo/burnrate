@@ -209,9 +209,43 @@ For the first version, BurnRate should use a simple sync strategy:
 
 BurnRate should assume that transaction imports may be paginated or refreshed incrementally over time, and it should preserve external identifiers needed for safe re-sync behavior.
 
-### One Fetch Window, Shared
+### How Often The Scheduled Refresh Runs
 
-Enable Banking returns one status per call, so BurnRate makes two: a default call for booked transactions and a `PDNG` call for pending ones. Both run over **one** trailing 30-day window, which the sweep below is also scoped to.
+`SYNC_CRON` is `0 11,20 * * *` — twice a day, at 12:00 and 21:00 Europe/Madrid in
+winter. **This is a regulated ceiling and not a tuning parameter.**
+
+PSD2's RTS, [Article 36(5)(b) of Commission Delegated Regulation (EU) 2018/389][rts],
+limits account-information access **where the account holder is not actively requesting
+it**. [EBA Q&A 2019_4631][qa] puts the number at "no more than four times in a 24-hour
+period", "unless a higher frequency is agreed between the AISP and the ASPSP". A sync
+spends one access per call per account, so the cadence and the number of accounts
+together decide whether BurnRate is inside the rule.
+
+It was `*/30 * * * *` — 48 runs a day — from Phase 1 until 2026-11-03, when Openbank
+began refusing with `ASPSP_RATE_LIMIT_EXCEEDED` within an hour of being connected. ING
+had served 37 runs the same day, which is ING declining to enforce a limit it may
+enforce at any time, not evidence that the cadence was sound.
+
+What the four are counted *against* — per consent, per account, or per account and
+request type — is not settled by the Q&A, and this owner's measurements exclude the two
+strict readings for Openbank. **Read
+`docs/adr/0015-two-unattended-syncs-a-day.md` before changing this value**: it holds
+the measurements, what remains unknown, and what would justify a different number.
+
+An access the owner asked for, while present, is outside the budget. BurnRate does not
+yet send the PSU-presence headers that mark a request as attended, so every call it
+makes is unattended whoever triggered it — including a manual sync from the Web UI.
+
+[rts]: https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32018R0389
+[qa]: https://www.eba.europa.eu/single-rule-book-qa/qna/view/publicId/2019_4631
+
+### One Fetch Window, One Call
+
+BurnRate makes **one** transactions call per account, with no `transaction_status`, over a trailing 30-day window — the same window the sweep below is scoped to.
+
+It used to make two, a default call for booked rows and a `PDNG` call for pending ones, because Enable Banking returns one status per call. The second call spent a third of the per-account access budget described above and never returned a row from either of this owner's banks. It was removed on 2026-11-03; the amendment to `docs/adr/0003-pending-spend-is-load-bearing.md` holds the measurement and its limits.
+
+Pending transactions are still handled. A response's `pending` array is read whichever call produced it, and `SCHD` normalizes to pending, so a bank that volunteers a held or scheduled row on the ordinary call is stored and swept exactly as before. What a bank will no longer be *asked* for is holds it reports only on request — the way to discover such a bank is to make the call once and look, not to make it twice a day for every bank for ever.
 
 That is a constraint, not three numbers that happen to agree. The sweep deletes a pending row the bank stopped reporting, and the *booked* call is the only thing that can bring its settled copy back — so the booked window has to cover at least the window the sweep judges. When the booked call ran from the first of the current month instead, it did not: for the first 30 days of every month the sweep judged days the booked call never re-asked about. A hold that pended on the 31st and booked overnight under that same date was deleted as absent and never re-imported, so the charge existed in neither status and the previous month was understated for good — the exact loss ADR-0003 calls self-healing. Re-importing a settled charge is idempotent and the volume is one owner's, so the cheap direction is to widen the booked call rather than narrow the sweep.
 
@@ -255,10 +289,33 @@ Which shape the real bank sends is still unknown, so all of them are covered.
 Enable Banking API calls are retried automatically on transient failures inside the infrastructure client (`EnableBankingClient`):
 
 * Network/transport errors and timeouts are retried.
-* HTTP `429`, `500`, `502`, `503`, and `504` responses are retried.
+* HTTP `500`, `502`, `503`, and `504` responses are retried.
 * Other `4xx` responses (auth, permission, not-found) are not retried, since a retry cannot fix them.
 
 Retries use exponential backoff configured by `ENABLE_BANKING_MAX_RETRIES` and `ENABLE_BANKING_RETRY_BACKOFF_SECONDS`.
+
+**`429` is not in that list, and it used to be.** It is not a transient failure: it is
+`ASPSP_RATE_LIMIT_EXCEEDED`, meaning the unattended access budget described above is
+spent. A quantity measured in hours or days cannot change across a backoff measured in
+seconds, so the retry is certain to fail, and it is itself charged as an access.
+Retrying therefore turned one over-budget call into four and pushed recovery further
+into the next day. Measured on 2026-11-03: a single rate-limited `/balances` call cost
+four accesses on its own retries.
+
+That holds whichever way the four are counted, which is why it was fixed ahead of the
+cadence question being settled.
+
+A rate limit is logged by name rather than left as a bare traceback, because a `429`
+and a `503` otherwise differ by one number while calling for opposite reactions — a
+`503` means something is wrong, a `429` means wait. The bank's response body is not
+logged, for the same reason the API layer refuses to echo it to a client.
+
+The Telegram bot *does* retry its own `429`s, and that is not an inconsistency to
+tidy up. Telegram's flood limit is measured in seconds and the response names a
+`retry_after`, so waiting is both possible and instructed. A bank's is measured in
+days and names nothing. Same status code, opposite correct behaviour — see
+`docs/technical/architecture.md` for the crash that made the Telegram case
+load-bearing.
 
 ### Expired Or Inactive Sessions
 

@@ -9,8 +9,16 @@ report itself**. The owner opening the app is the only path that catches it.
 
 The worker reports it at **startup**, not on each sync pass. Starting up is the
 first moment a returning worker can speak, and it is also what debounces the
-alert — a pass runs every half hour, so a permanent gap reported per pass would be
-48 messages a day for the ninety days of the lookback.
+alert — a permanent gap reported per pass would repeat for the ninety days of the
+lookback, where startup reports it once per restart.
+
+That argument was first written against a cadence of 48 passes a day, which made it
+48 messages a day. ADR-0015 cut the cadence to two, so the number is now two a day and
+the case is weaker than it was. It is not gone: two identical messages a day for three
+months is still how a warning becomes furniture, and startup is still the first moment
+a returning worker can speak. The arithmetic is recorded as changed rather than
+quietly restated, because a reader checking this against `SYNC_CRON` would otherwise
+find it wrong and distrust the rest.
 
 ## The cause recorded in the roadmap was wrong, and that is why
 
@@ -24,7 +32,8 @@ against the database:
   consent alert demonstrably **works** — it fired on 2026-07-16 for the previous
   connection, three days before it lapsed;
 * **there are no `sync_sessions` rows at all between 2026-08-29 and 2026-10-04.**
-  The 29th cut off at 33 runs of 48; the 4th resumed at 27.
+  The 29th cut off at 33 runs of 48; the 4th resumed at 27. (48 was the cadence
+  at the time — see ADR-0015 for why it is now two.)
 
 The worker was down. Had the alert been built where it was first proposed — inside
 the sync pass — it would have been incapable of reporting the only failure that has

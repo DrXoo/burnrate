@@ -59,7 +59,14 @@ class Settings(BaseSettings):
     bank_rate_limit_max_requests: int = Field(default=20, ge=1, alias="BANK_RATE_LIMIT_MAX_REQUESTS")
     bank_rate_limit_window_seconds: int = Field(default=60, ge=1, alias="BANK_RATE_LIMIT_WINDOW_SECONDS")
     bank_token_encryption_key: str = Field(default="", alias="BANK_TOKEN_ENCRYPTION_KEY")
-    sync_cron: str = Field(default="*/30 * * * *", alias="SYNC_CRON")
+    # Twice a day, and a regulated ceiling rather than a preference. PSD2 grants four
+    # account-information accesses per 24 hours when the account holder is not actively
+    # asking, and a sync spends one per call per account -- so cadence times accounts
+    # decides whether this product is inside the rule. The default was */30 (48 passes
+    # a day) until a bank started enforcing it. Read
+    # docs/adr/0015-two-unattended-syncs-a-day.md before raising it; expressed in
+    # app_timezone, which defaults to UTC.
+    sync_cron: str = Field(default="0 11,20 * * *", alias="SYNC_CRON")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
     telegram_api_base_url: str = Field(default="https://api.telegram.org", alias="TELEGRAM_API_BASE_URL")
