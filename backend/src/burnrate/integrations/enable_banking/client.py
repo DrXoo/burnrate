@@ -120,7 +120,7 @@ class EnableBankingClient:
                 return self._perform_request(method, path, params=params, json=json)
             except (httpx.TransportError, EnableBankingAPIError) as exc:
                 if attempt >= self.settings.enable_banking_max_retries or not self._is_retryable(exc):
-                    self._log_rate_limit(method, path, exc)
+                    self._log_refusal(method, path, exc)
                     raise
                 delay = self.settings.enable_banking_retry_backoff_seconds * (2**attempt)
                 logger.warning(
@@ -135,30 +135,61 @@ class EnableBankingClient:
                 self.sleep(delay)
                 attempt += 1
 
-    @staticmethod
-    def _log_rate_limit(method: str, path: str, exc: Exception) -> None:
-        """Name a spent access budget, because a 429 and a 503 otherwise look alike.
+    # Keys whose values are the bank's own classification of a refusal, safe to put
+    # in a log. Allow-listed rather than filtered: a body also carries ``message`` and
+    # ``psu_reference``, which can name an account, and a log file is no safer a place
+    # for that than a response to a client.
+    SAFE_ERROR_KEYS = ("error", "code")
 
-        Without this the only trace either case leaves is the caller's traceback,
-        which differs by one number and reads as a crash both times -- yet a 503 means
-        go and look and a 429 means wait. Says which, and what happens next, so the
-        log answers the question rather than raising it.
+    @classmethod
+    def _log_refusal(cls, method: str, path: str, exc: Exception) -> None:
+        """Say what the bank refused with, because a status alone is not a diagnosis.
 
-        The bank's body is not logged. ``_bank_error`` already refuses to echo
-        provider detail to a client, and a log file is no safer a place for it.
+        Two different jobs, and the 429 case came first. A spent budget and a broken
+        bank used to surface only as a caller's traceback saying "Enable Banking API
+        error (<status>)", so they differed by one number while calling for opposite
+        reactions -- a 503 means go and look, a 429 means wait -- and the owner spent
+        an evening on the wrong one.
+
+        Every other refusal gets the bank's own error code, which the 429's message
+        does not need because its cause is already named. Openbank refused the balances
+        call with 400 three times across 2026-11-03 and 2026-11-04 and nothing recorded
+        why: ``EnableBankingAPIError.__str__`` carries the status alone, and that string
+        is what ``sync_sessions.error_summary`` keeps. With two passes a day, a cause
+        that is not captured when it happens is a cause that costs half a day to see
+        again -- and each look spends an access out of the budget in ADR-0015.
         """
         if not isinstance(exc, EnableBankingAPIError):
             return
-        if exc.status_code != RATE_LIMIT_STATUS_CODE:
+        if exc.status_code == RATE_LIMIT_STATUS_CODE:
+            logger.warning(
+                "Enable Banking refused %s %s: rate limit reached for this consent. The "
+                "unattended access budget is spent and refills on the bank's own schedule, "
+                "so this is not retried. No history is lost while a later successful sync "
+                "still reaches back across the fetch window.",
+                method,
+                path,
+            )
             return
         logger.warning(
-            "Enable Banking refused %s %s: rate limit reached for this consent. The "
-            "unattended access budget is spent and refills on the bank's own schedule, "
-            "so this is not retried. No history is lost while a later successful sync "
-            "still reaches back across the fetch window.",
+            "Enable Banking refused %s %s with status %s%s",
             method,
             path,
+            exc.status_code,
+            cls._refusal_codes(exc.detail),
         )
+
+    @classmethod
+    def _refusal_codes(cls, detail: Any) -> str:
+        """The allow-listed codes from a refusal body, as a log suffix or nothing."""
+        if not isinstance(detail, dict):
+            return ""
+        named = [
+            f"{key}={detail[key]}"
+            for key in cls.SAFE_ERROR_KEYS
+            if isinstance(detail.get(key), str)
+        ]
+        return f" ({', '.join(named)})" if named else ""
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:

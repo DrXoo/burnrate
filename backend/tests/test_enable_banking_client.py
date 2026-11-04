@@ -289,3 +289,80 @@ def test_enable_banking_client_does_not_call_an_outage_a_rate_limit(
             client.list_aspsps(country="fi")
 
     assert "rate limit" not in caplog.text.lower()
+
+
+def test_a_refusal_names_the_banks_own_error_code(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Without the code, a 400 is a mystery that costs a day to re-observe.
+
+    On 2026-11-03 and 2026-11-04 Openbank refused the balances call with 400 three
+    times. Nothing anywhere recorded *why*: ``EnableBankingAPIError.__str__`` carries
+    the status alone, ``sync_sessions.error_summary`` stores that string, and the
+    container logs that held more were lost in a rebuild. Diagnosing it meant waiting
+    for the next twice-daily pass -- and the budget makes re-running it expensive.
+
+    Only the bank's own identifiers are logged, allow-listed by key rather than
+    filtered: ``error`` and ``code`` are classifications, while ``message`` and
+    ``psu_reference`` can carry account detail, and a log file is no safer a place for
+    that than a client response.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": "WRONG_REQUEST_PARAMETERS",
+                "code": "HUB123",
+                "message": "account ES66 0049 ... is not accessible",
+                "psu_reference": "do-not-log",
+            },
+        )
+
+    client = EnableBankingClient(
+        settings=make_settings(max_retries=1, retry_backoff_seconds=0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="burnrate.integrations.enable_banking.client"):
+        with pytest.raises(EnableBankingAPIError):
+            client.list_aspsps(country="fi")
+
+    logged = caplog.text
+    assert "WRONG_REQUEST_PARAMETERS" in logged
+    assert "HUB123" in logged
+    assert "400" in logged
+    assert "/aspsps" in logged
+    assert "do-not-log" not in logged
+    assert "ES66" not in logged
+    # A refusal is not a rate limit, and must not inherit its "wait, nothing is lost"
+    # wording -- that is what sent the owner to wait while a bank was broken.
+    assert "rate limit" not in logged.lower()
+
+
+def test_a_refusal_with_no_body_to_speak_of_is_still_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bank that answers with prose, or with nothing, must not break the logging.
+
+    ``_perform_request`` falls back to ``response.text`` when the body is not JSON, so
+    the thing being inspected here is not always a mapping. An exception raised while
+    reporting a failure replaces a diagnosable error with an undiagnosable one.
+    """
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text="Bad Request")
+
+    client = EnableBankingClient(
+        settings=make_settings(max_retries=1, retry_backoff_seconds=0.0),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="burnrate.integrations.enable_banking.client"):
+        with pytest.raises(EnableBankingAPIError):
+            client.list_aspsps(country="fi")
+
+    assert "400" in caplog.text
+    assert "/aspsps" in caplog.text
+    # The prose itself is not echoed: it is the one part of a body nobody allow-listed.
+    assert "Bad Request" not in caplog.text

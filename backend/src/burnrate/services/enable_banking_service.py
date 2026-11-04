@@ -356,7 +356,7 @@ class EnableBankingService:
             sync_session.finished_at = datetime.now(UTC)
             connection.last_synced_at = datetime.now(UTC)
             logger.info(
-                "Completed manual Enable Banking sync for connection %s: accounts=%s transactions=%s",
+                "Completed Enable Banking sync for connection %s: accounts=%s transactions=%s",
                 connection_id,
                 summary.accounts_imported,
                 summary.transactions_imported,
@@ -365,7 +365,7 @@ class EnableBankingService:
             sync_session.status = "failed"
             sync_session.error_summary = str(exc)
             sync_session.finished_at = datetime.now(UTC)
-            logger.exception("Manual Enable Banking sync failed for connection %s", connection_id)
+            logger.exception("Enable Banking sync failed for connection %s", connection_id)
             raise
 
         return {
@@ -475,7 +475,7 @@ class EnableBankingService:
 
             mapping.last_seen_at = datetime.now(UTC)
             local_account.last_synced_at = datetime.now(UTC)
-            logger.info("Manual sync for Enable Banking account %s", mapping.external_account_id)
+            logger.info("Syncing Enable Banking account %s", mapping.external_account_id)
             summary.accounts_imported += 1
 
             balances_payload = self.client.get_account_balances(account_id=mapping.external_account_id)

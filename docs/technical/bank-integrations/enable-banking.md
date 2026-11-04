@@ -341,8 +341,15 @@ since a later successful sync still reaches back across the fetch window.
 
 A rate limit is logged by name rather than left as a bare traceback, because a `429`
 and a `503` otherwise differ by one number while calling for opposite reactions — a
-`503` means something is wrong, a `429` means wait. The bank's response body is not
-logged, for the same reason the API layer refuses to echo it to a client.
+`503` means something is wrong, a `429` means wait.
+
+Every **other** refusal is logged with the bank's own error code — the `error` and
+`code` fields of the body, allow-listed by key. `EnableBankingAPIError` carries the
+status alone in its message, and that string is what `sync_sessions.error_summary`
+keeps, so a refusal used to leave no record of its cause at all. With two passes a day
+(ADR-0015) a cause not captured when it happens costs half a day to see again, and each
+look spends an access. `message` and `psu_reference` are *not* logged: they can name an
+account, and a log file is no safer a place for that than a client response.
 
 The Telegram bot *does* retry its own `429`s, and that is not an inconsistency to
 tidy up. Telegram's flood limit is measured in seconds and the response names a
