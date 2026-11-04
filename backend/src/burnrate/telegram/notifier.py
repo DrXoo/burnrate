@@ -210,10 +210,11 @@ def send_sync_gap_alert(
     nothing anywhere saying so -- and a process that is not running cannot report
     itself. Coming back up is the first moment it can speak, so it speaks then.
 
-    Starting up is also what debounces it. A sync pass runs every half hour, so a
-    permanent gap reported per pass would be 48 messages a day for the ninety days of
-    the lookback; starting up happens rarely and needs no stored bookkeeping to go
-    with it, which is why there is no ``*_alerted_at`` column here.
+    Starting up is also what debounces it. A permanent gap reported per pass would
+    repeat for the ninety days of the lookback -- two messages a day since ADR-0015
+    cut the cadence, and 48 when this was written, which is the weaker case ADR-0013
+    records rather than restates. Starting up happens rarely and needs no stored
+    bookkeeping to go with it, which is why there is no ``*_alerted_at`` column here.
 
     The case this does **not** reach is a worker that stays up while its syncs fail.
     That one already has ``send_reconnect_alerts`` and ``send_expiry_alerts`` for its

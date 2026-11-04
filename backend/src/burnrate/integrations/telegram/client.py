@@ -57,6 +57,33 @@ class TelegramClient:
             json={"chat_id": chat_id, "text": text},
         )
 
+    @staticmethod
+    def _log_refusal(path: str, status_code: int, detail: Any) -> None:
+        """Say what Telegram refused with, because the status says nothing.
+
+        Every refusal of a well-formed request is a ``400``, so the status is the one
+        part of a Telegram error that carries no information -- and it was all the logs
+        held. On 2026-11-04 a sync notification was refused and never arrived: ING had
+        imported a transaction and nothing told the owner why the message was missing.
+        ``description`` is Telegram's own diagnosis and usually names the fix.
+
+        Reported here rather than left to the caller. ``telegram.notifier`` catches
+        these so a notification failure cannot disturb a sync, which makes it the layer
+        least able to explain one.
+
+        **The rejected text is not logged, and the bot token cannot be.** The text is
+        the owner's own financial detail and it is this client's to withhold; the token
+        lives in the base path, so naming only the method keeps it out. Neither
+        restriction applies to ``description``, which describes the request's shape.
+        """
+        described = detail.get("description") if isinstance(detail, dict) else None
+        logger.warning(
+            "Telegram refused %s with status %s%s",
+            path,
+            status_code,
+            f": {described}" if isinstance(described, str) else "",
+        )
+
     def _request(
         self,
         method: str,
@@ -78,6 +105,7 @@ class TelegramClient:
                 detail: Any = response.json()
             except ValueError:
                 detail = response.text
+            self._log_refusal(path, response.status_code, detail)
             raise TelegramAPIError(status_code=response.status_code, detail=detail)
 
         return response.json()
