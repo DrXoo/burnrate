@@ -120,6 +120,11 @@ services:
     volumes:
       - acme-state:/acme.sh
       - tls-certs:/certs
+    # acme.sh's own cron, which renews at ~60 days and re-runs the install into
+    # /certs that `--install-cert` recorded. nginx picks the new pair up on its daily
+    # reload, so nothing here needs the Docker socket. A one-off `compose run acme
+    # <args>` still overrides this.
+    command: daemon
 
 volumes:
   postgres-data:
