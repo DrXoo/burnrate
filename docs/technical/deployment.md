@@ -109,7 +109,69 @@ Notes:
 * Its nginx proxies `/api/v1/` and `/enable_banking_items/` to `backend`, so the browser only ever talks to the origin it loaded the page from. This is not optional decoration: it is what keeps requests off the cross-origin path, and the Enable Banking callback reaches the handler only because the second location is proxied. See `docs/adr/0004-the-web-origin-is-the-only-origin.md`
 * `web/nginx.conf` is `COPY`ed into the image at build time, so a change to it needs an image rebuild, not a container restart
 * The config uses a variable `proxy_pass` with Docker's embedded resolver, so it requires a runtime that provides `127.0.0.11`. On anything other than Compose, every proxied request fails
+* It terminates TLS itself on `443`, and `80` is served too and **not redirected** — see below
 * An external TLS-terminating proxy in front of this one is still reasonable, and would route to `web` alone — see `reverse-proxy` below
+
+---
+
+## TLS, And Why It Is Not Optional Any More
+
+Enable Banking will only redirect a finished bank authorization to an **https** URL.
+So TLS is not a hardening nicety here: without it, a bank cannot be connected or
+reconnected at all, and a lapsed consent becomes permanent. It is the single point of
+failure for the one operation this product cannot perform on its own behalf.
+
+`web` serves `80` and `443` from one nginx server block, so the proxy rules, the
+security headers and the three locations cannot drift between the two schemes.
+
+**Plain HTTP is deliberately not redirected.** The same nginx serves the app on the
+LAN by IP, where no certificate can match and no redirect can succeed. A blanket
+redirect would trade a working private entrance for a broken one.
+
+**HSTS is set to one day**, not the usual six months. It is keyed on the hostname, so
+the LAN entrance by IP is untouched. The short life is because the public entrance is
+one self-hosted machine and one dynamic-DNS name: a certificate that lapses or fails
+to renew would otherwise leave the bank's redirect host unreachable, with no
+click-through, for months.
+
+### The certificate is issued over DNS-01
+
+The `acme` service (profile `certs`, so it is not started by `docker compose up`)
+runs acme.sh against DuckDNS. DNS-01 proves control of the domain by writing a TXT
+record rather than by answering an inbound connection, and that is the whole reason
+it was chosen: **no port needs to be reachable from the internet for the certificate
+to be obtained.** It can be issued from a machine that is not exposed at all, days
+before it is moved somewhere it will be.
+
+Issue once (`DUCKDNS_TOKEN` must be in `.env`; it is DuckDNS's own API token):
+
+```sh
+docker compose --profile certs run --rm acme \
+  --issue --dns dns_duckdns -d "$DOMAIN" --server letsencrypt
+docker compose --profile certs run --rm acme \
+  --install-cert -d "$DOMAIN" \
+  --key-file /certs/privkey.pem --fullchain-file /certs/fullchain.pem
+docker compose restart web
+```
+
+Renew by leaving it running: `docker compose --profile certs up -d acme` keeps
+acme.sh's own cron in the container.
+
+Two failure modes are handled rather than left to chance:
+
+* **No certificate yet.** The 443 listener names two files, and nginx refuses to
+  start without them — so a failed issuance would take down plain-HTTP LAN access
+  that has nothing to do with TLS. `web/docker-entrypoint.d/10-bootstrap-tls-cert.sh`
+  writes a self-signed placeholder when the volume is empty, and never overwrites a
+  real one. The site stays up and the browser complains about the certificate.
+* **A renewed certificate nobody reads.** nginx reads the pair once, at startup, and
+  acme.sh renews into the shared volume without touching the `web` container — so
+  from day 90 nginx would serve an expired certificate, silently.
+  `20-reload-on-renewal.sh` reloads nginx once a day. Graceful, free, and cheaper
+  than giving this container the Docker socket so it can be told.
+
+The pair lives in the `tls-certs` volume rather than a bind mount, so the private key
+is not sitting in the repository directory where a stray `git add -A` could reach it.
 
 ---
 

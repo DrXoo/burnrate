@@ -88,8 +88,44 @@ services:
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:80"
+      # The bank will only redirect to an https URL, so this port is what makes
+      # reconnecting a bank possible at all. See docs/technical/deployment.md.
+      - "${WEB_TLS_PORT:-443}:443"
+    volumes:
+      # Shared with `acme`, which writes the certificate here. Read by nginx at
+      # startup and on every reload.
+      - tls-certs:/etc/nginx/certs
     depends_on:
       - backend
 
+  # Issues and renews the TLS certificate over DNS-01, which proves control of the
+  # domain through a TXT record instead of an inbound connection. That is the whole
+  # reason for choosing it: no port has to be reachable from the internet for the
+  # certificate to be obtained, so it can be issued from anywhere and before the
+  # machine is ever exposed.
+  #
+  # Not started with the stack: `profiles` keeps it out of `docker compose up`. It
+  # runs on demand to issue, and in `daemon` mode to renew. See the deployment doc.
+  acme:
+    image: neilpang/acme.sh:3.0.7
+    container_name: burnrate-acme
+    profiles: ["certs"]
+    environment:
+      # DuckDNS's own API token, which is what authorizes writing the TXT record.
+      # Left empty rather than required with `:?`, which would make *every* compose
+      # command fail until the token exists -- including bringing up the database.
+      # An absent token fails inside acme.sh, where the error is about the one thing
+      # that needs it.
+      DuckDNS_Token: ${DUCKDNS_TOKEN:-}
+    volumes:
+      - acme-state:/acme.sh
+      - tls-certs:/certs
+
 volumes:
   postgres-data:
+  # acme.sh's account key and issued certificates. Losing it means re-registering
+  # with the CA, which is cheap, but it also holds the renewal schedule.
+  acme-state:
+  # The pair nginx serves. Named rather than a bind mount so the private key is not
+  # sitting in the repo directory, where a stray `git add -A` could reach it.
+  tls-certs:
