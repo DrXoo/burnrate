@@ -128,6 +128,11 @@ export function SettingsPage({ connections, accounts, onConnect, onReconnect, on
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500 }}>{account.display_name}</div>
                   <div className="num" style={{ fontSize: 12, color: "var(--text-3)" }}>
+                    {/* The bank, because `display_name` is the account *holder*: two
+                        accounts at one bank render identically without it, and
+                        counting the rows is how a reconnection is checked for having
+                        duplicated an account rather than recognised it. */}
+                    {account.source_aspsp_name ?? "Not linked to a bank"} ·{" "}
                     {account.latest_balance_amount != null ? eur(account.latest_balance_amount) : "—"}
                   </div>
                 </div>
