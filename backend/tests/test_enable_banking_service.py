@@ -1090,6 +1090,59 @@ def test_a_hold_with_no_identifier_survives_resync_on_its_content_hash() -> None
     assert holds[0].id == original_row_id
 
 
+def test_a_row_stored_on_its_content_hash_adopts_the_identifier_the_bank_sends_later() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    # Openbank's shape: on the day a card charge books it arrives with no
+    # entry_reference, and a week later the same row carries one ("2026-11-03.0").
+    charge = settle(make_pending_payload(remittance="OPENAI *CHATGPT SUBSCR"))
+    client.pending_payloads = []
+    client.booked_payloads = [charge]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    stored = db.scalars(select(Transaction)).all()
+    assert len(stored) == 1
+    original_row_id = stored[0].id
+    subscriptions = Category(name="Subscriptions", type="expense", active=True)
+    db.add(subscriptions)
+    db.flush()
+    stored[0].category_id = subscriptions.id
+    db.commit()
+
+    client.booked_payloads = [{**charge, "entry_reference": "2026-11-03.0"}]
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    transactions = db.scalars(select(Transaction)).all()
+    assert len(transactions) == 1
+    assert transactions[0].id == original_row_id
+    assert transactions[0].enable_banking_transaction_id == "2026-11-03.0"
+    assert transactions[0].category_id == subscriptions.id
+
+
+def test_a_hashed_row_on_another_account_is_not_adopted() -> None:
+    db = make_session()
+    client = PendingTransactionsClient()
+    charge = settle(make_pending_payload(remittance="OPENAI *CHATGPT SUBSCR"))
+    client.pending_payloads = []
+    client.booked_payloads = [charge]
+    service = EnableBankingService(db=db, settings=make_settings(), client=client)
+    connection_id = link_bank(service=service, db=db)
+    hashed = db.scalars(select(Transaction)).one()
+    # The same content hashed under a different account is a different charge.
+    other_account = Account(display_name="Other", currency="EUR")
+    db.add(other_account)
+    db.flush()
+    hashed.account_id = other_account.id
+    db.commit()
+
+    client.booked_payloads = [{**charge, "entry_reference": "2026-11-03.0"}]
+    service.sync_connection(connection_id=connection_id)
+    db.commit()
+
+    assert len(db.scalars(select(Transaction)).all()) == 2
+
+
 def test_the_sweep_leaves_a_pending_hold_older_than_the_fetched_window() -> None:
     db = make_session()
     client = PendingTransactionsClient()

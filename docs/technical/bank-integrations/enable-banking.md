@@ -213,6 +213,23 @@ See `docs/adr/0016-syncing-is-the-workers-job-alone.md`.
 
 BurnRate should assume that transaction imports may be paginated or refreshed incrementally over time, and it should preserve external identifiers needed for safe re-sync behavior.
 
+### Transaction Identity
+
+A transaction is keyed on the bank's `transaction_id`, else its `entry_reference`, else a
+SHA-256 content hash of account, dates, direction, amount, currency and remittance text.
+
+**A bank can supply the identifier late.** Openbank reports a card charge with no
+`entry_reference` on the day it books and with one (`2026-11-03.0`) on later syncs. When
+a row arrives carrying an identifier BurnRate has never stored, the import first looks
+for a row on the same account stored under that payload's content hash and re-keys it,
+so its category and Ignored flag survive. Before this, the 2026-11-10 resync inserted a
+twin of an already-categorized charge and the money counted twice.
+
+The reverse — an identifier that later disappears — is not handled: the row would be
+inserted again under its hash. Openbank has not done that. Note too that Openbank's
+`entry_reference` is a date plus a per-day index, so it is positional: if the bank ever
+reorders a day's rows, two charges could swap identifiers.
+
 ### How Often The Scheduled Refresh Runs
 
 `SYNC_CRON` is `0 11,20 * * *` — twice a day, at 12:00 and 21:00 Europe/Madrid in

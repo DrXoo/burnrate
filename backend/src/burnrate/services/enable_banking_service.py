@@ -836,6 +836,12 @@ class EnableBankingService:
         transaction = self.db.scalar(
             select(Transaction).where(Transaction.enable_banking_transaction_id == external_id)
         )
+        if transaction is None:
+            transaction = self._adopt_row_stored_on_content_hash(
+                local_account=local_account,
+                external_id=external_id,
+                transaction_payload=transaction_payload,
+            )
 
         amount_info = transaction_payload.get("transaction_amount") or {}
         amount = Decimal(str(amount_info.get("amount", "0")))
@@ -883,6 +889,37 @@ class EnableBankingService:
 
         RulesService(db=self.db).apply_rule_to_transaction(transaction=transaction)
         return created
+
+    def _adopt_row_stored_on_content_hash(
+        self,
+        *,
+        local_account: Account,
+        external_id: str,
+        transaction_payload: dict[str, Any],
+    ) -> Transaction | None:
+        """Hand a bank identifier that arrived late to the row stored without one.
+
+        Openbank reports a card charge with no ``entry_reference`` on the day it
+        books and with one (``2026-11-03.0``) on later syncs. The first sync could
+        only key the row on its content hash, so without this the second inserts a
+        twin -- the money counts twice and the owner's category sits on one copy.
+        Re-keying the existing row keeps its category and Ignored flag.
+
+        Only the same account's hash is a match: the hash already includes the
+        account id, so this restates that a charge on another account is not this one.
+        """
+        if not self._bank_transaction_id(transaction_payload):
+            return None
+        content_hash = self._transaction_content_hash(local_account.id, transaction_payload)
+        transaction = self.db.scalar(
+            select(Transaction).where(
+                Transaction.account_id == local_account.id,
+                Transaction.enable_banking_transaction_id == content_hash,
+            )
+        )
+        if transaction is not None:
+            transaction.enable_banking_transaction_id = external_id
+        return transaction
 
     def _is_readable_transactions_payload(self, transactions_payload: dict[str, Any]) -> bool:
         """Whether the payload is one of the shapes ``_extract_transactions`` knows.
@@ -974,10 +1011,15 @@ class EnableBankingService:
         }
 
     def _transaction_external_id(self, account_id: str, transaction_payload: dict[str, Any]) -> str:
-        explicit_id = transaction_payload.get("transaction_id") or transaction_payload.get("entry_reference")
+        explicit_id = self._bank_transaction_id(transaction_payload)
         if explicit_id:
             return explicit_id
+        return self._transaction_content_hash(account_id, transaction_payload)
 
+    def _bank_transaction_id(self, transaction_payload: dict[str, Any]) -> str | None:
+        return transaction_payload.get("transaction_id") or transaction_payload.get("entry_reference")
+
+    def _transaction_content_hash(self, account_id: str, transaction_payload: dict[str, Any]) -> str:
         stable_input = "|".join(
             [
                 str(account_id),
